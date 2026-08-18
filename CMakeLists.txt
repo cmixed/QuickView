@@ -78,6 +78,8 @@ set(QUICKVIEW_SOURCES
     QuickView/GeekIconRenderer.cpp
     QuickView/GeekIconData.cpp
     QuickView/exif.cpp
+    QuickView/RatingMetadata.cpp
+    QuickView/RatingStore.cpp
     QuickView/RenderEngine.cpp
     QuickView/ImageLoader.cpp
     QuickView/MiniTiff.cpp
@@ -392,6 +394,7 @@ add_executable(QuickViewTests
     tests/SvgNeedsFallbackTests.cpp
     tests/MetafileCodecTests.cpp
     tests/GeekWidgetsTests.cpp
+    tests/RatingMetadataTests.cpp
     QuickView/GeekWidgets.cpp
     QuickView/GeekIconLibrary.cpp
     QuickView/GeekIconData.cpp
@@ -406,6 +409,7 @@ add_executable(QuickViewTests
     QuickView/FileNavigator.cpp 
     QuickView/ArchiveVFS.cpp 
     QuickView/exif.cpp
+    QuickView/RatingMetadata.cpp
     QuickView/QuickViewETW.cpp
     QuickView/pch.cpp
 )
