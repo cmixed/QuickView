@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <atomic>
 #include "GeekGlass.h"
 #include "GeekIconLibrary.h"
 #include "EditState.h"
@@ -33,6 +34,9 @@ enum class OptionType {
     CustomColorRow, 
     Input,
     Header, 
+    SubHeader,
+    Separator,
+    AccordionCardHeader,
     AboutHeader,      
     AboutVersionCard, 
     AboutLinks,       
@@ -158,11 +162,15 @@ public:
     static bool IsRegistrationNeeded();
     static std::wstring GetAppVersion();
 
+    void RequestRebuild() {
+        m_pendingRebuild.store(true, std::memory_order_release);
+    }
+
     bool IsCapturingHotkey() const { return m_capturingHotkey; }
     void CancelHotkeyCapture() {
         m_capturingHotkey = false;
         m_capturingAction = HotkeyAction::None;
-        m_pendingRebuild = true;
+        RequestRebuild();
     }
     void OnHotkeyCaptured(const KeyCombo& combo);
 
@@ -291,7 +299,7 @@ private:
     float m_toastScrollY = 0.0f;
     float m_toastTotalHeight = 0.0f;
     
-    bool m_pendingRebuild = false;
+    std::atomic<bool> m_pendingRebuild{false};
     bool m_pendingResetFeedback = false; 
     
     bool m_capturingHotkey = false;

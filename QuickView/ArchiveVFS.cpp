@@ -54,10 +54,21 @@ namespace QuickView {
         void (*progressCb)(float progress, void* userData),
         void* userData
     ) {
+        char logBuf[512];
+        sprintf_s(logBuf, "[QVX-Extract] ExtractZipToDirectory: opening '%ls' -> '%ls'\n", zipPath.c_str(), destDir.c_str());
+        OutputDebugStringA(logBuf);
+
         ZipArchive zip(zipPath);
-        if (!zip.IsValid()) return false;
+        if (!zip.IsValid()) {
+            sprintf_s(logBuf, "[QVX-Extract] Failed: zip.IsValid() is false for '%ls'\n", zipPath.c_str());
+            OutputDebugStringA(logBuf);
+            return false;
+        }
 
         size_t totalEntries = zip.GetEntryCount();
+        sprintf_s(logBuf, "[QVX-Extract] Zip has %zu entries\n", totalEntries);
+        OutputDebugStringA(logBuf);
+
         if (totalEntries == 0) return true;
 
         EnsureParentDirectory(destDir + L"\\dummy.tmp");
@@ -78,21 +89,37 @@ namespace QuickView {
             }
 
             ::std::wstring outPath = destDir + L"\\" + relName;
+            if (relName.back() == L'\\') {
+                EnsureParentDirectory(outPath + L"\\dummy.tmp");
+                continue;
+            }
             EnsureParentDirectory(outPath);
 
             const ArchiveEntry& entry = zip.GetEntry(i);
+            sprintf_s(logBuf, "[QVX-Extract] Entry [%zu]: '%ls', uncompSize=%u, method=%u\n", i, relName.c_str(), entry.uncompSize, entry.method);
+            OutputDebugStringA(logBuf);
+
             if (buffer.size() < entry.uncompSize) {
                 buffer.resize(entry.uncompSize);
             }
 
             size_t extractedSize = zip.ExtractEntry(i, buffer.data(), buffer.size());
             if (extractedSize != entry.uncompSize) {
+                sprintf_s(logBuf, "[QVX-Extract] ExtractEntry failed for '%ls' (got %zu, expected %u)\n", relName.c_str(), extractedSize, entry.uncompSize);
+                OutputDebugStringA(logBuf);
                 return false;
             }
 
-            HANDLE hFile = CreateFileW(outPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            SetFileAttributesW(outPath.c_str(), FILE_ATTRIBUTE_NORMAL);
+            HANDLE hFile = CreateFileW(outPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (hFile == INVALID_HANDLE_VALUE) {
-                return false;
+                DeleteFileW(outPath.c_str());
+                hFile = CreateFileW(outPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (hFile == INVALID_HANDLE_VALUE) {
+                    sprintf_s(logBuf, "[QVX-Extract] CreateFileW failed for '%ls' (err=%lu)\n", outPath.c_str(), GetLastError());
+                    OutputDebugStringA(logBuf);
+                    return false;
+                }
             }
 
             DWORD written = 0;
@@ -103,6 +130,8 @@ namespace QuickView {
             CloseHandle(hFile);
 
             if (!writeOk || written != entry.uncompSize) {
+                sprintf_s(logBuf, "[QVX-Extract] WriteFile failed for '%ls' (written=%lu, expected=%u, err=%lu)\n", outPath.c_str(), written, entry.uncompSize, GetLastError());
+                OutputDebugStringA(logBuf);
                 DeleteFileW(outPath.c_str());
                 return false;
             }
@@ -113,6 +142,8 @@ namespace QuickView {
             }
         }
 
+        sprintf_s(logBuf, "[QVX-Extract] ExtractZipToDirectory completed successfully for '%ls'\n", zipPath.c_str());
+        OutputDebugStringA(logBuf);
         return true;
     }
 
@@ -290,12 +321,19 @@ namespace QuickView {
                 if (inflateInit2(m_zstream.get(), -MAX_WBITS) != Z_OK) return 0;
                 m_zstream_init = true;
             } else {
-                if (inflateReset(m_zstream.get()) != Z_OK) return 0;
+                if (inflateReset(m_zstream.get()) != Z_OK) {
+                    inflateEnd(m_zstream.get());
+                    if (inflateInit2(m_zstream.get(), -MAX_WBITS) != Z_OK) return 0;
+                }
             }
 
             int ret = inflate(m_zstream.get(), Z_FINISH);
 
-            if (ret != Z_STREAM_END && ret != Z_OK) return 0;
+            if (ret != Z_STREAM_END && ret != Z_OK) {
+                inflateEnd(m_zstream.get());
+                m_zstream_init = false;
+                return 0;
+            }
         } else {
             // Unsupported compression method
             return false;

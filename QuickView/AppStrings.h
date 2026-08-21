@@ -478,7 +478,11 @@ namespace AppStrings {
     extern const wchar_t* Export_Checkbox_SuperResolution;
     extern const wchar_t* Settings_Label_SrDebounce;
     extern const wchar_t* Settings_Tooltip_SrDebounce;
+    extern const wchar_t* Settings_Header_PluginTriggers;
     extern const wchar_t* Settings_Header_PluginParams;
+    extern const wchar_t* Settings_Label_SrStorageFolder;
+    extern const wchar_t* Settings_Button_OpenModelFolder;
+    extern const wchar_t* Settings_Prompt_DownloadModelFirst;
     extern const wchar_t* Settings_Label_SrSharpness;
     extern const wchar_t* Settings_Tooltip_SrSharpness;
     extern const wchar_t* Settings_Label_SrDenoise;

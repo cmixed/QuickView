@@ -13,11 +13,11 @@
 #include <windows.h>
 #include <d3d11.h>
 
-#define QVX_SR_INTERFACE_VERSION 0x00020100 // 2.1.0
+#define QVX_SR_INTERFACE_VERSION 0x00000100 // 0.1.0
 
 // Official Built-in / Target Super-Resolution Plugin Version Handshake
-#define QVX_OFFICIAL_SR_PLUGIN_VERSION "2.1.0"
-#define QVX_OFFICIAL_SR_PLUGIN_VERSION_INT 0x00020100
+#define QVX_OFFICIAL_SR_PLUGIN_VERSION "0.1.0"
+#define QVX_OFFICIAL_SR_PLUGIN_VERSION_INT 0x00000100
 
 #ifdef __cplusplus
 extern "C" {

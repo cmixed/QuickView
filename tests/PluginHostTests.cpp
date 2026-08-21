@@ -140,6 +140,13 @@ TEST_F(PluginHostTests, RealESRGANGpuUpscale) {
     std::vector<uint32_t> srcPixels(64 * 64, 0xFF55AAFF);
     m_d3dContext->UpdateSubresource(pSrcTex.Get(), 0, nullptr, srcPixels.data(), 64 * 4, 0);
 
+    std::wstring exeBinary = std::wstring(exePath) + L"\\plugins\\realesrgan-ncnn-vulkan.exe";
+    std::wstring modelBin = std::wstring(exePath) + L"\\plugins\\models\\realesr-animevideov3-x2.bin";
+    if (GetFileAttributesW(exeBinary.c_str()) == INVALID_FILE_ATTRIBUTES ||
+        GetFileAttributesW(modelBin.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        GTEST_SKIP() << "realesrgan-ncnn-vulkan.exe or model weights not downloaded yet, skipping GPU execution.";
+    }
+
     // Execute Real-ESRGAN Deep Residual GPU Upscale
     int32_t result = host.ExecuteSrUpscaleGpu(
         m_d3dDevice.Get(),
@@ -151,16 +158,19 @@ TEST_F(PluginHostTests, RealESRGANGpuUpscale) {
     printf("Real-ESRGAN ExecuteSrUpscaleGpu result = 0x%08X\n", (uint32_t)result);
     EXPECT_EQ(result, (int32_t)S_OK);
 
-    // Also test 0.3.0 General Photo Model (realesr-general-x4v3)
-    host.SetSrModelId("realesr-general-x4v3");
-    int32_t resultGeneral = host.ExecuteSrUpscaleGpu(
-        m_d3dDevice.Get(),
-        pSrcTex.Get(), 64, 64,
-        pDstTex.Get(), 128, 128,
-        nullptr, nullptr
-    );
-    printf("Real-ESRGAN 0.3.0 General-x4v3 result = 0x%08X\n", (uint32_t)resultGeneral);
-    EXPECT_EQ(resultGeneral, (int32_t)S_OK);
+    // Also test 0.3.0 General Photo Model (realesr-general-x4v3) if downloaded
+    std::wstring genBin = std::wstring(exePath) + L"\\plugins\\models\\realesr-general-x4v3.bin";
+    if (GetFileAttributesW(genBin.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        host.SetSrModelId("realesr-general-x4v3");
+        int32_t resultGeneral = host.ExecuteSrUpscaleGpu(
+            m_d3dDevice.Get(),
+            pSrcTex.Get(), 64, 64,
+            pDstTex.Get(), 128, 128,
+            nullptr, nullptr
+        );
+        printf("Real-ESRGAN 0.3.0 General-x4v3 result = 0x%08X\n", (uint32_t)resultGeneral);
+        EXPECT_EQ(resultGeneral, (int32_t)S_OK);
+    }
 }
 
 // 4. Test ResetToDefaults and compare mode default value
@@ -193,6 +203,40 @@ TEST_F(PluginHostTests, NativeZipExtraction) {
 
     // Non-existent ZIP should gracefully fail
     EXPECT_FALSE(QuickView::IArchive::ExtractZipToDirectory(dummyZip, extractDir));
+
+    // Test downloading and extracting all model zips with callback
+    const char* modelIds[] = {
+        "realesr-animevideov3-x2",
+        "realesr-animevideov3-x3",
+        "realesr-animevideov3-x4",
+        "realesr-general-x4v3",
+        "realesrgan-x4plus-anime",
+        "realesrgan-x4plus"
+    };
+
+    struct TestProgressCtx {
+        float lastProgress = 0.0f;
+        bool finished = false;
+        bool success = false;
+    };
+
+    auto testCb = [](float progress, bool finished, bool success, void* uData) {
+        auto* ctx = static_cast<TestProgressCtx*>(uData);
+        ctx->lastProgress = progress;
+        ctx->finished = finished;
+        ctx->success = success;
+    };
+
+    for (const char* mId : modelIds) {
+        std::string filename = std::string(mId) + ".zip";
+        std::wstring wFilename(filename.begin(), filename.end());
+        std::string url = "https://justnullname.github.io/QuickView/models/" + filename;
+        TestProgressCtx pCtx;
+        bool res = QuickView::PluginHost::Instance().DownloadModel(wFilename, url, testCb, &pCtx);
+        EXPECT_TRUE(res) << "Failed to download/extract: " << mId;
+        EXPECT_TRUE(pCtx.finished) << "Callback was not finished for: " << mId;
+        EXPECT_TRUE(pCtx.success) << "Callback success was false for: " << mId;
+    }
 }
 
 

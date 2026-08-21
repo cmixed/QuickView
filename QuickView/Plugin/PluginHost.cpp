@@ -293,11 +293,19 @@ std::vector<SrModelEntry> PluginHost::GetCurrentSrModels() const {
 
         // If plugin didn't determine installation status, fallback to checking plugins/models/<modelId>.bin
         if (!entry.isInstalled && !entry.downloadUrl.empty()) {
-            std::string filename = entry.modelId + ".bin";
-            std::wstring wideFilename(filename.begin(), filename.end());
-            std::wstring modelFullPath = modelsDir + L"\\" + wideFilename;
-            if (GetFileAttributesW(modelFullPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
-                entry.isInstalled = true;
+            if (entry.modelId == "realesr-animevideov3-auto") {
+                if (GetFileAttributesW((modelsDir + L"\\realesr-animevideov3-x2.bin").c_str()) != INVALID_FILE_ATTRIBUTES &&
+                    GetFileAttributesW((modelsDir + L"\\realesr-animevideov3-x3.bin").c_str()) != INVALID_FILE_ATTRIBUTES &&
+                    GetFileAttributesW((modelsDir + L"\\realesr-animevideov3-x4.bin").c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    entry.isInstalled = true;
+                }
+            } else {
+                std::string filename = entry.modelId + ".bin";
+                std::wstring wideFilename(filename.begin(), filename.end());
+                std::wstring modelFullPath = modelsDir + L"\\" + wideFilename;
+                if (GetFileAttributesW(modelFullPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    entry.isInstalled = true;
+                }
             }
         }
 
@@ -715,94 +723,194 @@ std::vector<PluginCandidate> PluginHost::ScanPluginsDirectory(const std::wstring
     return candidates;
 }
 
+static void LogDownloadDebug(const char* fmt, ...) {
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf_s(buf, sizeof(buf), _TRUNCATE, fmt, args);
+    va_end(args);
+    OutputDebugStringA(buf);
+}
+
 static bool WinHttpDownloadSingleUrl(
-    const std::string& url, 
+    const std::string& initialUrl, 
     const std::wstring& targetPath,
     PluginHost::DownloadProgressCallback onProgress,
     void* userData
 ) {
-    bool isHttps = (url.rfind("https://", 0) == 0);
-    size_t protocolPos = url.find("://");
-    if (protocolPos == std::string::npos) return false;
+    if (initialUrl.empty()) return false;
 
-    std::string domainPath = url.substr(protocolPos + 3);
-    size_t slashPos = domainPath.find('/');
-    if (slashPos == std::string::npos) return false;
+    LogDownloadDebug("[QVX-Download] WinHttpDownloadSingleUrl: starting '%s' -> '%ls'\n", initialUrl.c_str(), targetPath.c_str());
 
-    std::string hostStr = domainPath.substr(0, slashPos);
-    std::string pathStr = domainPath.substr(slashPos);
+    std::string currentUrl = initialUrl;
+    for (int redirectHop = 0; redirectHop < 8; ++redirectHop) {
+        bool isHttps = (currentUrl.rfind("https://", 0) == 0);
+        size_t protocolPos = currentUrl.find("://");
+        if (protocolPos == std::string::npos) {
+            LogDownloadDebug("[QVX-Download] Invalid URL protocol in: %s\n", currentUrl.c_str());
+            return false;
+        }
 
-    std::wstring host(hostStr.begin(), hostStr.end());
-    std::wstring path(pathStr.begin(), pathStr.end());
+        std::string domainPath = currentUrl.substr(protocolPos + 3);
+        size_t slashPos = domainPath.find('/');
+        if (slashPos == std::string::npos) {
+            LogDownloadDebug("[QVX-Download] No path slash in domainPath: %s\n", domainPath.c_str());
+            return false;
+        }
 
-    HINTERNET hSession = WinHttpOpen(L"QuickView/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!hSession) return false;
+        std::string hostStr = domainPath.substr(0, slashPos);
+        std::string pathStr = domainPath.substr(slashPos);
 
-    INTERNET_PORT port = isHttps ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
-    HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), port, 0);
-    if (!hConnect) {
-        WinHttpCloseHandle(hSession);
-        return false;
-    }
+        std::wstring host(hostStr.begin(), hostStr.end());
+        std::wstring path(pathStr.begin(), pathStr.end());
 
-    DWORD flags = isHttps ? WINHTTP_FLAG_SECURE : 0;
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-    if (!hRequest) {
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        return false;
-    }
+        HINTERNET hSession = WinHttpOpen(L"QuickView/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!hSession) {
+            LogDownloadDebug("[QVX-Download] WinHttpOpen failed (err=%lu)\n", GetLastError());
+            return false;
+        }
 
-    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
-    WinHttpSetOption(hRequest, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
+        // Resilient timeouts: 15s resolve, 15s connect, 15s send, 300s receive (supports large models on slow networks)
+        WinHttpSetTimeouts(hSession, 15000, 15000, 15000, 300000);
 
-    bool success = false;
-    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-        WinHttpReceiveResponse(hRequest, NULL)) {
+        INTERNET_PORT port = isHttps ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
+        HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), port, 0);
+        if (!hConnect) {
+            LogDownloadDebug("[QVX-Download] WinHttpConnect to '%ls' failed (err=%lu)\n", host.c_str(), GetLastError());
+            WinHttpCloseHandle(hSession);
+            return false;
+        }
 
-        DWORD statusCode = 0;
-        DWORD dwSize = sizeof(statusCode);
-        WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                            WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &dwSize, WINHTTP_NO_HEADER_INDEX);
+        DWORD flags = isHttps ? WINHTTP_FLAG_SECURE : 0;
+        HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+        if (!hRequest) {
+            LogDownloadDebug("[QVX-Download] WinHttpOpenRequest failed (err=%lu)\n", GetLastError());
+            WinHttpCloseHandle(hConnect);
+            WinHttpCloseHandle(hSession);
+            return false;
+        }
 
-        if (statusCode == 200) {
-            DWORD contentLength = 0;
-            DWORD lenSize = sizeof(contentLength);
-            bool hasContentLength = WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
-                                                        WINHTTP_HEADER_NAME_BY_INDEX, &contentLength, &lenSize, WINHTTP_NO_HEADER_INDEX);
+        DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+        WinHttpSetOption(hRequest, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
 
-            HANDLE hFile = CreateFileW(targetPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (hFile != INVALID_HANDLE_VALUE) {
-                DWORD bytesRead = 0;
-                DWORD totalDownloaded = 0;
-                char buffer[32768];
-                success = true;
-                while (WinHttpReadData(hRequest, buffer, sizeof(buffer), &bytesRead) && bytesRead > 0) {
-                    DWORD written = 0;
-                    if (!WriteFile(hFile, buffer, bytesRead, &written, nullptr)) {
-                        success = false;
-                        break;
+        bool success = false;
+        if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+            WinHttpReceiveResponse(hRequest, NULL)) {
+
+            DWORD statusCode = 0;
+            DWORD dwSize = sizeof(statusCode);
+            WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &dwSize, WINHTTP_NO_HEADER_INDEX);
+
+            LogDownloadDebug("[QVX-Download] HTTP response status=%lu for '%s'\n", statusCode, currentUrl.c_str());
+
+            if (statusCode == 301 || statusCode == 302 || statusCode == 303 || statusCode == 307 || statusCode == 308) {
+                wchar_t locBuf[2048] = { 0 };
+                DWORD locSize = sizeof(locBuf);
+                if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, locBuf, &locSize, WINHTTP_NO_HEADER_INDEX)) {
+                    char nextUrlBuf[2048] = { 0 };
+                    WideCharToMultiByte(CP_UTF8, 0, locBuf, -1, nextUrlBuf, sizeof(nextUrlBuf), nullptr, nullptr);
+                    std::string nextUrl = nextUrlBuf;
+                    if (nextUrl.find("://") == std::string::npos) {
+                        if (!nextUrl.empty() && nextUrl[0] == '/') {
+                            nextUrl = (isHttps ? "https://" : "http://") + hostStr + nextUrl;
+                        }
                     }
-                    totalDownloaded += bytesRead;
-                    if (onProgress) {
-                        float progress = (hasContentLength && contentLength > 0)
-                            ? (static_cast<float>(totalDownloaded) / static_cast<float>(contentLength))
-                            : 0.5f;
-                        onProgress(progress, false, false, userData);
-                    }
-                }
-                CloseHandle(hFile);
-                if (!success) {
-                    DeleteFileW(targetPath.c_str());
+                    LogDownloadDebug("[QVX-Download] Redirect hop -> '%s'\n", nextUrl.c_str());
+                    currentUrl = nextUrl;
+                    WinHttpCloseHandle(hRequest);
+                    WinHttpCloseHandle(hConnect);
+                    WinHttpCloseHandle(hSession);
+                    continue; // Follow redirect hop
                 }
             }
-        }
-    }
 
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
-    return success;
+            if (statusCode == 200) {
+                DWORD contentLength = 0;
+                DWORD lenSize = sizeof(contentLength);
+                bool hasContentLength = WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                                                            WINHTTP_HEADER_NAME_BY_INDEX, &contentLength, &lenSize, WINHTTP_NO_HEADER_INDEX);
+
+                LogDownloadDebug("[QVX-Download] Content-Length=%lu (hasLen=%d)\n", contentLength, hasContentLength ? 1 : 0);
+
+                // Ensure parent directory exists before creating target file
+                size_t lastSlash = targetPath.find_last_of(L"\\/");
+                if (lastSlash != std::wstring::npos) {
+                    std::wstring parentDir = targetPath.substr(0, lastSlash);
+                    CreateDirectoryW(parentDir.c_str(), nullptr);
+                }
+
+                HANDLE hFile = CreateFileW(targetPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (hFile != INVALID_HANDLE_VALUE) {
+                    DWORD bytesRead = 0;
+                    DWORD totalDownloaded = 0;
+                    char buffer[65536];
+                    success = true;
+                    while (WinHttpReadData(hRequest, buffer, sizeof(buffer), &bytesRead) && bytesRead > 0) {
+                        DWORD written = 0;
+                        if (!WriteFile(hFile, buffer, bytesRead, &written, nullptr)) {
+                            LogDownloadDebug("[QVX-Download] WriteFile failed (err=%lu)\n", GetLastError());
+                            success = false;
+                            break;
+                        }
+                        totalDownloaded += bytesRead;
+                        if (onProgress) {
+                            float progress = (hasContentLength && contentLength > 0)
+                                ? (static_cast<float>(totalDownloaded) / static_cast<float>(contentLength))
+                                : 0.5f;
+                            onProgress(progress, false, false, userData);
+                        }
+                    }
+                    CloseHandle(hFile);
+
+                    // Validate truncation: if Content-Length was reported and downloaded count differs, fail
+                    if (hasContentLength && contentLength > 0 && totalDownloaded != contentLength) {
+                        LogDownloadDebug("[QVX-Download] Stream Truncation Error: expected %lu bytes, got %lu bytes\n", contentLength, totalDownloaded);
+                        success = false;
+                    }
+
+                    // Validate ZIP magic if downloading a zip file
+                    if (success && (targetPath.ends_with(L".zip") || currentUrl.find(".zip") != std::string::npos)) {
+                        if (totalDownloaded < 22) {
+                            LogDownloadDebug("[QVX-Download] Zip Validation Error: file size %lu is too small\n", totalDownloaded);
+                            success = false;
+                        } else {
+                            HANDLE hVerify = CreateFileW(targetPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                            if (hVerify != INVALID_HANDLE_VALUE) {
+                                char magic[4] = { 0 };
+                                DWORD readMagic = 0;
+                                ReadFile(hVerify, magic, 4, &readMagic, nullptr);
+                                CloseHandle(hVerify);
+                                if (readMagic < 4 || magic[0] != 'P' || magic[1] != 'K') {
+                                    LogDownloadDebug("[QVX-Download] Zip Magic Mismatch: not a valid PK zip (got 0x%02X 0x%02X)\n", (uint8_t)magic[0], (uint8_t)magic[1]);
+                                    success = false;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!success) {
+                        DeleteFileW(targetPath.c_str());
+                    } else {
+                        LogDownloadDebug("[QVX-Download] Successfully downloaded %lu bytes to '%ls'\n", totalDownloaded, targetPath.c_str());
+                    }
+                } else {
+                    LogDownloadDebug("[QVX-Download] CreateFileW failed for '%ls' (err=%lu)\n", targetPath.c_str(), GetLastError());
+                }
+            } else {
+                LogDownloadDebug("[QVX-Download] HTTP status %lu != 200, failing download for '%s'\n", statusCode, currentUrl.c_str());
+            }
+        } else {
+            LogDownloadDebug("[QVX-Download] WinHttpSendRequest/ReceiveResponse failed (err=%lu)\n", GetLastError());
+        }
+
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        if (success) return true;
+        break;
+    }
+    return false;
 }
 
 static bool WinHttpDownloadFile(
@@ -813,37 +921,44 @@ static bool WinHttpDownloadFile(
 ) {
     if (url.empty()) return false;
 
-    std::vector<std::string> candidates;
-    candidates.push_back(url);
-
-    if (url.find("github.com") != std::string::npos || url.find("githubusercontent.com") != std::string::npos) {
-        candidates.push_back("https://ghfast.top/" + url);
-
-        // Branch fallback: main <-> dev <-> master
-        if (url.find("/main/models/") != std::string::npos) {
-            std::string devUrl = url;
-            size_t pos = devUrl.find("/main/models/");
-            devUrl.replace(pos, 13, "/dev/models/");
-            candidates.push_back(devUrl);
-            candidates.push_back("https://ghfast.top/" + devUrl);
-        } else if (url.find("/dev/models/") != std::string::npos) {
-            std::string mainUrl = url;
-            size_t pos = mainUrl.find("/dev/models/");
-            mainUrl.replace(pos, 12, "/main/models/");
-            candidates.push_back(mainUrl);
-            candidates.push_back("https://ghfast.top/" + mainUrl);
-        }
+    // Strip any existing proxy prefix if already present to prevent nested proxying (e.g. ghfast.top/https://ghfast.top/...)
+    std::string rawUrl = url;
+    if (rawUrl.rfind("https://ghfast.top/", 0) == 0) {
+        rawUrl = rawUrl.substr(strlen("https://ghfast.top/"));
+    } else if (rawUrl.rfind("https://ghproxy.net/", 0) == 0) {
+        rawUrl = rawUrl.substr(strlen("https://ghproxy.net/"));
     }
 
-    for (const auto& candUrl : candidates) {
-        if (WinHttpDownloadSingleUrl(candUrl, targetPath, onProgress, userData)) {
+    std::vector<std::string> candidates;
+    if (rawUrl.find("justnullname.github.io/QuickView/") != std::string::npos) {
+        std::string suffix = rawUrl.substr(rawUrl.find("justnullname.github.io/QuickView/") + strlen("justnullname.github.io/QuickView/"));
+        candidates.push_back("https://ghfast.top/https://raw.githubusercontent.com/justnullname/QuickView/gh-pages/" + suffix);
+        candidates.push_back("https://ghproxy.net/https://raw.githubusercontent.com/justnullname/QuickView/gh-pages/" + suffix);
+        candidates.push_back("https://raw.githubusercontent.com/justnullname/QuickView/gh-pages/" + suffix);
+        candidates.push_back(rawUrl);
+    } else if (rawUrl.find("raw.githubusercontent.com") != std::string::npos || rawUrl.find("github.com") != std::string::npos) {
+        candidates.push_back("https://ghfast.top/" + rawUrl);
+        candidates.push_back("https://ghproxy.net/" + rawUrl);
+        candidates.push_back(rawUrl);
+    } else {
+        candidates.push_back(rawUrl);
+    }
+
+    LogDownloadDebug("[QVX-Download] WinHttpDownloadFile: '%s' -> '%ls' (%zu candidates)\n", rawUrl.c_str(), targetPath.c_str(), candidates.size());
+
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        LogDownloadDebug("[QVX-Download] Trying candidate [%zu/%zu]: '%s'\n", i + 1, candidates.size(), candidates[i].c_str());
+        if (WinHttpDownloadSingleUrl(candidates[i], targetPath, onProgress, userData)) {
+            LogDownloadDebug("[QVX-Download] Candidate [%zu/%zu] succeeded!\n", i + 1, candidates.size());
             if (onProgress) {
                 onProgress(1.0f, true, true, userData);
             }
             return true;
         }
+        LogDownloadDebug("[QVX-Download] Candidate [%zu/%zu] failed, falling back...\n", i + 1, candidates.size());
     }
 
+    LogDownloadDebug("[QVX-Download] All candidates failed for '%s'\n", rawUrl.c_str());
     if (onProgress) {
         onProgress(0.0f, true, false, userData);
     }
@@ -858,23 +973,67 @@ bool PluginHost::DownloadPlugin(const std::wstring& pluginName, const std::strin
     std::wstring destDir = std::wstring(exePath) + L"\\plugins";
     CreateDirectoryW(destDir.c_str(), nullptr);
 
-    std::wstring targetPath = destDir + L"\\" + pluginName;
-
     std::string url = downloadUrl;
     if (url.empty()) {
         char nameBuf[128] = { 0 };
         WideCharToMultiByte(CP_UTF8, 0, pluginName.c_str(), -1, nameBuf, sizeof(nameBuf), nullptr, nullptr);
-        url = std::string("https://github.com/justnullname/QuickView/releases/latest/download/") + nameBuf;
+        url = std::string("https://justnullname.github.io/QuickView/plugins/") + nameBuf;
     }
 
-    bool ok = WinHttpDownloadFile(url, targetPath, onProgress, userData);
+    bool isZip = (url.find(".zip") != std::string::npos || pluginName.ends_with(L".zip"));
+    bool ok = false;
+
+    LogDownloadDebug("[QVX-Download] DownloadPlugin: plugin='%ls', url='%s', isZip=%d\n", pluginName.c_str(), url.c_str(), isZip ? 1 : 0);
+
+    if (isZip) {
+        std::wstring tempZipPath = destDir + L"\\temp_plugin.zip";
+        ok = WinHttpDownloadFile(url, tempZipPath, onProgress, userData);
+        if (ok) {
+            ok = IArchive::ExtractZipToDirectory(tempZipPath, destDir);
+            DeleteFileW(tempZipPath.c_str());
+        }
+    } else {
+        std::wstring targetPath = destDir + L"\\" + pluginName;
+        ok = WinHttpDownloadFile(url, targetPath, onProgress, userData);
+    }
+
     if (ok) {
         std::lock_guard<std::mutex> lock(m_srMutex);
-        m_srPluginPath = targetPath;
+        m_srPluginPath = destDir + L"\\sr_realesrgan_d3d11.qvx";
         UnloadSrPlugin();
         EnsureSrModuleLoaded();
     }
+    LogDownloadDebug("[QVX-Download] DownloadPlugin finished: ok=%d\n", ok ? 1 : 0);
     return ok;
+}
+
+static void FlattenModelDirectory(const std::wstring& fullModelsDir) {
+    WIN32_FIND_DATAW fd;
+    std::wstring searchPattern = fullModelsDir + L"\\*";
+    HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                wcscmp(fd.cFileName, L".") != 0 && wcscmp(fd.cFileName, L"..") != 0) {
+                std::wstring subDir = fullModelsDir + L"\\" + fd.cFileName;
+                WIN32_FIND_DATAW subFd;
+                std::wstring subSearch = subDir + L"\\*";
+                HANDLE hSubFind = FindFirstFileW(subSearch.c_str(), &subFd);
+                if (hSubFind != INVALID_HANDLE_VALUE) {
+                    do {
+                        if (!(subFd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                            std::wstring srcFile = subDir + L"\\" + subFd.cFileName;
+                            std::wstring dstFile = fullModelsDir + L"\\" + subFd.cFileName;
+                            MoveFileExW(srcFile.c_str(), dstFile.c_str(), MOVEFILE_REPLACE_EXISTING);
+                        }
+                    } while (FindNextFileW(hSubFind, &subFd));
+                    FindClose(hSubFind);
+                }
+                RemoveDirectoryW(subDir.c_str());
+            }
+        } while (FindNextFileW(hFind, &fd));
+        FindClose(hFind);
+    }
 }
 
 bool PluginHost::DownloadModel(
@@ -885,6 +1044,11 @@ bool PluginHost::DownloadModel(
 ) {
     if (downloadUrl.empty()) return false;
 
+    LogDownloadDebug("[QVX-Download] PluginHost::DownloadModel start: target='%ls', url='%s'\n", targetRelativePath.c_str(), downloadUrl.c_str());
+
+    // Release any active SR context or loaded module to release file locks on models directory
+    UnloadSrPlugin();
+
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     PathRemoveFileSpecW(exePath);
@@ -894,29 +1058,112 @@ bool PluginHost::DownloadModel(
     CreateDirectoryW(pluginsDir.c_str(), nullptr);
     CreateDirectoryW(fullModelsDir.c_str(), nullptr);
 
-    bool isZip = (downloadUrl.find(".zip") != std::string::npos);
-    bool ok = false;
+    bool isAutoComposite = (targetRelativePath.find(L"realesr-animevideov3-auto") != std::wstring::npos ||
+                            downloadUrl.find("realesr-animevideov3-auto") != std::string::npos ||
+                            (downloadUrl.find("animevideov3-x2") != std::string::npos && targetRelativePath.find(L"realesr-animevideov3-auto") != std::wstring::npos));
 
-    if (isZip) {
-        std::wstring tempZipPath = pluginsDir + L"\\temp_models.zip";
-        ok = WinHttpDownloadFile(downloadUrl, tempZipPath, onProgress, userData);
-        if (ok) {
-            // Extract models folder using built-in ArchiveVFS (Zero subprocess, zero tar.exe dependency)
-            ok = IArchive::ExtractZipToDirectory(tempZipPath, pluginsDir);
-            DeleteFileW(tempZipPath.c_str());
+    // Extract model ID (without .bin / .zip extension)
+    std::string modelId;
+    size_t lastSlash = downloadUrl.find_last_of('/');
+    std::string baseFilename = (lastSlash != std::string::npos) ? downloadUrl.substr(lastSlash + 1) : downloadUrl;
+    size_t dotPos = baseFilename.find_last_of('.');
+    modelId = (dotPos != std::string::npos) ? baseFilename.substr(0, dotPos) : baseFilename;
+
+    std::string zipUrl = downloadUrl;
+    if (zipUrl.ends_with(".bin")) {
+        zipUrl = zipUrl.substr(0, zipUrl.length() - 4) + ".zip";
+    }
+
+    bool ok = false;
+    LogDownloadDebug("[QVX-Download] PluginHost::DownloadModel: isAutoComposite=%d, modelId='%s', zipUrl='%s', modelsDir='%ls'\n", isAutoComposite ? 1 : 0, modelId.c_str(), zipUrl.c_str(), fullModelsDir.c_str());
+
+    struct ModelDownloadCtx {
+        DownloadProgressCallback onProgress;
+        void* userData;
+    };
+    ModelDownloadCtx ctx{ onProgress, userData };
+
+    auto internalProgress = [](float progress, bool finished, [[maybe_unused]] bool success, void* u) {
+        auto* pCtx = static_cast<ModelDownloadCtx*>(u);
+        if (pCtx && pCtx->onProgress && !finished) {
+            pCtx->onProgress(progress * 0.9f, false, false, pCtx->userData);
         }
-    } else {
-        std::wstring targetFullPath = fullModelsDir + L"\\" + targetRelativePath;
-        ok = WinHttpDownloadFile(downloadUrl, targetFullPath, onProgress, userData);
-        if (ok && targetRelativePath.length() >= 4 && targetRelativePath.ends_with(L".bin")) {
-            // Automatically download the matching .param companion file
-            std::wstring paramRelativePath = targetRelativePath.substr(0, targetRelativePath.length() - 4) + L".param";
-            std::wstring paramFullPath = fullModelsDir + L"\\" + paramRelativePath;
-            if (downloadUrl.length() >= 4 && downloadUrl.ends_with(".bin")) {
-                std::string paramUrl = downloadUrl.substr(0, downloadUrl.length() - 4) + ".param";
-                WinHttpDownloadFile(paramUrl, paramFullPath, nullptr, nullptr);
+    };
+
+    if (isAutoComposite) {
+        // Sequentially download x2, x3, and x4 zip packages for auto composite model
+        std::vector<std::string> autoZipUrls = {
+            "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x2.zip",
+            "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x3.zip",
+            "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x4.zip"
+        };
+        bool allOk = true;
+        for (size_t i = 0; i < autoZipUrls.size(); ++i) {
+            std::wstring tempZip = fullModelsDir + L"\\temp_auto_" + std::to_wstring(i) + L".zip";
+            struct SubCtx {
+                DownloadProgressCallback onProgress;
+                void* userData;
+                size_t index;
+                size_t total;
+            } subCtx{ onProgress, userData, i, autoZipUrls.size() };
+
+            auto subProg = [](float progress, bool finished, [[maybe_unused]] bool success, void* u) {
+                auto* pSub = static_cast<SubCtx*>(u);
+                if (pSub && pSub->onProgress && !finished) {
+                    float overall = (static_cast<float>(pSub->index) + progress) / static_cast<float>(pSub->total) * 0.9f;
+                    pSub->onProgress(overall, false, false, pSub->userData);
+                }
+            };
+
+            LogDownloadDebug("[QVX-Download] [AutoComposite] Step %zu/%zu: Downloading '%s'\n", i + 1, autoZipUrls.size(), autoZipUrls[i].c_str());
+            bool dl = WinHttpDownloadFile(autoZipUrls[i], tempZip, onProgress ? subProg : nullptr, onProgress ? &subCtx : nullptr);
+            if (dl) {
+                LogDownloadDebug("[QVX-Download] [AutoComposite] Step %zu/%zu: Extracting '%ls'...\n", i + 1, autoZipUrls.size(), tempZip.c_str());
+                bool ext = IArchive::ExtractZipToDirectory(tempZip, fullModelsDir);
+                DeleteFileW(tempZip.c_str());
+                if (ext) {
+                    LogDownloadDebug("[QVX-Download] [AutoComposite] Step %zu/%zu: Extraction succeeded\n", i + 1, autoZipUrls.size());
+                    FlattenModelDirectory(fullModelsDir);
+                } else {
+                    LogDownloadDebug("[QVX-Download] [AutoComposite] Step %zu/%zu: Extraction failed!\n", i + 1, autoZipUrls.size());
+                    allOk = false;
+                    break;
+                }
+            } else {
+                LogDownloadDebug("[QVX-Download] [AutoComposite] Step %zu/%zu: Download failed!\n", i + 1, autoZipUrls.size());
+                allOk = false;
+                break;
             }
         }
+        ok = allOk;
+    } else {
+        // Download ZIP package containing model .bin and .param companion files
+        std::wstring wModelId(modelId.begin(), modelId.end());
+        std::wstring tempZipPath = fullModelsDir + L"\\temp_" + wModelId + L".zip";
+        LogDownloadDebug("[QVX-Download] [ZipModel] Downloading ZIP package '%s' -> '%ls'\n", zipUrl.c_str(), tempZipPath.c_str());
+        bool dlZipOk = WinHttpDownloadFile(zipUrl, tempZipPath, onProgress ? internalProgress : nullptr, onProgress ? &ctx : nullptr);
+        if (dlZipOk) {
+            if (onProgress) {
+                onProgress(0.95f, false, false, userData);
+            }
+            LogDownloadDebug("[QVX-Download] [ZipModel] Extracting '%ls' to '%ls'...\n", tempZipPath.c_str(), fullModelsDir.c_str());
+            ok = IArchive::ExtractZipToDirectory(tempZipPath, fullModelsDir);
+            DeleteFileW(tempZipPath.c_str());
+            if (ok) {
+                LogDownloadDebug("[QVX-Download] [ZipModel] Extraction succeeded, flattening directory...\n");
+                FlattenModelDirectory(fullModelsDir);
+            } else {
+                LogDownloadDebug("[QVX-Download] [ZipModel] Extraction failed for '%ls'!\n", tempZipPath.c_str());
+            }
+        } else {
+            LogDownloadDebug("[QVX-Download] [ZipModel] Download failed for '%s'!\n", zipUrl.c_str());
+        }
+    }
+
+    LogDownloadDebug("[QVX-Download] PluginHost::DownloadModel finished: ok=%d\n", ok ? 1 : 0);
+
+    if (onProgress) {
+        onProgress(ok ? 1.0f : 0.0f, true, ok, userData);
     }
 
     if (ok) {
@@ -931,16 +1178,13 @@ bool PluginHost::DownloadModel(
 
 void PluginHost::FetchRemoteManifestAsync(ManifestCallback callback, void* userData) {
     std::thread([callback, userData]() {
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        PathRemoveFileSpecW(exePath);
-
-        std::wstring tempPath = std::wstring(exePath) + L"\\plugins\\plugins_manifest.json.tmp";
+        wchar_t tempDir[MAX_PATH];
+        GetTempPathW(MAX_PATH, tempDir);
+        std::wstring tempPath = std::wstring(tempDir) + L"quickview_plugins_manifest.json.tmp";
         
         std::vector<std::string> candidates = {
             "https://justnullname.github.io/QuickView/plugins_manifest.json",
-            "https://raw.githubusercontent.com/justnullname/QuickView/main/plugins/plugins_manifest.json",
-            "https://ghfast.top/https://raw.githubusercontent.com/justnullname/QuickView/main/plugins/plugins_manifest.json"
+            "https://raw.githubusercontent.com/justnullname/QuickView/gh-pages/plugins_manifest.json"
         };
         
         std::vector<RemotePluginItem> items;
@@ -1011,7 +1255,9 @@ void PluginHost::TriggerManifestFetch() {
         auto* self = static_cast<PluginHost*>(userData);
         if (self) {
             std::lock_guard<std::mutex> lock(self->m_srMutex);
-            self->m_cachedManifest = items;
+            if (!items.empty()) {
+                self->m_cachedManifest = items;
+            }
             self->m_isFetchingManifest = false;
             self->NotifyUI();
         }

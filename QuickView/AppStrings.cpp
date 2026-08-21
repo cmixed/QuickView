@@ -402,6 +402,10 @@ const wchar_t *Settings_Desc_PluginNotInstalled = nullptr;
 const wchar_t *Export_Checkbox_SuperResolution = nullptr;
 const wchar_t *Settings_Label_SrDebounce = nullptr;
 const wchar_t *Settings_Tooltip_SrDebounce = nullptr;
+const wchar_t *Settings_Header_PluginTriggers = nullptr;
+const wchar_t *Settings_Label_SrStorageFolder = nullptr;
+const wchar_t *Settings_Button_OpenModelFolder = nullptr;
+const wchar_t *Settings_Prompt_DownloadModelFirst = nullptr;
 const wchar_t *Settings_Label_SrSharpness = nullptr;
 const wchar_t *Settings_Tooltip_SrSharpness = nullptr;
 const wchar_t *Settings_Label_SrDenoise = nullptr;
@@ -998,10 +1002,13 @@ struct LanguageTable {
     const wchar_t *Settings_Label_SrPromptModel;
     const wchar_t *Settings_Button_DownloadSrPlugin;
     const wchar_t *Settings_Button_UpdateSrPlugin;
-    const wchar_t *Settings_Desc_PluginNotInstalled;
     const wchar_t *Export_Checkbox_SuperResolution;
     const wchar_t *Settings_Label_SrDebounce;
     const wchar_t *Settings_Tooltip_SrDebounce;
+    const wchar_t *Settings_Header_PluginTriggers;
+    const wchar_t *Settings_Label_SrStorageFolder;
+    const wchar_t *Settings_Button_OpenModelFolder;
+    const wchar_t *Settings_Prompt_DownloadModelFirst;
     const wchar_t *Settings_Label_SrSharpness;
     const wchar_t *Settings_Tooltip_SrSharpness;
     const wchar_t *Settings_Label_SrDenoise;
@@ -1594,7 +1601,7 @@ static const LanguageTable Table_EN = {
     L"Adjust edge sharpness for AMD FSR 1.0 spatial super-resolution.", // Settings_Tooltip_FsrSharpness
     L"Plugins", // Settings_Tab_Plugins
     L"Super-Resolution AI Engine", // Settings_Header_Plugins_SR
-    L"Enable AI Super-Resolution", // Settings_Label_EnableSrPlugin
+    L"Super-Resolution AI", // Settings_Label_EnableSrPlugin
     L"Enable external neural upscaling / super-resolution plugin (.qvx) from plugins folder.", // Settings_Tooltip_EnableSrPlugin
     L"Plugin Module", // Settings_Label_SrPluginModule
     L"Auto Trigger", // Settings_Label_SrAutoTrigger
@@ -1602,10 +1609,13 @@ static const LanguageTable Table_EN = {
     L"Prompt Model Selection on Manual Trigger", // Settings_Label_SrPromptModel
     L"Download Super-Resolution Plugin (~15 MB)", // Settings_Button_DownloadSrPlugin
     L"Update Super-Resolution Plugin", // Settings_Button_UpdateSrPlugin
-    L"AI Super-Resolution extension is not installed. Click below to download and setup automatically.", // Settings_Desc_PluginNotInstalled
     L"Export Super-Resolution Quality", // Export_Checkbox_SuperResolution
     L"Trigger Delay", // Settings_Label_SrDebounce
     L"Delay in milliseconds (0 - 5000 ms) before neural super-resolution triggers after zoom settles.\nMaintains smooth interpolation during interaction and reconstructs ultra-crisp AI details once settled.", // Settings_Tooltip_SrDebounce
+    L"Triggers & Lifecycle", // Settings_Header_PluginTriggers
+    L"Plugin & Model Storage", // Settings_Label_SrStorageFolder
+    L"📂 Open Local Directory", // Settings_Button_OpenModelFolder
+    L"Download selected model first", // Settings_Prompt_DownloadModelFirst
     L"AI Sharpness", // Settings_Label_SrSharpness
     L"Adjust edge sharpening strength for AI super-resolution plugin.", // Settings_Tooltip_SrSharpness
     L"AI Denoise", // Settings_Label_SrDenoise
@@ -2198,7 +2208,7 @@ static const LanguageTable Table_CN = {
     L"调节 AMD FSR 1.0 空间自适应超分辨率的边缘锐化强度。", // Settings_Tooltip_FsrSharpness
     L"插件", // Settings_Tab_Plugins
     L"超分辨率 AI 引擎", // Settings_Header_Plugins_SR
-    L"启用 AI 超分辨率插件", // Settings_Label_EnableSrPlugin
+    L"超分辨率增强", // Settings_Label_EnableSrPlugin
     L"启用位于 plugins 目录的外部神经网络超分辨率扩展插件 (.qvx)。", // Settings_Tooltip_EnableSrPlugin
     L"超分辨率插件模块", // Settings_Label_SrPluginModule
     L"自动触发", // Settings_Label_SrAutoTrigger
@@ -2206,10 +2216,13 @@ static const LanguageTable Table_CN = {
     L"手动触发时提示选择模型", // Settings_Label_SrPromptModel
     L"一键下载超分辨率插件 (~15 MB)", // Settings_Button_DownloadSrPlugin
     L"更新超分辨率插件 (有新版本)", // Settings_Button_UpdateSrPlugin
-    L"未安装超分辨率 AI 扩展组件。点击下方按钮即可一键下载并自动就绪。", // Settings_Desc_PluginNotInstalled
     L"导出超分辨率画质", // Export_Checkbox_SuperResolution
     L"触发延迟", // Settings_Label_SrDebounce
     L"缩放停止后触发 AI 神经超分的等待时间 (0 - 5000 毫秒)。\n缩放交互过程中保持当前放大插值算法的流畅度，静止后无缝重构成 AI 极清画质。", // Settings_Tooltip_SrDebounce
+    L"触发调度与交互", // Settings_Header_PluginTriggers
+    L"插件与模型目录", // Settings_Label_SrStorageFolder
+    L"📂 打开本地目录", // Settings_Button_OpenModelFolder
+    L"需先下载选中的模型", // Settings_Prompt_DownloadModelFirst
     L"AI 锐化强度", // Settings_Label_SrSharpness
     L"调节 AI 超分辨率插件的边缘轮廓锐化强度。", // Settings_Tooltip_SrSharpness
     L"AI 去噪强度", // Settings_Label_SrDenoise
@@ -2802,7 +2815,7 @@ static const LanguageTable Table_TW = {
     L"調節 AMD FSR 1.0 空間自適應超解析度的邊緣銳化強度。", // Settings_Tooltip_FsrSharpness
     L"外掛程式", // Settings_Tab_Plugins
     L"超解析度 AI 引擎", // Settings_Header_Plugins_SR
-    L"啟用 AI 超解析度外掛程式", // Settings_Label_EnableSrPlugin
+    L"超解析度增強", // Settings_Label_EnableSrPlugin
     L"啟用位於 plugins 目錄的外部神經網路超解析度擴充外掛 (.qvx)。", // Settings_Tooltip_EnableSrPlugin
     L"超解析度外掛模組", // Settings_Label_SrPluginModule
     L"自動觸發", // Settings_Label_SrAutoTrigger
@@ -2810,10 +2823,13 @@ static const LanguageTable Table_TW = {
     L"手動觸發時提示選擇模型", // Settings_Label_SrPromptModel
     L"一鍵下載超解析度外掛 (~15 MB)", // Settings_Button_DownloadSrPlugin
     L"更新超解析度外掛 (有新版本)", // Settings_Button_UpdateSrPlugin
-    L"尚未安裝超解析度 AI 擴充組件。點擊下方按鈕即可一鍵下載並自動就緒。", // Settings_Desc_PluginNotInstalled
     L"匯出超解析度畫質", // Export_Checkbox_SuperResolution
     L"觸發延遲", // Settings_Label_SrDebounce
     L"縮放停止後觸發 AI 神經超分的等待時間 (0 - 5000 毫秒)。\n縮放互動過程中保持當前放大插值演算法的流暢度，靜止後無縫重構成 AI 極清畫質。", // Settings_Tooltip_SrDebounce
+    L"觸發調度與互動", // Settings_Header_PluginTriggers
+    L"外掛與模型目錄", // Settings_Label_SrStorageFolder
+    L"📂 開啟本機目錄", // Settings_Button_OpenModelFolder
+    L"需先下載選取的模型", // Settings_Prompt_DownloadModelFirst
     L"AI 銳化強度", // Settings_Label_SrSharpness
     L"調節 AI 超解析度外掛程式的邊緣輪廓銳化強度。", // Settings_Tooltip_SrSharpness
     L"AI 去噪強度", // Settings_Label_SrDenoise
@@ -3406,7 +3422,7 @@ static const LanguageTable Table_JA = {
     L"AMD FSR 1.0 空間超解像のエッジ強調強度を調整します。", // Settings_Tooltip_FsrSharpness
     L"プラグイン", // Settings_Tab_Plugins
     L"超解像 AI エンジン", // Settings_Header_Plugins_SR
-    L"AI 超解像プラグインを有効化", // Settings_Label_EnableSrPlugin
+    L"超解像 AI", // Settings_Label_EnableSrPlugin
     L"plugins フォルダ内の外部超解像プラグイン (.qvx) を有効にします。", // Settings_Tooltip_EnableSrPlugin
     L"プラグインモジュール", // Settings_Label_SrPluginModule
     L"自動トリガー", // Settings_Label_SrAutoTrigger
@@ -3414,10 +3430,13 @@ static const LanguageTable Table_JA = {
     L"手動トリガー時にモデル選択を表示", // Settings_Label_SrPromptModel
     L"超解像プラグインをダウンロード (~15 MB)", // Settings_Button_DownloadSrPlugin
     L"超解像プラグインをアップデート", // Settings_Button_UpdateSrPlugin
-    L"超解像 AI 拡張機能は未インストールです。下のボタンでダウンロードできます。", // Settings_Desc_PluginNotInstalled
     L"超解像画質で書き出す", // Export_Checkbox_SuperResolution
     L"トリガー遅延", // Settings_Label_SrDebounce
     L"ズーム操作停止後に AI 超解像をトリガーする遅延時間 (0 - 5000 ミリ秒)。\n操作中は高速補間を維持し、停止後に超高画質 AI 復元を行います。", // Settings_Tooltip_SrDebounce
+    L"トリガーと動作設定", // Settings_Header_PluginTriggers
+    L"プラグインとモデル保存先", // Settings_Label_SrStorageFolder
+    L"📂 ローカルフォルダを開く", // Settings_Button_OpenModelFolder
+    L"選択したモデルのダウンロードが必要", // Settings_Prompt_DownloadModelFirst
     L"AI シャープネス", // Settings_Label_SrSharpness
     L"AI 超解像プラグインのエッジシャープネス強度を調整します。", // Settings_Tooltip_SrSharpness
     L"AI ノイズ低減", // Settings_Label_SrDenoise
@@ -4010,7 +4029,7 @@ static const LanguageTable Table_RU = {
     L"Настройка резкости краев для масштабирования AMD FSR 1.0.", // Settings_Tooltip_FsrSharpness
     L"Плагины", // Settings_Tab_Plugins
     L"AI Движок сверхразрешения", // Settings_Header_Plugins_SR
-    L"Включить AI масштабирование", // Settings_Label_EnableSrPlugin
+    L"AI Сверхразрешение", // Settings_Label_EnableSrPlugin
     L"Включить внешний плагин сверхразрешения (.qvx) из папки plugins.", // Settings_Tooltip_EnableSrPlugin
     L"Модуль плагина", // Settings_Label_SrPluginModule
     L"Автоматический запуск", // Settings_Label_SrAutoTrigger
@@ -4018,10 +4037,13 @@ static const LanguageTable Table_RU = {
     L"Запрашивать выбор модели при ручном запуске", // Settings_Label_SrPromptModel
     L"Скачать плагин AI сверхразрешения (~15 MB)", // Settings_Button_DownloadSrPlugin
     L"Обновить плагин сверхразрешения", // Settings_Button_UpdateSrPlugin
-    L"Плагин AI сверхразрешения не установлен. Нажмите для загрузки.", // Settings_Desc_PluginNotInstalled
     L"Экспортировать с AI масштабированием", // Export_Checkbox_SuperResolution
     L"Задержка запуска", // Settings_Label_SrDebounce
     L"Задержка в миллисекундах (0 - 5000 мс) перед запуском нейросетевого сверхразрешения после остановки зума.", // Settings_Tooltip_SrDebounce
+    L"Триггеры и взаимодействие", // Settings_Header_PluginTriggers
+    L"Каталог плагинов и моделей", // Settings_Label_SrStorageFolder
+    L"📂 Открыть локальную папку", // Settings_Button_OpenModelFolder
+    L"Сначала скачайте выбранную модель", // Settings_Prompt_DownloadModelFirst
     L"AI Резкость", // Settings_Label_SrSharpness
     L"Настройка резкости краев для AI плагина.", // Settings_Tooltip_SrSharpness
     L"AI Шумоподавление", // Settings_Label_SrDenoise
@@ -4614,7 +4636,7 @@ static const LanguageTable Table_DE = {
     L"Passen Sie die Kantenschärfe für AMD FSR 1.0 Super-Resolution an.", // Settings_Tooltip_FsrSharpness
     L"Plugins", // Settings_Tab_Plugins
     L"Super-Resolution KI-Engine", // Settings_Header_Plugins_SR
-    L"KI-Super-Resolution aktivieren", // Settings_Label_EnableSrPlugin
+    L"KI-Super-Resolution", // Settings_Label_EnableSrPlugin
     L"Externes KI-Upscaling / Super-Resolution-Plugin (.qvx) aus dem plugins-Ordner aktivieren.", // Settings_Tooltip_EnableSrPlugin
     L"Plugin-Modul", // Settings_Label_SrPluginModule
     L"Automatisches Auslösen", // Settings_Label_SrAutoTrigger
@@ -4622,10 +4644,13 @@ static const LanguageTable Table_DE = {
     L"Modellauswahl bei manuellem Auslösen abfragen", // Settings_Label_SrPromptModel
     L"Super-Resolution Plugin herunterladen (~15 MB)", // Settings_Button_DownloadSrPlugin
     L"Super-Resolution Plugin aktualisieren", // Settings_Button_UpdateSrPlugin
-    L"Super-Resolution KI-Erweiterung ist nicht installiert. Klicken Sie zum Herunterladen.", // Settings_Desc_PluginNotInstalled
     L"Super-Resolution Qualität exportieren", // Export_Checkbox_SuperResolution
     L"Auslöseverzögerung", // Settings_Label_SrDebounce
     L"Verzögerung in Millisekunden (0 - 5000 ms), bevor die neuronale Super-Resolution nach dem Zoomen ausgelöst wird.", // Settings_Tooltip_SrDebounce
+    L"Trigger & Interaktion", // Settings_Header_PluginTriggers
+    L"Plugin- & Modellverzeichnis", // Settings_Label_SrStorageFolder
+    L"📂 Lokales Verzeichnis öffnen", // Settings_Button_OpenModelFolder
+    L"Gewähltes Modell zuerst herunterladen", // Settings_Prompt_DownloadModelFirst
     L"KI-Schärfe", // Settings_Label_SrSharpness
     L"Kantenschärfe für KI-Super-Resolution-Plugin anpassen.", // Settings_Tooltip_SrSharpness
     L"KI-Rauschunterdrückung", // Settings_Label_SrDenoise
@@ -5218,7 +5243,7 @@ static const LanguageTable Table_ES = {
     L"Ajusta la nitidez de bordes para la superresolución AMD FSR 1.0.", // Settings_Tooltip_FsrSharpness
     L"Complementos", // Settings_Tab_Plugins
     L"Motor IA de Superresolución", // Settings_Header_Plugins_SR
-    L"Activar superresolución IA", // Settings_Label_EnableSrPlugin
+    L"Superresolución IA", // Settings_Label_EnableSrPlugin
     L"Habilita el complemento de superresolución / escalado por IA (.qvx) desde la carpeta plugins.", // Settings_Tooltip_EnableSrPlugin
     L"Módulo de plugin", // Settings_Label_SrPluginModule
     L"Activación automática", // Settings_Label_SrAutoTrigger
@@ -5226,10 +5251,13 @@ static const LanguageTable Table_ES = {
     L"Preguntar modelo al activar manualmente", // Settings_Label_SrPromptModel
     L"Descargar plugin de superresolución (~15 MB)", // Settings_Button_DownloadSrPlugin
     L"Actualizar plugin de superresolución", // Settings_Button_UpdateSrPlugin
-    L"La extensión de Superresolución IA no está instalada. Haga clic para descargar.", // Settings_Desc_PluginNotInstalled
     L"Exportar calidad de superresolución", // Export_Checkbox_SuperResolution
     L"Retardo de activación", // Settings_Label_SrDebounce
     L"Retardo en milisegundos (0 - 5000 ms) antes de activar la superresolución neuronal tras finalizar el zoom.", // Settings_Tooltip_SrDebounce
+    L"Disparadores e Interacción", // Settings_Header_PluginTriggers
+    L"Directorio de plugins y modelos", // Settings_Label_SrStorageFolder
+    L"📂 Abrir carpeta local", // Settings_Button_OpenModelFolder
+    L"Descargue primero el modelo", // Settings_Prompt_DownloadModelFirst
     L"Nitidez IA", // Settings_Label_SrSharpness
     L"Ajusta la nitidez del complemento de superresolución IA.", // Settings_Tooltip_SrSharpness
     L"Reducción de ruido IA", // Settings_Label_SrDenoise
@@ -5822,7 +5850,7 @@ static const LanguageTable Table_FR = {
     L"Ajuste la netteté des contours pour la super-résolution AMD FSR 1.0.", // Settings_Tooltip_FsrSharpness
     L"Plugins", // Settings_Tab_Plugins
     L"Moteur IA de super-résolution", // Settings_Header_Plugins_SR
-    L"Activer la super-résolution IA", // Settings_Label_EnableSrPlugin
+    L"Super-résolution IA", // Settings_Label_EnableSrPlugin
     L"Activer le plugin de super-résolution IA (.qvx) externe depuis le dossier plugins.", // Settings_Tooltip_EnableSrPlugin
     L"Module de plugin", // Settings_Label_SrPluginModule
     L"Déclenchement automatique", // Settings_Label_SrAutoTrigger
@@ -5830,10 +5858,13 @@ static const LanguageTable Table_FR = {
     L"Demander le modèle lors du déclenchement manuel", // Settings_Label_SrPromptModel
     L"Télécharger le plugin de super-résolution (~15 MB)", // Settings_Button_DownloadSrPlugin
     L"Mettre à jour le plugin de super-résolution", // Settings_Button_UpdateSrPlugin
-    L"L'extension de super-résolution IA n'est pas installée. Cliquez ci-dessous pour télécharger.", // Settings_Desc_PluginNotInstalled
     L"Exporter la qualité de super-résolution", // Export_Checkbox_SuperResolution
     L"Délai de déclenchement", // Settings_Label_SrDebounce
     L"Délai en millisecondes (0 - 5000 ms) avant le déclenchement de la super-résolution neuronale après l'arrêt du zoom.", // Settings_Tooltip_SrDebounce
+    L"Déclencheurs et Interaction", // Settings_Header_PluginTriggers
+    L"Répertoire des plugins et modèles", // Settings_Label_SrStorageFolder
+    L"📂 Ouvrir le répertoire local", // Settings_Button_OpenModelFolder
+    L"Téléchargez d'abord le modèle", // Settings_Prompt_DownloadModelFirst
     L"Netteté IA", // Settings_Label_SrSharpness
     L"Ajuster la netteté du plugin de super-résolution IA.", // Settings_Tooltip_SrSharpness
     L"Débruitage IA", // Settings_Label_SrDenoise
@@ -6438,11 +6469,13 @@ void Apply(const LanguageTable& t) {
   Settings_Label_SrOpenInCompare = t.Settings_Label_SrOpenInCompare;
   Settings_Label_SrPromptModel = t.Settings_Label_SrPromptModel;
   Settings_Button_DownloadSrPlugin = t.Settings_Button_DownloadSrPlugin;
-  Settings_Button_UpdateSrPlugin = t.Settings_Button_UpdateSrPlugin;
-  Settings_Desc_PluginNotInstalled = t.Settings_Desc_PluginNotInstalled;
   Export_Checkbox_SuperResolution = t.Export_Checkbox_SuperResolution;
   Settings_Label_SrDebounce = t.Settings_Label_SrDebounce;
   Settings_Tooltip_SrDebounce = t.Settings_Tooltip_SrDebounce;
+  Settings_Header_PluginTriggers = t.Settings_Header_PluginTriggers;
+  Settings_Label_SrStorageFolder = t.Settings_Label_SrStorageFolder;
+  Settings_Button_OpenModelFolder = t.Settings_Button_OpenModelFolder;
+  Settings_Prompt_DownloadModelFirst = t.Settings_Prompt_DownloadModelFirst;
   Settings_Label_SrSharpness = t.Settings_Label_SrSharpness;
   Settings_Tooltip_SrSharpness = t.Settings_Tooltip_SrSharpness;
   Settings_Label_SrDenoise = t.Settings_Label_SrDenoise;

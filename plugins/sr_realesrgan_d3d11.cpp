@@ -45,12 +45,12 @@ static QVX_SR_ModelInfo s_models[] = {
         sizeof(QVX_SR_ModelInfo),
         "realesr-animevideov3-auto",
         "动漫极速 (自适应 2x/3x/4x)",
-        "根据缩放倍率自动匹配最优动漫模型（50~120ms），兼顾极致流畅与画质",
+        "根据缩放倍率自动匹配最优动漫模型（50~120ms），包含 2x/3x/4x 全套极速模型 (~3.5 MB)",
         4.0f,
         true,
         false, // External weights model
-        1247368,
-        "https://raw.githubusercontent.com/justnullname/QuickView/main/models/realesr-animevideov3-x4.bin",
+        3502191,
+        "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x2.zip",
         512,
         100,   // default_debounce_ms
         false  // default_compare_mode
@@ -63,8 +63,8 @@ static QVX_SR_ModelInfo s_models[] = {
         2.0f,
         true,
         false,
-        1247368,
-        "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x2.bin",
+        1167404,
+        "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x2.zip",
         512,
         100,   // default_debounce_ms
         false  // default_compare_mode
@@ -77,8 +77,8 @@ static QVX_SR_ModelInfo s_models[] = {
         3.0f,
         true,
         false,
-        1247368,
-        "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x3.bin",
+        1167406,
+        "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x3.zip",
         512,
         120,   // default_debounce_ms
         false  // default_compare_mode
@@ -91,8 +91,8 @@ static QVX_SR_ModelInfo s_models[] = {
         4.0f,
         true,
         false,
-        1247368,
-        "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x4.bin",
+        1167381,
+        "https://justnullname.github.io/QuickView/models/realesr-animevideov3-x4.zip",
         512,
         150,   // default_debounce_ms
         false  // default_compare_mode
@@ -101,12 +101,12 @@ static QVX_SR_ModelInfo s_models[] = {
         sizeof(QVX_SR_ModelInfo),
         "realesrgan-x4plus-anime",
         "动漫极致 4x",
-        "深层残差神经网络，针对老动漫与复杂线稿进行极致纹理修复 (~8.9 MB)",
+        "深层残差神经网络，针对老动漫与复杂线稿进行极致纹理修复 (~8.3 MB)",
         4.0f,
         true,
         false,
-        8943500,
-        "https://justnullname.github.io/QuickView/models/realesrgan-x4plus-anime.bin",
+        8286003,
+        "https://justnullname.github.io/QuickView/models/realesrgan-x4plus-anime.zip",
         512,
         250,   // default_debounce_ms
         true   // default_compare_mode
@@ -115,12 +115,12 @@ static QVX_SR_ModelInfo s_models[] = {
         sizeof(QVX_SR_ModelInfo),
         "realesr-general-x4v3",
         "真实照片极速 4x",
-        "0.3.0 官方超轻量摄影微型模型（~1.5 MB），毫秒级极速，消除噪点并支持降噪强度调节",
+        "0.3.0 官方超轻量摄影微型模型（~2.3 MB），毫秒级极速，消除噪点并支持降噪强度调节",
         4.0f,
         true,
         false,
-        1500000,
-        "https://justnullname.github.io/QuickView/models/realesr-general-x4v3.bin",
+        2283925,
+        "https://justnullname.github.io/QuickView/models/realesr-general-x4v3.zip",
         512,
         100,   // default_debounce_ms
         false  // default_compare_mode
@@ -129,12 +129,12 @@ static QVX_SR_ModelInfo s_models[] = {
         sizeof(QVX_SR_ModelInfo),
         "realesrgan-x4plus",
         "真实照片极致 4x",
-        "通用摄影大模型，针对真实风景、人像、静物深度消除 JPEG 块效应并还原细节 (~33.4 MB)",
+        "通用摄影大模型，针对真实风景、人像、静物深度消除 JPEG 块效应并还原细节 (~31.0 MB)",
         4.0f,
         true,
         false,
-        33424520,
-        "https://justnullname.github.io/QuickView/models/realesrgan-x4plus.bin",
+        30963424,
+        "https://justnullname.github.io/QuickView/models/realesrgan-x4plus.zip",
         512,
         300,   // default_debounce_ms
         true   // default_compare_mode
@@ -164,7 +164,7 @@ static void UpdateModelAndParamLocalization(const char* lang) {
 
     if (isZhCN) {
         s_models[0].display_name = "动漫极速 (自适应 2x/3x/4x)";
-        s_models[0].description  = "根据缩放倍率自动匹配最优动漫模型（50~120ms），兼顾极致流畅与画质";
+        s_models[0].description  = "根据缩放倍率自动匹配最优动漫模型（50~120ms），包含 2x/3x/4x 全套极速模型 (~3.5 MB)";
         s_models[1].display_name = "动漫极速 2x";
         s_models[1].description  = "极速动漫模型（50~100ms），极低显存，适合日常插画、漫画与截图二倍放大 (~1.2 MB)";
         s_models[2].display_name = "动漫平衡 3x";
@@ -340,10 +340,10 @@ static const QVX_SR_ModelInfo* RealESRGAN_GetModelInfo(uint32_t index) {
 
     const char* id = s_models[index].model_id;
     if (strcmp(id, "realesr-animevideov3-auto") == 0) {
-        bool hasAny = CheckModelPairExists(modelsDir, "realesr-animevideov3-x2") ||
-                      CheckModelPairExists(modelsDir, "realesr-animevideov3-x3") ||
+        bool hasAll = CheckModelPairExists(modelsDir, "realesr-animevideov3-x2") &&
+                      CheckModelPairExists(modelsDir, "realesr-animevideov3-x3") &&
                       CheckModelPairExists(modelsDir, "realesr-animevideov3-x4");
-        s_models[index].is_installed = hasAny;
+        s_models[index].is_installed = hasAll;
     } else {
         s_models[index].is_installed = CheckModelPairExists(modelsDir, id);
     }
@@ -356,19 +356,12 @@ static int32_t RealESRGAN_SetLanguage(const char* lang_code) {
 }
 
 static uint32_t RealESRGAN_GetParamCount(void) {
-    if (s_activeModelId == "realesr-general-x4v3") {
-        return static_cast<uint32_t>(sizeof(s_generalParams) / sizeof(s_generalParams[0]));
-    }
-    return static_cast<uint32_t>(sizeof(s_commonParams) / sizeof(s_commonParams[0]));
+    return static_cast<uint32_t>(sizeof(s_generalParams) / sizeof(s_generalParams[0]));
 }
 
 static const QVX_ParamDesc* RealESRGAN_GetParamDesc(uint32_t index) {
-    if (s_activeModelId == "realesr-general-x4v3") {
-        if (index >= sizeof(s_generalParams) / sizeof(s_generalParams[0])) return nullptr;
-        return &s_generalParams[index];
-    }
-    if (index >= sizeof(s_commonParams) / sizeof(s_commonParams[0])) return nullptr;
-    return &s_commonParams[index];
+    if (index >= sizeof(s_generalParams) / sizeof(s_generalParams[0])) return nullptr;
+    return &s_generalParams[index];
 }
 
 static int32_t RealESRGAN_GetParamValue(QVX_SR_Context ctx, const char* param_id, float* out_val) {

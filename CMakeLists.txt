@@ -388,6 +388,7 @@ set_target_properties(sr_realesrgan_d3d11 PROPERTIES
 )
 target_include_directories(sr_realesrgan_d3d11 PRIVATE QuickView)
 target_link_libraries(sr_realesrgan_d3d11 PRIVATE d3d11.lib d3dcompiler.lib dxgi.lib shlwapi.lib)
+add_dependencies(QuickView sr_realesrgan_d3d11)
 
 # ============================================================================
 # Unit Tests
