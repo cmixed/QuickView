@@ -9,6 +9,12 @@
 #include <d2d1_1.h>
 #include <cmath>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 extern class CRenderEngine* g_pRenderEngine;
 
 #pragma comment(lib, "d2d1.lib")
@@ -1160,3 +1166,8 @@ void GeekContextMenu::RenderAndUI() {
 }
 
 } // namespace QuickView::UI::Menu
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

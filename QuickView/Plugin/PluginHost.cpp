@@ -11,13 +11,36 @@
 #include <shlwapi.h>
 #include <shellapi.h>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 namespace QuickView {
 
 typedef bool (*QVX_InitFn)(const QVX_PluginHeader**);
 typedef void (*QVX_ShutdownFn)(void);
 
+bool PluginHost::IsSrPluginEnabled() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_enableSrPlugin; }
+void PluginHost::SetSrPluginEnabled(bool enable) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_enableSrPlugin = enable; }
+std::wstring PluginHost::GetSrPluginPath() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srPluginPath; }
+std::string PluginHost::GetSrModelId() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srModelId; }
+bool PluginHost::IsSrAutoTriggerEnabled() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srAutoTrigger; }
+void PluginHost::SetSrAutoTriggerEnabled(bool enable) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_srAutoTrigger = enable; }
+bool PluginHost::IsSrOpenInCompareMode() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srOpenInCompareMode; }
+void PluginHost::SetSrOpenInCompareMode(bool enable) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_srOpenInCompareMode = enable; }
+bool PluginHost::IsSrPromptModelOnHotkey() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srPromptModelOnHotkey; }
+void PluginHost::SetSrPromptModelOnHotkey(bool prompt) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_srPromptModelOnHotkey = prompt; }
+int PluginHost::GetSrDebounceDelayMs() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srDebounceDelayMs; }
+void PluginHost::SetSrDebounceDelayMs(int delayMs) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_srDebounceDelayMs = std::clamp(delayMs, 0, 5000); }
+std::string PluginHost::GetLastExecutionLog() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_lastLog; }
+double PluginHost::GetLastDurationMs() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_lastDurationMs; }
+std::vector<RemotePluginItem> PluginHost::GetCachedRemoteManifest() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_cachedManifest; }
+bool PluginHost::IsFetchingManifest() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_isFetchingManifest; }
+
 void PluginHost::SetSrPluginPath(const std::wstring& path) {
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     if (m_srPluginPath != path) {
         m_srPluginPath = path;
         UnloadSrPlugin();
@@ -26,7 +49,7 @@ void PluginHost::SetSrPluginPath(const std::wstring& path) {
 }
 
 PluginInstallState PluginHost::GetSrPluginInstallState() const {
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     std::wstring fullPath = m_srPluginPath;
     if (fullPath.empty()) {
         fullPath = L"plugins\\sr_realesrgan_d3d11.qvx";
@@ -75,7 +98,7 @@ PluginInstallState PluginHost::GetSrPluginInstallState() const {
 }
 
 std::string PluginHost::GetInstalledPluginVersion() const {
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     if (m_srHeader && m_srHeader->version_str) {
         return m_srHeader->version_str;
     }
@@ -107,7 +130,7 @@ std::string PluginHost::GetInstalledPluginVersion() const {
 }
 
 void PluginHost::SetLanguage(const std::string& langCode) {
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     m_currentLanguage = langCode;
     if (m_srVTable && m_srVTable->set_language) {
         m_srVTable->set_language(m_currentLanguage.c_str());
@@ -196,7 +219,7 @@ bool PluginHost::EnsureSrModuleLoaded() {
 }
 
 void PluginHost::SetSrModelId(const std::string& modelId) {
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     if (m_srModelId != modelId) {
         m_srModelId = modelId;
         if (m_srVTable && m_srContext) {
@@ -207,7 +230,7 @@ void PluginHost::SetSrModelId(const std::string& modelId) {
 }
 
 float PluginHost::GetParamValue(const std::string& paramId, float defaultVal) const {
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     for (const auto& kv : m_dynamicParams) {
         if (kv.first == paramId) {
             return kv.second;
@@ -217,7 +240,7 @@ float PluginHost::GetParamValue(const std::string& paramId, float defaultVal) co
 }
 
 void PluginHost::SetParamValue(const std::string& paramId, float val) {
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     bool found = false;
     for (auto& kv : m_dynamicParams) {
         if (kv.first == paramId) {
@@ -258,7 +281,7 @@ void PluginHost::SyncDynamicParamsToContext() {
 
 std::vector<SrModelEntry> PluginHost::GetCurrentSrModels() const {
     std::vector<SrModelEntry> result;
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
 
     const_cast<PluginHost*>(this)->EnsureSrModuleLoaded();
 
@@ -340,7 +363,7 @@ std::wstring PluginHost::GetModelDisplayName(const std::string& modelId) const {
 
 std::vector<SrParamEntry> PluginHost::GetCurrentSrParams() const {
     std::vector<SrParamEntry> result;
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
 
     const_cast<PluginHost*>(this)->EnsureSrModuleLoaded();
 
@@ -388,7 +411,7 @@ std::vector<SrParamEntry> PluginHost::GetCurrentSrParams() const {
 }
 
 void PluginHost::ResetToDefaults() {
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     m_enableSrPlugin = false;
     m_srPluginPath = L"plugins\\sr_realesrgan_d3d11.qvx";
     m_srModelId = "realesr-animevideov3-auto";
@@ -408,7 +431,7 @@ void PluginHost::ResetToDefaults() {
 void PluginHost::LoadConfig(const wchar_t* iniPath) {
     if (!iniPath || iniPath[0] == L'\0') return;
 
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     m_cachedIniPath = iniPath;
 
     m_enableSrPlugin = (GetPrivateProfileIntW(L"SuperResolution", L"EnableSrPlugin", 0, iniPath) != 0);
@@ -462,7 +485,7 @@ void PluginHost::LoadConfig(const wchar_t* iniPath) {
 void PluginHost::SaveConfig(const wchar_t* iniPath) const {
     if (!iniPath || iniPath[0] == L'\0') return;
 
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
 
     WritePrivateProfileStringW(L"SuperResolution", L"EnableSrPlugin", m_enableSrPlugin ? L"1" : L"0", iniPath);
     WritePrivateProfileStringW(L"SuperResolution", L"SrPluginPath", m_srPluginPath.c_str(), iniPath);
@@ -502,7 +525,7 @@ bool PluginHost::EnsureSrContext(ID3D11Device* pDevice) {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(m_srMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
 
     // If context already valid for this device, return true immediately (0 overhead)
     if (m_hSrModule && m_srVTable && m_srContext && m_cachedDevice == pDevice) {
@@ -607,6 +630,10 @@ int32_t PluginHost::ExecuteSrUpscaleGpu(
         return QVX_E_INVALIDARG;
     }
 
+    // Keep the module and its context alive for the whole call.  Downloads,
+    // model changes and shutdown all take this same recursive lock before
+    // destroying either object.
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     if (!EnsureSrContext(pDevice)) {
         OutputDebugStringA("[QVX-SR] Execute failed: EnsureSrContext returned false.\n");
         return QVX_E_FAIL;
@@ -643,6 +670,7 @@ int32_t PluginHost::ExecuteSrUpscaleGpu(
 }
 
 void PluginHost::UnloadSrPlugin() {
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     if (m_srVTable && m_srContext) {
         m_srVTable->destroy_context(m_srContext);
         m_srContext = nullptr;
@@ -723,6 +751,7 @@ std::vector<PluginCandidate> PluginHost::ScanPluginsDirectory(const std::wstring
     return candidates;
 }
 
+#ifdef _DEBUG
 static void LogDownloadDebug(const char* fmt, ...) {
     char buf[1024];
     va_list args;
@@ -731,6 +760,9 @@ static void LogDownloadDebug(const char* fmt, ...) {
     va_end(args);
     OutputDebugStringA(buf);
 }
+#else
+#define LogDownloadDebug(...) ((void)0)
+#endif
 
 static bool WinHttpDownloadSingleUrl(
     const std::string& initialUrl, 
@@ -745,6 +777,12 @@ static bool WinHttpDownloadSingleUrl(
     std::string currentUrl = initialUrl;
     for (int redirectHop = 0; redirectHop < 8; ++redirectHop) {
         bool isHttps = (currentUrl.rfind("https://", 0) == 0);
+        // Plugins and model weights are executable/trusted inputs.  Never
+        // downgrade to HTTP, including through a redirect.
+        if (!isHttps) {
+            LogDownloadDebug("[QVX-Download] Refusing non-HTTPS URL: %s\n", currentUrl.c_str());
+            return false;
+        }
         size_t protocolPos = currentUrl.find("://");
         if (protocolPos == std::string::npos) {
             LogDownloadDebug("[QVX-Download] Invalid URL protocol in: %s\n", currentUrl.c_str());
@@ -760,6 +798,14 @@ static bool WinHttpDownloadSingleUrl(
 
         std::string hostStr = domainPath.substr(0, slashPos);
         std::string pathStr = domainPath.substr(slashPos);
+
+        // The built-in marketplace is intentionally single-publisher.  This
+        // prevents a compromised manifest from turning the downloader into an
+        // arbitrary binary fetcher.
+        if (hostStr != "justnullname.github.io" && hostStr != "raw.githubusercontent.com") {
+            LogDownloadDebug("[QVX-Download] Refusing untrusted host: %s\n", hostStr.c_str());
+            return false;
+        }
 
         std::wstring host(hostStr.begin(), hostStr.end());
         std::wstring path(pathStr.begin(), pathStr.end());
@@ -998,7 +1044,7 @@ bool PluginHost::DownloadPlugin(const std::wstring& pluginName, const std::strin
     }
 
     if (ok) {
-        std::lock_guard<std::mutex> lock(m_srMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_srMutex);
         m_srPluginPath = destDir + L"\\sr_realesrgan_d3d11.qvx";
         UnloadSrPlugin();
         EnsureSrModuleLoaded();
@@ -1167,7 +1213,7 @@ bool PluginHost::DownloadModel(
     }
 
     if (ok) {
-        std::lock_guard<std::mutex> lock(m_srMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_srMutex);
         if (m_srVTable && m_srContext) {
             m_srVTable->destroy_context(m_srContext);
             m_srContext = nullptr;
@@ -1249,12 +1295,15 @@ void PluginHost::FetchRemoteManifestAsync(ManifestCallback callback, void* userD
 }
 
 void PluginHost::TriggerManifestFetch() {
-    if (m_isFetchingManifest) return;
-    m_isFetchingManifest = true;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_srMutex);
+        if (m_isFetchingManifest) return;
+        m_isFetchingManifest = true;
+    }
     FetchRemoteManifestAsync([](const std::vector<RemotePluginItem>& items, void* userData) {
         auto* self = static_cast<PluginHost*>(userData);
         if (self) {
-            std::lock_guard<std::mutex> lock(self->m_srMutex);
+            std::lock_guard<std::recursive_mutex> lock(self->m_srMutex);
             if (!items.empty()) {
                 self->m_cachedManifest = items;
             }
@@ -1277,10 +1326,12 @@ void PluginHost::OpenModelsDirectory() const {
 }
 
 void PluginHost::Shutdown() {
-    std::lock_guard<std::mutex> lock(m_srMutex);
     UnloadSrPlugin();
 }
 
 } // namespace QuickView
 
-
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

@@ -20,6 +20,12 @@
 #include "ImageEngine.h"
 #include <thread>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 extern std::unique_ptr<ImageEngine> g_imageEngine;
 
 extern float g_uiScale;
@@ -1754,3 +1760,8 @@ void ExportPanel::DrawQualitySlider(ID2D1DeviceContext* dc, const D2D1_RECT_F& r
 }
 
 } // namespace QuickView
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

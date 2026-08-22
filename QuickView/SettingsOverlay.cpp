@@ -957,6 +957,12 @@ static D2D1_RECT_F GetUpdateButtonRect(const D2D1_RECT_F& cardRect) {
 
 #include "EditState.h"
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 extern AppConfig g_config;
 
 // Helper to cast Enum to int*
@@ -2540,8 +2546,8 @@ void SettingsOverlay::BuildMenu() {
 
     QuickView::PluginHost::Instance().SetUINotifyCallback([]([[maybe_unused]] void* u) {
         extern HWND g_mainHwnd;
-        extern SettingsOverlay g_settingsOverlay;
-        g_settingsOverlay.RequestRebuild();
+        // Manifest fetching completes on a worker thread.  Do not mutate the
+        // overlay there; invalidation schedules the normal UI-thread redraw.
         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
     });
 
@@ -2696,9 +2702,8 @@ void SettingsOverlay::BuildMenu() {
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                                std::thread([overlay, wFilename, url, curModelId]() {
-                                    auto progressCb = [](float progress, bool finished, bool success, void* uData) {
-                                        auto* pOverlay = static_cast<SettingsOverlay*>(uData);
+                                std::thread([wFilename, url, curModelId]() {
+                                    auto progressCb = [](float progress, bool finished, bool success, [[maybe_unused]] void* uData) {
                                         char cbLog[512];
                                         sprintf_s(cbLog, "[QVX-UI] progressCb: progress=%.2f, finished=%d, success=%d\n", progress, finished ? 1 : 0, success ? 1 : 0);
                                         OutputDebugStringA(cbLog);
@@ -2719,18 +2724,16 @@ void SettingsOverlay::BuildMenu() {
                                                 s_srDownloadText = L"Downloading (" + std::to_wstring(percent) + L"%)...";
                                             }
                                         }
-                                        if (pOverlay) pOverlay->RequestRebuild();
                                         extern HWND g_mainHwnd;
                                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                                     };
 
-                                    bool ok = QuickView::PluginHost::Instance().DownloadModel(wFilename, url, progressCb, overlay);
+                                    bool ok = QuickView::PluginHost::Instance().DownloadModel(wFilename, url, progressCb, nullptr);
                                     char finishLog[512];
                                     sprintf_s(finishLog, "[QVX-UI] DownloadModel returned ok=%d for '%s'\n", ok ? 1 : 0, curModelId.c_str());
                                     OutputDebugStringA(finishLog);
                                     if (ok) {
                                         std::this_thread::sleep_for(std::chrono::milliseconds(600));
-                                        if (overlay) overlay->RequestRebuild();
                                         extern HWND g_mainHwnd;
                                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                                         extern void RefreshImageDisplay(HWND hwnd);
@@ -3099,9 +3102,8 @@ void SettingsOverlay::BuildMenu() {
                         extern HWND g_mainHwnd;
                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                        std::thread([overlay, wFile, dlUrl]() {
-                            auto progressCb = [](float progress, bool finished, bool success, void* uData) {
-                                auto* pOverlay = static_cast<SettingsOverlay*>(uData);
+                        std::thread([wFile, dlUrl]() {
+                            auto progressCb = [](float progress, bool finished, bool success, [[maybe_unused]] void* uData) {
                                 {
                                     std::lock_guard<std::mutex> lock(s_mktDlMutex);
                                     if (finished) {
@@ -3119,15 +3121,13 @@ void SettingsOverlay::BuildMenu() {
                                         s_mktDownloadText = L"Updating (" + std::to_wstring(percent) + L"%)...";
                                     }
                                 }
-                                if (pOverlay) pOverlay->RequestRebuild();
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                             };
 
-                            bool ok = QuickView::PluginHost::Instance().DownloadPlugin(wFile, dlUrl, progressCb, overlay);
+                            bool ok = QuickView::PluginHost::Instance().DownloadPlugin(wFile, dlUrl, progressCb, nullptr);
                             if (ok) {
                                 std::this_thread::sleep_for(std::chrono::milliseconds(600));
-                                if (overlay) overlay->RequestRebuild();
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                                 extern void RefreshImageDisplay(HWND hwnd);
@@ -3164,9 +3164,8 @@ void SettingsOverlay::BuildMenu() {
                         extern HWND g_mainHwnd;
                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                        std::thread([overlay, wFile, dlUrl]() {
-                            auto progressCb = [](float progress, bool finished, bool success, void* uData) {
-                                auto* pOverlay = static_cast<SettingsOverlay*>(uData);
+                        std::thread([wFile, dlUrl]() {
+                            auto progressCb = [](float progress, bool finished, bool success, [[maybe_unused]] void* uData) {
                                 {
                                     std::lock_guard<std::mutex> lock(s_mktDlMutex);
                                     if (finished) {
@@ -3184,17 +3183,15 @@ void SettingsOverlay::BuildMenu() {
                                         s_mktDownloadText = L"Downloading (" + std::to_wstring(percent) + L"%)...";
                                     }
                                 }
-                                if (pOverlay) pOverlay->RequestRebuild();
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                             };
 
-                            bool ok = QuickView::PluginHost::Instance().DownloadPlugin(wFile, dlUrl, progressCb, overlay);
+                            bool ok = QuickView::PluginHost::Instance().DownloadPlugin(wFile, dlUrl, progressCb, nullptr);
                             if (ok) {
                                 QuickView::PluginHost::Instance().SetSrPluginEnabled(true);
                                 SaveConfig();
                                 std::this_thread::sleep_for(std::chrono::milliseconds(600));
-                                if (overlay) overlay->RequestRebuild();
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                                 extern void RefreshImageDisplay(HWND hwnd);
@@ -6882,3 +6879,8 @@ void SettingsOverlay::OnHotkeyCaptured(const KeyCombo& combo) {
     }
     if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
 }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

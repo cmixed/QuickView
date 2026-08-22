@@ -54,27 +54,23 @@ namespace QuickView {
         void (*progressCb)(float progress, void* userData),
         void* userData
     ) {
-        char logBuf[512];
-        sprintf_s(logBuf, "[QVX-Extract] ExtractZipToDirectory: opening '%ls' -> '%ls'\n", zipPath.c_str(), destDir.c_str());
-        OutputDebugStringA(logBuf);
-
         ZipArchive zip(zipPath);
         if (!zip.IsValid()) {
-            sprintf_s(logBuf, "[QVX-Extract] Failed: zip.IsValid() is false for '%ls'\n", zipPath.c_str());
-            OutputDebugStringA(logBuf);
             return false;
         }
 
+        constexpr size_t kMaxEntries = 4096;
+        constexpr uint64_t kMaxEntryBytes = 512ull * 1024 * 1024;
+        constexpr uint64_t kMaxTotalBytes = 1024ull * 1024 * 1024;
         size_t totalEntries = zip.GetEntryCount();
-        sprintf_s(logBuf, "[QVX-Extract] Zip has %zu entries\n", totalEntries);
-        OutputDebugStringA(logBuf);
-
+        if (totalEntries > kMaxEntries) return false;
         if (totalEntries == 0) return true;
 
         EnsureParentDirectory(destDir + L"\\dummy.tmp");
 
         ::std::vector<uint8_t> buffer;
 
+        uint64_t totalUncompressed = 0;
         for (size_t i = 0; i < totalEntries; ++i) {
             ::std::wstring relName = zip.GetEntryName(i);
             if (relName.empty()) continue;
@@ -84,7 +80,8 @@ namespace QuickView {
             }
 
             // Security: Prevent Directory Traversal
-            if (relName.find(L"..\\") != ::std::wstring::npos || relName.find(L"\\..") != ::std::wstring::npos) {
+            if (relName.front() == L'\\' || relName.find(L':') != ::std::wstring::npos ||
+                relName.find(L"..\\") != ::std::wstring::npos || relName == L".." || relName.find(L"\\..") != ::std::wstring::npos) {
                 continue;
             }
 
@@ -96,8 +93,8 @@ namespace QuickView {
             EnsureParentDirectory(outPath);
 
             const ArchiveEntry& entry = zip.GetEntry(i);
-            sprintf_s(logBuf, "[QVX-Extract] Entry [%zu]: '%ls', uncompSize=%u, method=%u\n", i, relName.c_str(), entry.uncompSize, entry.method);
-            OutputDebugStringA(logBuf);
+            if (entry.uncompSize > kMaxEntryBytes || totalUncompressed > kMaxTotalBytes - entry.uncompSize) return false;
+            totalUncompressed += entry.uncompSize;
 
             if (buffer.size() < entry.uncompSize) {
                 buffer.resize(entry.uncompSize);
@@ -105,8 +102,6 @@ namespace QuickView {
 
             size_t extractedSize = zip.ExtractEntry(i, buffer.data(), buffer.size());
             if (extractedSize != entry.uncompSize) {
-                sprintf_s(logBuf, "[QVX-Extract] ExtractEntry failed for '%ls' (got %zu, expected %u)\n", relName.c_str(), extractedSize, entry.uncompSize);
-                OutputDebugStringA(logBuf);
                 return false;
             }
 
@@ -116,8 +111,6 @@ namespace QuickView {
                 DeleteFileW(outPath.c_str());
                 hFile = CreateFileW(outPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
                 if (hFile == INVALID_HANDLE_VALUE) {
-                    sprintf_s(logBuf, "[QVX-Extract] CreateFileW failed for '%ls' (err=%lu)\n", outPath.c_str(), GetLastError());
-                    OutputDebugStringA(logBuf);
                     return false;
                 }
             }
@@ -130,8 +123,6 @@ namespace QuickView {
             CloseHandle(hFile);
 
             if (!writeOk || written != entry.uncompSize) {
-                sprintf_s(logBuf, "[QVX-Extract] WriteFile failed for '%ls' (written=%lu, expected=%u, err=%lu)\n", outPath.c_str(), written, entry.uncompSize, GetLastError());
-                OutputDebugStringA(logBuf);
                 DeleteFileW(outPath.c_str());
                 return false;
             }
@@ -142,8 +133,6 @@ namespace QuickView {
             }
         }
 
-        sprintf_s(logBuf, "[QVX-Extract] ExtractZipToDirectory completed successfully for '%ls'\n", zipPath.c_str());
-        OutputDebugStringA(logBuf);
         return true;
     }
 

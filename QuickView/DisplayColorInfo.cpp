@@ -18,6 +18,12 @@ static constexpr const char* CURRENT_MODULE = "DisplayColorInfo";
 #include <wrl/client.h>
 #include <wrl/wrappers/corewrappers.h>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 #pragma comment(lib, "runtimeobject.lib")
 #pragma comment(lib, "mscms.lib")
 
@@ -481,3 +487,8 @@ const wchar_t* ToString(ColorPrimaries value) {
 }
 
 } // namespace QuickView
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

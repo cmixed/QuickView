@@ -6,6 +6,12 @@
 #include "UndoManager.h"
 #include "Plugin/PluginHost.h"
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 extern AppConfig g_config;
 extern RuntimeConfig g_runtime;
 
@@ -242,3 +248,8 @@ void ShowGalleryContextMenu(HWND hwnd, POINT pt) {
 
     GeekContextMenu::ShowMenu(hwnd, pt.x, pt.y, {}, std::move(items));
 }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

@@ -150,13 +150,13 @@ set_target_properties(QuickView PROPERTIES LINK_FLAGS "${QUICKVIEW_LINK_FLAGS}")
 # Include paths
 target_include_directories(QuickView PRIVATE QuickView third_party/yyjson third_party/unrar-mini third_party/webview2)
 
-# Precompiled Headers (PCH) - CXX only to avoid conflict with C source (yyjson.c)
-target_precompile_headers(QuickView PRIVATE $<$<COMPILE_LANGUAGE:CXX>:pch.h>)
-
 # Disable PCH for specific files (as defined in .vcxproj)
 set_source_files_properties(QuickView/WuffsImpl.cpp PROPERTIES SKIP_PRECOMPILED_HEADERS ON)
 set_source_files_properties(QuickView/ImageLoaderSimd.cpp PROPERTIES SKIP_PRECOMPILED_HEADERS ON)
 set_source_files_properties(third_party/yyjson/yyjson.c PROPERTIES SKIP_PRECOMPILED_HEADERS ON)
+
+# Precompiled Headers (PCH) - CXX only to avoid conflict with C source (yyjson.c)
+target_precompile_headers(QuickView PRIVATE $<$<COMPILE_LANGUAGE:CXX>:pch.h>)
 
 # ============================================================================
 # Compiler & Linker Flags (Clang-CL Matrix)
@@ -207,7 +207,7 @@ if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 
     if(ENABLE_LTO)
         message(STATUS "Build Matrix: Enabling Full LTO (Release-LTO Pure Maximum Speed)")
-        # Pure peak performance flags (Pure /O2, no /Oscompromise)
+        # Pure peak performance flags for Hot-Path (Pure /O2, no compromise)
         target_compile_options(QuickView PRIVATE 
             /O2 /Gw /Gy /Zc:inline /GR- /fp:fast /GS- /EHs-c- /Z7
             /clang:-flto=full

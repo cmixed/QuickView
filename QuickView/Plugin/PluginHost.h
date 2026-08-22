@@ -87,26 +87,26 @@ public:
     std::string GetTargetPluginVersion() const { return QVX_OFFICIAL_SR_PLUGIN_VERSION; }
 
     // --- Super-Resolution Plugin Control ---
-    bool IsSrPluginEnabled() const noexcept { return m_enableSrPlugin; }
-    void SetSrPluginEnabled(bool enable) noexcept { m_enableSrPlugin = enable; }
+    bool IsSrPluginEnabled() const;
+    void SetSrPluginEnabled(bool enable);
 
-    const std::wstring& GetSrPluginPath() const noexcept { return m_srPluginPath; }
+    std::wstring GetSrPluginPath() const;
     void SetSrPluginPath(const std::wstring& path);
 
-    const std::string& GetSrModelId() const noexcept { return m_srModelId; }
+    std::string GetSrModelId() const;
     void SetSrModelId(const std::string& modelId);
 
-    bool IsSrAutoTriggerEnabled() const noexcept { return m_srAutoTrigger; }
-    void SetSrAutoTriggerEnabled(bool enable) noexcept { m_srAutoTrigger = enable; }
+    bool IsSrAutoTriggerEnabled() const;
+    void SetSrAutoTriggerEnabled(bool enable);
 
-    bool IsSrOpenInCompareMode() const noexcept { return m_srOpenInCompareMode; }
-    void SetSrOpenInCompareMode(bool enable) noexcept { m_srOpenInCompareMode = enable; }
+    bool IsSrOpenInCompareMode() const;
+    void SetSrOpenInCompareMode(bool enable);
 
-    bool IsSrPromptModelOnHotkey() const noexcept { return m_srPromptModelOnHotkey; }
-    void SetSrPromptModelOnHotkey(bool prompt) noexcept { m_srPromptModelOnHotkey = prompt; }
+    bool IsSrPromptModelOnHotkey() const;
+    void SetSrPromptModelOnHotkey(bool prompt);
 
-    int GetSrDebounceDelayMs() const noexcept { return m_srDebounceDelayMs; }
-    void SetSrDebounceDelayMs(int delayMs) noexcept { m_srDebounceDelayMs = delayMs; }
+    int GetSrDebounceDelayMs() const;
+    void SetSrDebounceDelayMs(int delayMs);
 
     // Multi-Language localization propagation to active plugin
     void SetLanguage(const std::string& langCode);
@@ -141,8 +141,8 @@ public:
     bool DownloadModel(const std::wstring& targetRelativePath, const std::string& downloadUrl, DownloadProgressCallback onProgress = nullptr, void* userData = nullptr);
     void OpenModelsDirectory() const;
 
-    const std::string& GetLastExecutionLog() const noexcept { return m_lastLog; }
-    double GetLastDurationMs() const noexcept { return m_lastDurationMs; }
+    std::string GetLastExecutionLog() const;
+    double GetLastDurationMs() const;
 
     // --- Hot-Path Execution ---
     // Fast check if SR plugin is ready to execute (probes file & initializes if needed)
@@ -166,16 +166,18 @@ public:
     // --- Remote Manifest & Market API ---
     using ManifestCallback = void (*)(const std::vector<RemotePluginItem>& items, void* userData);
     void FetchRemoteManifestAsync(ManifestCallback callback, void* userData = nullptr);
-    const std::vector<RemotePluginItem>& GetCachedRemoteManifest() const noexcept { return m_cachedManifest; }
-    bool IsFetchingManifest() const noexcept { return m_isFetchingManifest; }
+    std::vector<RemotePluginItem> GetCachedRemoteManifest() const;
+    bool IsFetchingManifest() const;
     void TriggerManifestFetch();
 
     using UINotifyCallback = void (*)(void* userData);
-    void SetUINotifyCallback(UINotifyCallback cb, void* userData = nullptr) noexcept {
+    void SetUINotifyCallback(UINotifyCallback cb, void* userData = nullptr) {
+        std::lock_guard<std::recursive_mutex> lock(m_srMutex);
         m_uiNotifyCb = cb;
         m_uiNotifyUserData = userData;
     }
-    void NotifyUI() const noexcept {
+    void NotifyUI() const {
+        std::lock_guard<std::recursive_mutex> lock(m_srMutex);
         if (m_uiNotifyCb) m_uiNotifyCb(m_uiNotifyUserData);
     }
 
@@ -197,7 +199,7 @@ private:
     void SyncDynamicParamsToContext();
 
     // Active Super-Resolution Plugin State
-    mutable std::mutex m_srMutex;
+    mutable std::recursive_mutex m_srMutex;
     HMODULE m_hSrModule = nullptr;
     const QVX_PluginHeader* m_srHeader = nullptr;
     const QVX_SR_VTable* m_srVTable = nullptr;

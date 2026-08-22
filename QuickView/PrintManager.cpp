@@ -8,6 +8,12 @@
 #include <algorithm>
 #include <wincodec.h>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 #pragma comment(lib, "winspool.lib")
 
 extern CRenderEngine* g_pRenderEngine;
@@ -805,3 +811,8 @@ std::expected<void, HRESULT> PrintManager::ExecutePrintJob(const PrintJobSetting
 }
 
 } // namespace QuickView
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

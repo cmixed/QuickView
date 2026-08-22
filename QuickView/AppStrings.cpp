@@ -3,6 +3,12 @@
 #include <windows.h> // For GetUserDefaultUILanguage
 #include "EditState.h"
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 extern AppConfig g_config;
 
 namespace AppStrings {
@@ -7364,3 +7370,7 @@ const wchar_t* Settings_Button_Download = L"Download";
 
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif
