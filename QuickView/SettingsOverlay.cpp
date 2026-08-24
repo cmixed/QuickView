@@ -1770,7 +1770,7 @@ void SettingsOverlay::BuildMenu() {
     tagCloudNormal.label = AppStrings::Settings_Label_ItemsInNormalMode;
     tagCloudNormal.type = OptionType::TagCloud;
     tagCloudNormal.pStrVal = &g_config.InfoPanelLiteItemsNormal;
-    tagCloudNormal.options = { L"Zoom", L"Progress", L"File", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
+    tagCloudNormal.options = { L"Zoom", L"Progress", L"File", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
     tagCloudNormal.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
     tabVisuals.items.push_back(tagCloudNormal);
 
@@ -1778,7 +1778,7 @@ void SettingsOverlay::BuildMenu() {
     tagCloudCompare.label = AppStrings::Settings_Label_ItemsInCompareMode;
     tagCloudCompare.type = OptionType::TagCloud;
     tagCloudCompare.pStrVal = &g_config.InfoPanelLiteItemsCompare;
-    tagCloudCompare.options = { L"Zoom", L"Progress", L"File", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
+    tagCloudCompare.options = { L"Zoom", L"Progress", L"File", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
     tagCloudCompare.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
     tabVisuals.items.push_back(tagCloudCompare);
 

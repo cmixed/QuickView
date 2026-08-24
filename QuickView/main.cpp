@@ -5372,8 +5372,8 @@ void LoadConfig() {
     g_config.InfoPanelLiteItemsCompare = bufLiteItems;
 
     // Normalize loaded CSV configs (de-duplicate, check against allowed tags, limit to kInfoPanelLiteMaxItems (8))
-    std::vector<std::wstring> allowedNormal = { L"Zoom", L"Progress", L"File", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
-    std::vector<std::wstring> allowedCompare = { L"Zoom", L"Progress", L"File", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
+    std::vector<std::wstring> allowedNormal = { L"Zoom", L"Progress", L"File", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
+    std::vector<std::wstring> allowedCompare = { L"Zoom", L"Progress", L"File", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
     g_config.InfoPanelLiteItemsNormal = QuickView::NormalizeCSV(g_config.InfoPanelLiteItemsNormal, allowedNormal, 8);
     g_config.InfoPanelLiteItemsCompare = QuickView::NormalizeCSV(g_config.InfoPanelLiteItemsCompare, allowedCompare, 8);
 
@@ -5403,6 +5403,14 @@ void LoadConfig() {
         };
         addRatingItem(g_config.InfoPanelFullItemsNormal);
         addRatingItem(g_config.InfoPanelFullItemsCompare);
+        // The lists are persisted here rather than left to the next SaveConfig:
+        // if the process were killed before that ran, the "migrated" flag would
+        // already be set while the lists still lacked the item, and the row
+        // would then stay hidden for good.
+        WritePrivateProfileStringW(L"Controls", L"InfoPanelFullItemsNormal",
+                                   g_config.InfoPanelFullItemsNormal.c_str(), iniPath.c_str());
+        WritePrivateProfileStringW(L"Controls", L"InfoPanelFullItemsCompare",
+                                   g_config.InfoPanelFullItemsCompare.c_str(), iniPath.c_str());
         WritePrivateProfileStringW(L"Controls", L"RatingItemMigrated", L"1", iniPath.c_str());
     }
 

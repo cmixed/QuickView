@@ -2578,6 +2578,17 @@ namespace {
             }
             return std::nullopt;
         }
+        else if (key == L"Rating") {
+            // Only a rated photo takes up room in the compact strip; the
+            // detailed panel is where an unrated one still shows its row.
+            const std::wstring p = path.empty() ? meta.SourcePath : path;
+            if (p.empty()) return std::nullopt;
+            const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(p));
+            if (!rating || rating->stars <= 0) return std::nullopt;
+            std::wstring stars;
+            for (int i = 0; i < rating->stars; ++i) stars += L"\u2605";
+            return stars;
+        }
         else if (key == L"Format") {
             std::wstring fmtStr;
             if (!meta.FormatDetails.empty()) {
@@ -2837,6 +2848,13 @@ std::wstring UIRenderer::BuildCompactInfoText(float maxFileW) const {
     CombineHash(stateHash, currentZoom);
     CombineHash(stateHash, g_imagePath);
     CombineHash(stateHash, g_config.InfoPanelLiteItemsNormal);
+    // [Ratings] Same reason as the full panel: the read lands asynchronously,
+    // so it must be part of the cache key or the strip would never update.
+    if (const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(g_imagePath))) {
+        CombineHash(stateHash, rating->stars);
+    } else {
+        CombineHash(stateHash, -1);
+    }
     CombineHash(stateHash, maxFileW);
     CombineHash(stateHash, g_currentMetadata.IsFullMetadataLoaded);
     CombineHash(stateHash, g_currentMetadata.HasSharpness);

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "AppStrings.h"
 #include "GalleryOverlay.h"
+#include "RatingStore.h"
 #include "Toolbar.h"
 #include "ThumbnailManager.h"
 #include "ImageTypes.h"
@@ -16,6 +17,7 @@ extern AppConfig g_config;
 extern HWND g_mainHwnd;
 extern bool IsLightThemeActive();
 extern float g_uiScale;
+extern RatingStore g_ratingStore;
 extern Toolbar g_toolbar;
 extern RuntimeConfig g_runtime;
 extern std::wstring& g_imagePath;
@@ -798,6 +800,42 @@ void GalleryOverlay::Render(ID2D1DeviceContext *pDC, const D2D1_SIZE_F &size,
                 m_pThumbMgr->QueueRequest(imgId, path.c_str(), prio);
             }
         }
+        // [Ratings] Filled stars in the opposite corner from the RAW badge.
+        // The read is queued lazily, riding the same visibility pass as the
+        // thumbnails; an unrated photo gets no chip, so a folder nobody has
+        // rated stays exactly as quiet as before.
+        {
+            const auto rating = g_ratingStore.TryGet(imgId);
+            if (!rating && !m_isZooming) {
+                const FileNavigator::PairedRaw* ratingRaw = m_pNav->GetPairedRaw(imgId);
+                g_ratingStore.QueueRead(imgId, path, ratingRaw ? ratingRaw->path : std::wstring());
+            }
+            if (rating && rating->stars > 0) {
+                std::wstring stars;
+                for (int sIdx = 0; sIdx < rating->stars; ++sIdx) stars += L"\u2605";
+
+                const float bw = (8.0f + 7.5f * (float)stars.length()) * g_uiScale;
+                const float bh = 15.0f * g_uiScale;
+                const float bm = 5.0f * g_uiScale;
+                const float br = 3.5f * g_uiScale;
+                D2D1_RECT_F badge = D2D1::RectF(cellRect.left + bm, cellRect.bottom - bm - bh,
+                                                cellRect.left + bm + bw, cellRect.bottom - bm);
+                m_brushBg->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.55f));
+                m_brushBg->SetOpacity(m_transitionProgress);
+                pDC->FillRoundedRectangle(D2D1::RoundedRect(badge, br, br), m_brushBg.Get());
+
+                D2D1_COLOR_F prevStarTxt = m_brushText->GetColor();
+                // Same white-on-dark chip as the RAW badge: the star shape
+                // already carries the meaning, so a coloured one would only
+                // shout across a wall of thumbnails.
+                m_brushText->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+                m_brushText->SetOpacity(m_transitionProgress * 0.95f);
+                pDC->DrawText(stars.c_str(), (UINT32)stars.length(), m_textFormatBadge.Get(), badge, m_brushText.Get());
+                m_brushText->SetColor(prevStarTxt);
+                m_brushText->SetOpacity(1.0f);
+            }
+        }
+
         // [RAW+JPEG Pairing] "+CR3"-style badge: this item carries a hidden
         // RAW. Theme-independent dark chip so it reads on any photo content.
         if (const FileNavigator::PairedRaw* pairedRaw = m_pNav->GetPairedRaw(imgId)) {
