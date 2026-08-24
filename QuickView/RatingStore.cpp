@@ -121,7 +121,10 @@ std::optional<QuickView::Rating::Resolved> RatingStore::TryGet(ImageID id) const
 
 void RatingStore::QueueRead(ImageID id, const std::wstring& renderedPath,
                             const std::wstring& rawPath) {
-    if (!m_running.load() || renderedPath.empty()) return;
+    // Deliberately not gated on m_running: the first image can be navigated to
+    // before Initialize runs, and such a request must still be honoured once
+    // the worker starts rather than being dropped.
+    if (renderedPath.empty()) return;
     {
         std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
         if (m_cache.find(id) != m_cache.end()) return; // already known

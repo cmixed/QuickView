@@ -1807,7 +1807,7 @@ void SettingsOverlay::BuildMenu() {
     tagCloudFullNormal.label = AppStrings::Settings_Label_ItemsInNormalMode;
     tagCloudFullNormal.type = OptionType::TagCloud;
     tagCloudFullNormal.pStrVal = &g_config.InfoPanelFullItemsNormal;
-    tagCloudFullNormal.options = { L"Histogram", L"Position", L"File", L"RAW", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
+    tagCloudFullNormal.options = { L"Histogram", L"Position", L"File", L"RAW", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
     tagCloudFullNormal.tagCloudNoLimit = true;
     tagCloudFullNormal.tagCloudNoSort = true;
     tagCloudFullNormal.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
@@ -1817,7 +1817,7 @@ void SettingsOverlay::BuildMenu() {
     tagCloudFullCompare.label = AppStrings::Settings_Label_ItemsInCompareMode;
     tagCloudFullCompare.type = OptionType::TagCloud;
     tagCloudFullCompare.pStrVal = &g_config.InfoPanelFullItemsCompare;
-    tagCloudFullCompare.options = { L"Histogram", L"File", L"RAW", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
+    tagCloudFullCompare.options = { L"Histogram", L"File", L"RAW", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
     tagCloudFullCompare.tagCloudNoLimit = true;
     tagCloudFullCompare.tagCloudNoSort = true;
     tagCloudFullCompare.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };

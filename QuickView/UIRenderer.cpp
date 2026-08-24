@@ -1,4 +1,5 @@
 #include "UIRenderer.h"
+#include "RatingStore.h"
 #include "StringUtils.h"
 #include "AppStrings.h"
 #include <Shlwapi.h>
@@ -45,6 +46,7 @@ extern ImageEngine* g_pImageEngine; // [v3.1] Accessor (renamed from g_imageEngi
 
 #include "FileNavigator.h"
 extern FileNavigator& g_navigator;
+extern RatingStore g_ratingStore;
 
 // Dialog rendering is handled by DialogController
 
@@ -2928,6 +2930,27 @@ std::vector<InfoRow> UIRenderer::BuildGridRows(const CImageLoader::ImageMetadata
         }
     }
     
+    // [Ratings] Star rating, read off the decode pipeline by RatingStore; the
+    // row only appears once that background read has landed. Icon: glowing
+    // star is taken by HDR, so the plain star (U+2B50) marks this row.
+    // Shown as soon as the read has landed, unrated included, so that enabling
+    // the item does not make the row appear and vanish from photo to photo.
+    if (const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(imagePath))) {
+        std::wstring stars;
+        for (int i = 0; i < QuickView::Rating::MAX_STARS; ++i) {
+            stars += (i < rating->stars) ? L"\u2605" : L"\u2606";
+        }
+        // The hot path stays silent about a disagreement between the two files
+        // of a pair; the full panel is where it is spelled out.
+        std::wstring detail;
+        if (rating->conflict) {
+            detail = L"(sidecar; JPG has " + std::to_wstring(rating->otherStars) + L")";
+        }
+        rows.push_back({L"\u2B50", L"Rating", stars, detail,
+                        stars + (detail.empty() ? L"" : L" " + detail),
+                        TruncateMode::None, false});
+    }
+
     // [RAW+JPEG Pairing] Hidden RAW sibling of this photo. Icon: link
     // (U+1F517) = "file paired with this photo"; the film-frames icon is
     // already taken by the Format row.
@@ -3508,6 +3531,16 @@ void UIRenderer::BuildInfoGrid() {
     CombineHash(stateHash, g_currentMetadata.HasSharpness);
     CombineHash(stateHash, g_currentMetadata.HasEntropy);
     CombineHash(stateHash, hasHistR);
+    // [Ratings] The background read lands after the panel has already been
+    // built for this photo, so the rating has to take part in the hash --
+    // otherwise the cached rows would never pick the star row up.
+    if (const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(g_imagePath))) {
+        CombineHash(stateHash, rating->stars);
+        CombineHash(stateHash, rating->conflict);
+        CombineHash(stateHash, (int)rating->source);
+    } else {
+        CombineHash(stateHash, -1); // not read yet
+    }
     const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
     CombineHash(stateHash, editState.HasCrop);
     if (editState.HasCrop) {

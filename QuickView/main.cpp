@@ -105,6 +105,7 @@ using namespace Microsoft::WRL;
     // Globals
 #include "FileNavigator.h"
 #include "GalleryOverlay.h"
+#include "RatingStore.h"
 #include "Toolbar.h"
 #include "SettingsOverlay.h"
 #include "HelpOverlay.h"
@@ -517,6 +518,9 @@ static std::wstring g_pairViewRenderedPath;
 static bool g_pairCompareSession = false;
 static void ReturnToPairFaceAfterCompareExit(HWND hwnd);
 static void ArmPairRawFullDecode(const std::wstring& renderedPath, const std::wstring& rawPath);
+// [Ratings] Queue the background rating read for one photo, resolving a folded
+// pair so that both of its faces end up with the same answer.
+static void QueueRatingRead(const std::wstring& path);
 // [RAW+JPEG Pairing] Delete handling for a folded pair (three-way choice) and
 // the shared refresh of the not-per-frame pair indicators (title + toolbar).
 static void HandlePairedDelete(HWND hwnd, const std::wstring& renderedPath, const std::wstring& rawPath, bool isCurrentViewing);
@@ -546,6 +550,8 @@ static void ToggleSlideshowPlayback(HWND hwnd) {
 ViewState g_preservedViewState;
 int g_renderExifOrientation = 1; // Exif orientation baked into the bitmap surface
 static ThumbnailManager g_thumbMgr;
+// [Ratings] Isolated from the decode pipeline: its own cache and worker.
+RatingStore g_ratingStore;
 GalleryOverlay g_gallery;  // Non-static for extern access from UIRenderer
 Toolbar g_toolbar;  // Non-static for extern access from UIRenderer
 SettingsOverlay g_settingsOverlay;  // Non-static for extern access from UIRenderer
@@ -5372,18 +5378,33 @@ void LoadConfig() {
     g_config.InfoPanelLiteItemsCompare = QuickView::NormalizeCSV(g_config.InfoPanelLiteItemsCompare, allowedCompare, 8);
 
     wchar_t bufFullItems[1024];
-    GetPrivateProfileStringW(L"Controls", L"InfoPanelFullItemsNormal", L"Histogram,File,Position,RAW,Size,Disk,Date,Camera,Exp,Lens,Focal,Profile,HDR,Flash,W.Bal,Meter,Prog,Program,Format,GPS", bufFullItems, 1024, iniPath.c_str());
+    GetPrivateProfileStringW(L"Controls", L"InfoPanelFullItemsNormal", L"Histogram,File,Position,RAW,Rating,Size,Disk,Date,Camera,Exp,Lens,Focal,Profile,HDR,Flash,W.Bal,Meter,Prog,Program,Format,GPS", bufFullItems, 1024, iniPath.c_str());
     g_config.InfoPanelFullItemsNormal = bufFullItems;
     
-    GetPrivateProfileStringW(L"Controls", L"InfoPanelFullItemsCompare", L"Histogram,File,RAW,Size,Disk,Date,Camera,Exp,Lens,Focal,Profile,HDR,Flash,W.Bal,Meter,Prog,Program,Format,Sharp,Ent,BPP,GPS", bufFullItems, 1024, iniPath.c_str());
+    GetPrivateProfileStringW(L"Controls", L"InfoPanelFullItemsCompare", L"Histogram,File,RAW,Rating,Size,Disk,Date,Camera,Exp,Lens,Focal,Profile,HDR,Flash,W.Bal,Meter,Prog,Program,Format,Sharp,Ent,BPP,GPS", bufFullItems, 1024, iniPath.c_str());
     g_config.InfoPanelFullItemsCompare = bufFullItems;
     
     g_config.InfoPanelScale = std::clamp(static_cast<int>(GetPrivateProfileIntW(L"Controls", L"InfoPanelScale", 0, iniPath.c_str())), 0, 5);
     
-    std::vector<std::wstring> allowedFullNormal = { L"Histogram", L"File", L"Position", L"RAW", L"Size", L"Disk", L"Date", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"Format", L"Sharp", L"Ent", L"BPP", L"GPS" };
-    std::vector<std::wstring> allowedFullCompare = { L"Histogram", L"File", L"RAW", L"Size", L"Disk", L"Date", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"Format", L"Sharp", L"Ent", L"BPP" };
+    std::vector<std::wstring> allowedFullNormal = { L"Histogram", L"File", L"Position", L"RAW", L"Rating", L"Size", L"Disk", L"Date", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"Format", L"Sharp", L"Ent", L"BPP", L"GPS" };
+    std::vector<std::wstring> allowedFullCompare = { L"Histogram", L"File", L"RAW", L"Rating", L"Size", L"Disk", L"Date", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"Format", L"Sharp", L"Ent", L"BPP" };
     g_config.InfoPanelFullItemsNormal = QuickView::NormalizeCSV(g_config.InfoPanelFullItemsNormal, allowedFullNormal, 99);
     g_config.InfoPanelFullItemsCompare = QuickView::NormalizeCSV(g_config.InfoPanelFullItemsCompare, allowedFullCompare, 99);
+
+    // [Ratings] One-shot migration. An ini written before the Rating row
+    // existed holds a list that predates it, and since the list is a
+    // whitelist the new row would stay invisible forever. Add it once and
+    // remember having done so, leaving a later removal by the user alone.
+    if (GetPrivateProfileIntW(L"Controls", L"RatingItemMigrated", 0, iniPath.c_str()) == 0) {
+        auto addRatingItem = [](std::wstring& csv) {
+            if ((L"," + csv + L",").find(L",Rating,") != std::wstring::npos) return;
+            if (!csv.empty()) csv += L",";
+            csv += L"Rating";
+        };
+        addRatingItem(g_config.InfoPanelFullItemsNormal);
+        addRatingItem(g_config.InfoPanelFullItemsCompare);
+        WritePrivateProfileStringW(L"Controls", L"RatingItemMigrated", L"1", iniPath.c_str());
+    }
 
     wchar_t bufSeparator[64];
     GetPrivateProfileStringW(L"Controls", L"InfoPanelLiteSeparator", L"\" \u00b7 \"", bufSeparator, 64, iniPath.c_str());
@@ -7555,6 +7576,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     
     // Init Gallery
     g_thumbMgr.Initialize(hwnd, g_imageLoader.get());
+    g_ratingStore.Initialize(hwnd);
     g_gallery.Initialize(&g_thumbMgr, &GetPaneContext(PaneSlot::Primary).navigator);
     g_settingsOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
     g_helpOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
@@ -9039,6 +9061,7 @@ case WM_DESTROY: {
                 g_webContentHost.reset();
             }
             g_thumbMgr.Shutdown();
+            g_ratingStore.Shutdown();
             QuickView::WebViewThumbService::Instance().Shutdown();
             PostQuitMessage(0);
             return 0;
@@ -10294,11 +10317,27 @@ SKIP_EDGE_NAV:;
         }
         return 0;
 
+    case WM_RATING_READY:
+        // [Ratings] A background read filled the cache; refresh what shows it.
+        // The info panel lives on the static layer, so refreshing only the
+        // dynamic one would leave the star row unpainted until something else
+        // happened to dirty it.
+        RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
+        if (g_gallery.IsVisible()) RequestRepaint(PaintLayer::Gallery);
+        return 0;
+
     case WM_APP + 4: // WM_DEFERRED_REPAINT
         ::InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
 
     case WM_NAVIGATOR_DIR_CHANGED: {
+        // [Ratings] The folder changed on disk, so cached ratings may be stale
+        // (an external tool can rewrite a sidecar at any time). The watcher
+        // also fires right after a folder is opened, so the photo on screen
+        // has to be queued again immediately -- otherwise its rating would
+        // stay blank until the user navigated somewhere else.
+        g_ratingStore.Clear();
+        QueueRatingRead(GetPaneContext(PaneSlot::Primary).path);
         auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
         const size_t oldCount = nav.Count();
         const int oldIndex = nav.Index();
@@ -15006,6 +15045,8 @@ void StartNavigation(HWND hwnd, std::wstring path, [[maybe_unused]] bool showOSD
             || (!g_pairViewRawPath.empty() && path == g_pairViewRawPath);
         g_toolbar.SetRawState(QuickView::IsRawPath(path) || navHasPairedRaw,
                               g_runtime.ForceRawDecode, isPairedView);
+
+        QueueRatingRead(path);
     }
     if (IsCompareModeActive()) {
         RefreshCompareRawUI(hwnd);
@@ -16303,6 +16344,25 @@ static void ReturnToPairFaceAfterCompareExit(HWND hwnd) {
 // the current primary image. (The gallery badge, info panel and EXIF row are
 // per-frame and only need a repaint.) Compare mode routes through the existing
 // RefreshCompareRawUI instead.
+static void QueueRatingRead(const std::wstring& path) {
+    if (path.empty()) return;
+    const auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
+
+    // A folded pair is read as one photo: the rendered file carries the
+    // in-file rating and the RAW's sidecar the authoritative one, so whichever
+    // face is on screen resolves to the same stars.
+    std::wstring rendered = path;
+    std::wstring raw;
+    if (const auto* pairedRaw = nav.GetPairedRaw(FileNavigator::PathToImageID(path))) {
+        raw = pairedRaw->path;
+    } else if (!g_pairViewRawPath.empty() && path == g_pairViewRawPath &&
+               !g_pairViewRenderedPath.empty()) {
+        rendered = g_pairViewRenderedPath; // showing the RAW face of a pair
+        raw = path;
+    }
+    g_ratingStore.QueueRead(FileNavigator::PathToImageID(path), rendered, raw);
+}
+
 static void RefreshCurrentPairIndicators(HWND hwnd) {
     auto& pane = GetPaneContext(PaneSlot::Primary);
     const std::wstring cur = pane.path;
