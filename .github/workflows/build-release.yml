@@ -149,15 +149,26 @@ jobs:
           path: final-dist/*
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            final-dist/*.zip
-            final-dist/*.exe
-            final-dist/*.json
-          draft: true
-          generate_release_notes: true
-          fail_on_unmatched_files: false
+        shell: pwsh
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          Write-Host "[CI-Release] Uploading assets for tag: $tag"
+          $files = Get-ChildItem -Path final-dist -File | ForEach-Object { $_.FullName }
+          Write-Host "[CI-Release] Found $($files.Count) assets to upload:"
+          $files | ForEach-Object { Write-Host "  -> $_" }
+          
+          # Check if draft release already exists
+          gh release view "$tag" > $null 2>&1
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "[CI-Release] Creating draft release for $tag..."
+              gh release create "$tag" --draft --title "QuickView $tag" --generate-notes
+          }
+          
+          # Upload / Overwrite all files to the release
+          Write-Host "[CI-Release] Uploading all assets with --clobber..."
+          gh release upload "$tag" $files --clobber
+          Write-Host "[CI-Release] Release upload finished successfully!"
