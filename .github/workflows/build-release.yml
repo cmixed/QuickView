@@ -88,13 +88,20 @@ jobs:
 
           # Package standalone QVX plugin artifact (sr_ncnn_vulkan + models)
           $pluginDir = "${{ github.workspace }}/out/build/${{ matrix.preset }}/plugins/sr/sr_ncnn_vulkan"
+          Write-Host "[CI-Package] Checking plugin directory: $pluginDir"
           if (Test-Path "$pluginDir/sr_ncnn_vulkan.qvx") {
               $pluginZip = "Release/dist/sr_ncnn_vulkan_${archUpper}.zip"
+              Write-Host "[CI-Package] Packaging plugin $pluginDir -> $pluginZip"
               Compress-Archive -Path "$pluginDir/*" -DestinationPath $pluginZip -Force
               if ("${{ matrix.platform }}" -eq "x64") {
                   Copy-Item -Path "${{ github.workspace }}/plugins/plugins_manifest.json" -Destination "Release/dist/plugins_manifest.json" -Force
               }
+          } else {
+              Write-Warning "[CI-Package] Warning: sr_ncnn_vulkan.qvx not found at $pluginDir!"
           }
+
+          Write-Host "[CI-Package] Staging contents in Release/dist:"
+          Get-ChildItem "Release/dist" | Format-Table Name, Length
 
       - name: Build Inno Setup Installer
         shell: pwsh
@@ -129,6 +136,12 @@ jobs:
           path: final-dist
           merge-multiple: true
 
+      - name: List Release Assets
+        shell: pwsh
+        run: |
+          Write-Host "[CI-Release] Final release assets in final-dist:"
+          Get-ChildItem -Path final-dist -Recurse | Format-Table Name, Length, FullName
+
       - name: Upload Consolidated Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -139,8 +152,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: final-dist/*
+          files: |
+            final-dist/*.zip
+            final-dist/*.exe
+            final-dist/*.json
           draft: true
           generate_release_notes: true
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

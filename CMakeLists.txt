@@ -379,7 +379,11 @@ target_link_libraries(QuickView PRIVATE
 # ============================================================================
 # Super-Resolution Plugins (QVX)
 # ============================================================================
-set(NCNN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ncnn/x64")
+set(NCNN_ARCH "x64")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^[Aa][Rr][Mm]64$" OR VCPKG_TARGET_TRIPLET MATCHES "arm64" OR VCPKG_TARGET_ARCHITECTURE STREQUAL "arm64" OR CMAKE_GENERATOR_PLATFORM MATCHES "ARM64" OR CMAKE_CXX_COMPILER_TARGET MATCHES "arm64")
+    set(NCNN_ARCH "arm64")
+endif()
+set(NCNN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ncnn/${NCNN_ARCH}")
 if(EXISTS "${NCNN_DIR}/include/ncnn")
     add_library(sr_ncnn_vulkan SHARED plugins/sr/sr_ncnn_vulkan/sr_ncnn_vulkan_engine.cpp)
     set_target_properties(sr_ncnn_vulkan PROPERTIES
