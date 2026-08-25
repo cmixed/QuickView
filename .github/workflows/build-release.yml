@@ -129,6 +129,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -156,19 +159,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ github.ref_name }}"
-          Write-Host "[CI-Release] Uploading assets for tag: $tag"
+          $repo = "${{ github.repository }}"
+          Write-Host "[CI-Release] Uploading assets for repo: $repo, tag: $tag"
           $files = Get-ChildItem -Path final-dist -File | ForEach-Object { $_.FullName }
           Write-Host "[CI-Release] Found $($files.Count) assets to upload:"
           $files | ForEach-Object { Write-Host "  -> $_" }
           
           # Check if draft release already exists
-          gh release view "$tag" > $null 2>&1
+          gh release view "$tag" --repo "$repo" > $null 2>&1
           if ($LASTEXITCODE -ne 0) {
               Write-Host "[CI-Release] Creating draft release for $tag..."
-              gh release create "$tag" --draft --title "QuickView $tag" --generate-notes
+              gh release create "$tag" --repo "$repo" --draft --title "QuickView $tag" --generate-notes
           }
           
           # Upload / Overwrite all files to the release
           Write-Host "[CI-Release] Uploading all assets with --clobber..."
-          gh release upload "$tag" $files --clobber
+          gh release upload "$tag" $files --repo "$repo" --clobber
           Write-Host "[CI-Release] Release upload finished successfully!"
