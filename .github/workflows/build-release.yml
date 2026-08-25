@@ -93,9 +93,6 @@ jobs:
               $pluginZip = "Release/dist/sr_ncnn_vulkan_${archUpper}.zip"
               Write-Host "[CI-Package] Packaging plugin $pluginDir -> $pluginZip"
               Compress-Archive -Path "$pluginDir/*" -DestinationPath $pluginZip -Force
-              if ("${{ matrix.platform }}" -eq "x64") {
-                  Copy-Item -Path "${{ github.workspace }}/plugins/plugins_manifest.json" -Destination "Release/dist/plugins_manifest.json" -Force
-              }
           } else {
               Write-Warning "[CI-Package] Warning: sr_ncnn_vulkan.qvx not found at $pluginDir!"
           }
