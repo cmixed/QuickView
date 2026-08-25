@@ -1,18 +1,18 @@
 {
   "schema_version": "2.0",
-  "updated_at": "2026-08-21",
+  "updated_at": "2026-08-24",
   "plugins": [
     {
-      "id": "com.quickview.sr.realesrgan",
-      "name": "Real-ESRGAN Neural Upscaler",
+      "id": "com.quickview.sr.ncnn_vulkan",
+      "name": "Real-ESRGAN NCNN Vulkan",
       "version": "0.1.0",
-      "author": "QuickView Team",
+      "author": "QuickView Core Team",
       "interface": "super_resolution",
-      "description": "Deep residual neural super-resolution engine (D3D11 GPU 0-copy acceleration with NCNN pipeline).",
-      "download_url": "https://justnullname.github.io/QuickView/plugins/sr_realesrgan_d3d11.zip",
-      "file_name": "sr_realesrgan_d3d11.zip",
-      "file_size": 2280850,
-      "min_app_version": "2.0.0"
+      "description": "High-Performance In-Process Vulkan Compute Neural Super-Resolution Engine.",
+      "download_url": "https://justnullname.github.io/QuickView/plugins/sr_ncnn_vulkan.zip",
+      "file_name": "sr_ncnn_vulkan.zip",
+      "file_size": 2600000,
+      "min_app_version": "0.1.0"
     }
   ]
 }

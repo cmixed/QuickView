@@ -63,7 +63,7 @@ private:
 // Constexpr Parameter Manifest Helpers
 constexpr inline QVX_ParamDesc MakeSliderParam(
     const char* id, const char* label, const char* tooltip,
-    float min_val, float max_val, float step, float default_val, const char* format_str = "%.2f"
+    float min_val, float max_val, float default_val, float step = 0.01f, const char* format_str = "%.2f"
 ) noexcept {
     QVX_ParamDesc d{};
     d.struct_size = sizeof(QVX_ParamDesc);
@@ -94,7 +94,7 @@ constexpr inline QVX_ParamDesc MakeToggleParam(
 
 constexpr inline QVX_ParamDesc MakeIntSliderParam(
     const char* id, const char* label, const char* tooltip,
-    int32_t min_val, int32_t max_val, int32_t step, int32_t default_val, const char* format_str = "%d"
+    int32_t min_val, int32_t max_val, int32_t default_val, int32_t step = 1, const char* format_str = "%d"
 ) noexcept {
     QVX_ParamDesc d{};
     d.struct_size = sizeof(QVX_ParamDesc);
@@ -108,6 +108,20 @@ constexpr inline QVX_ParamDesc MakeIntSliderParam(
     d.int_param.default_val = default_val;
     d.int_param.format_str = format_str;
     return d;
+}
+
+constexpr inline QVX_ParamDesc MakeFloatSliderParam(
+    const char* id, const char* label, const char* tooltip,
+    float min_val, float max_val, float default_val, float step = 0.01f, const char* format_str = "%.2f"
+) noexcept {
+    return MakeSliderParam(id, label, tooltip, min_val, max_val, default_val, step, format_str);
+}
+
+constexpr inline QVX_ParamDesc MakeFloatParam(
+    const char* id, const char* label, const char* tooltip,
+    float min_val, float max_val, float default_val, float step = 0.01f, const char* format_str = "%.2f"
+) noexcept {
+    return MakeSliderParam(id, label, tooltip, min_val, max_val, default_val, step, format_str);
 }
 
 constexpr inline QVX_ParamDesc MakeEnumParam(

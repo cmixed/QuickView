@@ -13,7 +13,7 @@
 #include <windows.h>
 #include <d3d11.h>
 
-#define QVX_SR_INTERFACE_VERSION 0x00000100 // 0.1.0
+#define QVX_SR_INTERFACE_VERSION 0x00020000 // 2.0.0
 
 // Official Built-in / Target Super-Resolution Plugin Version Handshake
 #define QVX_OFFICIAL_SR_PLUGIN_VERSION "0.1.0"
@@ -22,6 +22,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Generic progress callback
+// @param progress: Normalized progress ratio in range [0.0f, 1.0f]
+typedef void (*QVX_ProgressCallback)(float progress, void* progress_user_data);
 
 // Standard QVX Return Codes (HRESULT-compatible)
 #define QVX_OK                 ((int32_t)0x00000000L) // S_OK
@@ -35,15 +39,15 @@ extern "C" {
 // Super-Resolution Model Metadata Description
 typedef struct QVX_SR_ModelInfo {
     uint32_t struct_size;         // sizeof(QVX_SR_ModelInfo)
-    const char* model_id;         // e.g. "realesr-animevideov3-x2"
-    const char* display_name;     // e.g. "Anime Fast 2x" (Localizable UTF-8)
-    const char* description;      // e.g. "Ultra-fast anime & illustration upscaler, lightweight VRAM" (Localizable UTF-8)
+    const char* model_id;         // e.g. "realesr-animevideov3-auto"
+    const char* display_name;     // e.g. "Anime Fast (Auto 2x/3x/4x)" (Localizable UTF-8)
+    const char* description;      // e.g. "Ultra-fast anime & illustration upscaler" (Localizable UTF-8)
     float scale;                  // e.g. 2.0f, 4.0f
     bool is_hdr_capable;          // Supports FP16 / HDR input & output
     bool is_installed;            // True if model file/weights ready locally
     uint64_t file_size_bytes;     // Size in bytes, 0 if embedded
     const char* download_url;     // Direct download URL if not installed
-    uint32_t preferred_tile_size; // Recommended tile dimension (e.g. 512, 0 = full frame)
+    uint32_t preferred_tile_size; // Recommended tile dimension (e.g. 512, 0 = auto)
     uint32_t default_debounce_ms; // Recommended debounce delay in ms
     bool default_compare_mode;    // Recommend compare mode by default
 } QVX_SR_ModelInfo;
@@ -63,6 +67,10 @@ typedef struct QVX_SR_ExecuteParams {
     // Optional visual tuning parameters (0.0f = engine default)
     float sharpness;              // Contrast-adaptive sharpening strength [0.0 - 1.0]
     float denoise;                // Pre-denoise strength [0.0 - 1.0]
+
+    // Optional progress callback: Invoked upon completing each tile chunk
+    QVX_ProgressCallback on_progress;
+    void* progress_user_data;
 } QVX_SR_ExecuteParams;
 
 // Opaque context handle holding model weights, GPU pipeline state, and scratch buffers

@@ -1,5 +1,6 @@
 #include "PluginHost.h"
 #include "pch.h"
+#include "AppStrings.h"
 #include "ArchiveVFS.h"
 #include "yyjson.h"
 #include <cwchar>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <thread>
 #include <winhttp.h>
+#include <wincrypt.h>
 #include <shlwapi.h>
 #include <shellapi.h>
 
@@ -22,46 +24,175 @@ namespace QuickView {
 typedef bool (*QVX_InitFn)(const QVX_PluginHeader**);
 typedef void (*QVX_ShutdownFn)(void);
 
-bool PluginHost::IsSrPluginEnabled() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_enableSrPlugin; }
-void PluginHost::SetSrPluginEnabled(bool enable) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_enableSrPlugin = enable; }
+bool PluginHost::IsSrPluginEnabled() const { return m_enableSrPlugin.load(std::memory_order_relaxed); }
+void PluginHost::SetSrPluginEnabled(bool enable) { m_enableSrPlugin.store(enable, std::memory_order_relaxed); }
 std::wstring PluginHost::GetSrPluginPath() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srPluginPath; }
 std::string PluginHost::GetSrModelId() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srModelId; }
-bool PluginHost::IsSrAutoTriggerEnabled() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srAutoTrigger; }
-void PluginHost::SetSrAutoTriggerEnabled(bool enable) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_srAutoTrigger = enable; }
-bool PluginHost::IsSrOpenInCompareMode() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srOpenInCompareMode; }
-void PluginHost::SetSrOpenInCompareMode(bool enable) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_srOpenInCompareMode = enable; }
-bool PluginHost::IsSrPromptModelOnHotkey() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srPromptModelOnHotkey; }
-void PluginHost::SetSrPromptModelOnHotkey(bool prompt) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_srPromptModelOnHotkey = prompt; }
-int PluginHost::GetSrDebounceDelayMs() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_srDebounceDelayMs; }
-void PluginHost::SetSrDebounceDelayMs(int delayMs) { std::lock_guard<std::recursive_mutex> lock(m_srMutex); m_srDebounceDelayMs = std::clamp(delayMs, 0, 5000); }
+bool PluginHost::IsSrAutoTriggerEnabled() const { return m_srAutoTrigger.load(std::memory_order_relaxed); }
+void PluginHost::SetSrAutoTriggerEnabled(bool enable) { m_srAutoTrigger.store(enable, std::memory_order_relaxed); }
+bool PluginHost::IsSrOpenInCompareMode() const { return m_srOpenInCompareMode.load(std::memory_order_relaxed); }
+void PluginHost::SetSrOpenInCompareMode(bool enable) { m_srOpenInCompareMode.store(enable, std::memory_order_relaxed); }
+bool PluginHost::IsSrPromptModelOnHotkey() const { return m_srPromptModelOnHotkey.load(std::memory_order_relaxed); }
+void PluginHost::SetSrPromptModelOnHotkey(bool prompt) { m_srPromptModelOnHotkey.store(prompt, std::memory_order_relaxed); }
+int PluginHost::GetSrDebounceDelayMs() const { return m_srDebounceDelayMs.load(std::memory_order_relaxed); }
+void PluginHost::SetSrDebounceDelayMs(int delayMs) { m_srDebounceDelayMs.store(std::clamp(delayMs, 0, 5000), std::memory_order_relaxed); }
+float PluginHost::GetSrAutoTriggerMaxSourceMp() const { return m_srAutoTriggerMaxSourceMp.load(std::memory_order_relaxed); }
+void PluginHost::SetSrAutoTriggerMaxSourceMp(float maxMp) { m_srAutoTriggerMaxSourceMp.store(std::clamp(maxMp, 0.1f, 16.0f), std::memory_order_relaxed); }
 std::string PluginHost::GetLastExecutionLog() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_lastLog; }
-double PluginHost::GetLastDurationMs() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_lastDurationMs; }
-std::vector<RemotePluginItem> PluginHost::GetCachedRemoteManifest() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_cachedManifest; }
-bool PluginHost::IsFetchingManifest() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_isFetchingManifest; }
+double PluginHost::GetLastDurationMs() const { return m_lastDurationMs.load(std::memory_order_relaxed); }
+bool PluginHost::IsFetchingManifest() const { return m_isFetchingManifest.load(std::memory_order_relaxed); }
 
 void PluginHost::SetSrPluginPath(const std::wstring& path) {
     std::lock_guard<std::recursive_mutex> lock(m_srMutex);
-    if (m_srPluginPath != path) {
-        m_srPluginPath = path;
-        UnloadSrPlugin();
-        EnsureSrModuleLoaded();
+    m_srPluginPath = path;
+    UnloadSrPlugin();
+    EnsureSrModuleLoaded();
+}
+
+std::string PluginHost::CalculateSHA256(const std::wstring& filePath) {
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    std::string hashStr = "";
+
+    if (!CryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
+        return "";
     }
+
+    if (!CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash)) {
+        CryptReleaseContext(hProv, 0);
+        return "";
+    }
+
+    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        constexpr DWORD BUFFER_SIZE = 64 * 1024;
+        std::vector<BYTE> buffer(BUFFER_SIZE);
+        DWORD bytesRead = 0;
+
+        while (ReadFile(hFile, buffer.data(), BUFFER_SIZE, &bytesRead, NULL) && bytesRead > 0) {
+            if (!CryptHashData(hHash, buffer.data(), bytesRead, 0)) {
+                break;
+            }
+        }
+        CloseHandle(hFile);
+
+        BYTE rgbHash[32] = { 0 };
+        DWORD cbHash = 32;
+        if (CryptGetHashParam(hHash, HP_HASHVAL, rgbHash, &cbHash, 0)) {
+            char hexBuf[65] = { 0 };
+            for (DWORD i = 0; i < cbHash; ++i) {
+                sprintf_s(hexBuf + i * 2, 3, "%02x", rgbHash[i]);
+            }
+            hashStr = hexBuf;
+        }
+    }
+
+    CryptDestroyHash(hHash);
+    CryptReleaseContext(hProv, 0);
+    return hashStr;
+}
+
+std::vector<RemotePluginItem> PluginHost::GetCachedRemoteManifest() const {
+    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
+    if (!m_cachedManifest.empty()) {
+        return m_cachedManifest;
+    }
+
+    // Default built-in manifest fallback to ensure offline / initial launch availability
+    std::vector<RemotePluginItem> defaultList;
+    defaultList.push_back({
+        "com.quickview.sr.ncnn_vulkan",
+        "Real-ESRGAN NCNN Vulkan",
+        "0.1.0",
+        "QuickView Core Team",
+        "SuperResolution",
+        "High-Performance In-Process Vulkan Compute Neural Super-Resolution Engine (0-Copy, 0 Disk I/O).",
+        "https://justnullname.github.io/QuickView/plugins/sr_ncnn_vulkan.zip",
+        "sr_ncnn_vulkan.zip",
+        2600000,
+        "0.1.0",
+        ""
+    });
+    return defaultList;
+}
+
+std::wstring PluginHost::ResolveEffectiveSrPluginPath(std::wstring* pOutRelativeForIni) const {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    PathRemoveFileSpecW(exePath);
+
+    std::wstring configuredPath = m_srPluginPath;
+    if (configuredPath.empty()) {
+        configuredPath = L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx";
+    }
+
+    // Candidate 1: Try configured path directly (if relative, anchor to exePath)
+    std::wstring absConfigured = configuredPath;
+    if (PathIsRelativeW(absConfigured.c_str())) {
+        wchar_t combined[MAX_PATH];
+        PathCombineW(combined, exePath, configuredPath.c_str());
+        absConfigured = combined;
+    }
+    DWORD attrs = GetFileAttributesW(absConfigured.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        if (pOutRelativeForIni) {
+            if (_wcsnicmp(absConfigured.c_str(), exePath, wcslen(exePath)) == 0) {
+                size_t offset = wcslen(exePath);
+                if (absConfigured[offset] == L'\\' || absConfigured[offset] == L'/') offset++;
+                *pOutRelativeForIni = absConfigured.substr(offset);
+            } else {
+                *pOutRelativeForIni = configuredPath;
+            }
+        }
+        return absConfigured;
+    }
+
+    // Candidate 2: Self-Healing Search in current application folder tree
+    std::wstring fileName = configuredPath;
+    size_t lastSlash = fileName.find_last_of(L"\\/");
+    if (lastSlash != std::wstring::npos) {
+        fileName = fileName.substr(lastSlash + 1);
+    }
+    if (fileName.empty()) fileName = L"sr_ncnn_vulkan.qvx";
+
+    std::vector<std::wstring> probeLocations;
+    probeLocations.push_back(std::wstring(exePath) + L"\\plugins\\sr\\sr_ncnn_vulkan\\" + fileName);
+    probeLocations.push_back(std::wstring(exePath) + L"\\plugins\\sr_ncnn_vulkan\\" + fileName);
+    probeLocations.push_back(std::wstring(exePath) + L"\\plugins\\sr\\" + fileName);
+    probeLocations.push_back(std::wstring(exePath) + L"\\plugins\\" + fileName);
+
+    // If configured path referred to the official plugin, also probe standard official locations
+    if (_wcsicmp(fileName.c_str(), L"sr_ncnn_vulkan.qvx") == 0 ||
+        configuredPath.find(L"sr_ncnn_vulkan") != std::wstring::npos) {
+        probeLocations.push_back(std::wstring(exePath) + L"\\plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx");
+        probeLocations.push_back(std::wstring(exePath) + L"\\plugins\\sr_ncnn_vulkan.qvx");
+    }
+
+    for (const auto& probe : probeLocations) {
+        DWORD probeAttrs = GetFileAttributesW(probe.c_str());
+        if (probeAttrs != INVALID_FILE_ATTRIBUTES && !(probeAttrs & FILE_ATTRIBUTE_DIRECTORY)) {
+            // Auto-heal active state
+            size_t offset = wcslen(exePath);
+            if (probe[offset] == L'\\' || probe[offset] == L'/') offset++;
+            std::wstring relPath = probe.substr(offset);
+            const_cast<PluginHost*>(this)->m_srPluginPath = relPath;
+            if (pOutRelativeForIni) {
+                *pOutRelativeForIni = relPath;
+            }
+            return probe;
+        }
+    }
+
+    // Not found anywhere on the current system
+    if (pOutRelativeForIni) {
+        *pOutRelativeForIni = configuredPath;
+    }
+    return absConfigured;
 }
 
 PluginInstallState PluginHost::GetSrPluginInstallState() const {
     std::lock_guard<std::recursive_mutex> lock(m_srMutex);
-    std::wstring fullPath = m_srPluginPath;
-    if (fullPath.empty()) {
-        fullPath = L"plugins\\sr_realesrgan_d3d11.qvx";
-    }
-    if (PathIsRelativeW(fullPath.c_str())) {
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        PathRemoveFileSpecW(exePath);
-        wchar_t combined[MAX_PATH];
-        PathCombineW(combined, exePath, fullPath.c_str());
-        fullPath = combined;
-    }
+    std::wstring fullPath = ResolveEffectiveSrPluginPath();
 
     DWORD attrs = GetFileAttributesW(fullPath.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -91,7 +222,7 @@ PluginInstallState PluginHost::GetSrPluginInstallState() const {
     FreeLibrary(hMod);
 
     // For official plugin, verify version consistency
-    if (pluginId == "com.quickview.sr.realesrgan" && installedVer != QVX_OFFICIAL_SR_PLUGIN_VERSION) {
+    if (pluginId == "com.quickview.sr.ncnn_vulkan" && installedVer != QVX_OFFICIAL_SR_PLUGIN_VERSION) {
         return PluginInstallState::UpdateAvailable;
     }
     return PluginInstallState::Installed;
@@ -103,14 +234,10 @@ std::string PluginHost::GetInstalledPluginVersion() const {
         return m_srHeader->version_str;
     }
 
-    std::wstring fullPath = m_srPluginPath;
-    if (PathIsRelativeW(fullPath.c_str())) {
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        PathRemoveFileSpecW(exePath);
-        wchar_t combined[MAX_PATH];
-        PathCombineW(combined, exePath, fullPath.c_str());
-        fullPath = combined;
+    std::wstring fullPath = ResolveEffectiveSrPluginPath();
+    DWORD attrs = GetFileAttributesW(fullPath.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        return "";
     }
 
     HMODULE hMod = LoadLibraryExW(fullPath.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
@@ -147,7 +274,8 @@ bool PluginHost::CanExecuteSrOnDimensions(uint32_t inW, uint32_t inH, std::wstri
     if (inW > MAX_SR_INPUT_DIMENSION || inH > MAX_SR_INPUT_DIMENSION || totalPixels > MAX_SR_INPUT_PIXELS) {
         if (outReason) {
             wchar_t buf[256];
-            swprintf_s(buf, L"图像分辨率过大 (%ux%u, 超过 1600 万像素)，已阻止全图超分以防止显存溢出", inW, inH);
+            const wchar_t* fmt = AppStrings::OSD_SrImageTooLargeFormat ? AppStrings::OSD_SrImageTooLargeFormat : L"Image resolution is too large (%ux%u, >16 MP)";
+            swprintf_s(buf, fmt, inW, inH);
             *outReason = buf;
         }
         return false;
@@ -159,21 +287,8 @@ bool PluginHost::EnsureSrModuleLoaded() {
     if (m_hSrModule && m_srHeader && m_srVTable) {
         return true;
     }
-    if (m_srPluginPath.empty()) {
-        m_srPluginPath = L"plugins\\sr_realesrgan_d3d11.qvx";
-    }
 
-    // Resolve full path (if relative, anchor to executable directory)
-    std::wstring fullPath = m_srPluginPath;
-    if (PathIsRelativeW(fullPath.c_str())) {
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        PathRemoveFileSpecW(exePath);
-        wchar_t combined[MAX_PATH];
-        PathCombineW(combined, exePath, fullPath.c_str());
-        fullPath = combined;
-    }
-
+    std::wstring fullPath = ResolveEffectiveSrPluginPath();
     DWORD attrs = GetFileAttributesW(fullPath.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
         return false;
@@ -253,21 +368,9 @@ void PluginHost::SetParamValue(const std::string& paramId, float val) {
         m_dynamicParams.push_back({ paramId, val });
     }
 
-    // Live forward to active plugin context
+    // Live forward to active plugin context (in-memory zero I/O)
     if (m_srVTable && m_srContext && m_srVTable->set_param_value) {
         m_srVTable->set_param_value(m_srContext, paramId.c_str(), val);
-    }
-
-    // Persist to INI if path available
-    if (!m_cachedIniPath.empty() && m_srHeader && m_srHeader->plugin_id) {
-        wchar_t section[128];
-        wchar_t keyWide[64];
-        wchar_t valWide[32];
-        MultiByteToWideChar(CP_UTF8, 0, m_srHeader->plugin_id, -1, section, 128);
-        std::wstring fullSection = L"Plugin." + std::wstring(section);
-        MultiByteToWideChar(CP_UTF8, 0, paramId.c_str(), -1, keyWide, 64);
-        swprintf_s(valWide, L"%.4f", val);
-        WritePrivateProfileStringW(fullSection.c_str(), keyWide, valWide, m_cachedIniPath.c_str());
     }
 }
 
@@ -295,7 +398,8 @@ std::vector<SrModelEntry> PluginHost::GetCurrentSrModels() const {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     PathRemoveFileSpecW(exePath);
-    std::wstring modelsDir = std::wstring(exePath) + L"\\plugins\\models";
+    std::wstring isolatedModelsDir = std::wstring(exePath) + L"\\plugins\\sr\\sr_ncnn_vulkan\\models";
+    std::wstring legacyModelsDir = std::wstring(exePath) + L"\\plugins\\models";
 
     for (uint32_t i = 0; i < count; ++i) {
         const QVX_SR_ModelInfo* info = m_srVTable->get_model_info(i);
@@ -314,19 +418,22 @@ std::vector<SrModelEntry> PluginHost::GetCurrentSrModels() const {
         entry.defaultDebounceMs = info->default_debounce_ms > 0 ? info->default_debounce_ms : 150;
         entry.defaultCompareMode = info->default_compare_mode;
 
-        // If plugin didn't determine installation status, fallback to checking plugins/models/<modelId>.bin
+        // Fallback file existence check if plugin returned not installed
         if (!entry.isInstalled && !entry.downloadUrl.empty()) {
             if (entry.modelId == "realesr-animevideov3-auto") {
-                if (GetFileAttributesW((modelsDir + L"\\realesr-animevideov3-x2.bin").c_str()) != INVALID_FILE_ATTRIBUTES &&
-                    GetFileAttributesW((modelsDir + L"\\realesr-animevideov3-x3.bin").c_str()) != INVALID_FILE_ATTRIBUTES &&
-                    GetFileAttributesW((modelsDir + L"\\realesr-animevideov3-x4.bin").c_str()) != INVALID_FILE_ATTRIBUTES) {
+                if ((GetFileAttributesW((isolatedModelsDir + L"\\realesr-animevideov3-x2.bin").c_str()) != INVALID_FILE_ATTRIBUTES &&
+                     GetFileAttributesW((isolatedModelsDir + L"\\realesr-animevideov3-x3.bin").c_str()) != INVALID_FILE_ATTRIBUTES &&
+                     GetFileAttributesW((isolatedModelsDir + L"\\realesr-animevideov3-x4.bin").c_str()) != INVALID_FILE_ATTRIBUTES) ||
+                    (GetFileAttributesW((legacyModelsDir + L"\\realesr-animevideov3-x2.bin").c_str()) != INVALID_FILE_ATTRIBUTES &&
+                     GetFileAttributesW((legacyModelsDir + L"\\realesr-animevideov3-x3.bin").c_str()) != INVALID_FILE_ATTRIBUTES &&
+                     GetFileAttributesW((legacyModelsDir + L"\\realesr-animevideov3-x4.bin").c_str()) != INVALID_FILE_ATTRIBUTES)) {
                     entry.isInstalled = true;
                 }
             } else {
                 std::string filename = entry.modelId + ".bin";
                 std::wstring wideFilename(filename.begin(), filename.end());
-                std::wstring modelFullPath = modelsDir + L"\\" + wideFilename;
-                if (GetFileAttributesW(modelFullPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                if (GetFileAttributesW((isolatedModelsDir + L"\\" + wideFilename).c_str()) != INVALID_FILE_ATTRIBUTES ||
+                    GetFileAttributesW((legacyModelsDir + L"\\" + wideFilename).c_str()) != INVALID_FILE_ATTRIBUTES) {
                     entry.isInstalled = true;
                 }
             }
@@ -413,13 +520,14 @@ std::vector<SrParamEntry> PluginHost::GetCurrentSrParams() const {
 void PluginHost::ResetToDefaults() {
     std::lock_guard<std::recursive_mutex> lock(m_srMutex);
     m_enableSrPlugin = false;
-    m_srPluginPath = L"plugins\\sr_realesrgan_d3d11.qvx";
+    m_srPluginPath = L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx";
     m_srModelId = "realesr-animevideov3-auto";
     m_srAutoTrigger = false;
     m_srOpenInCompareMode = true;
     m_srPromptModelOnHotkey = false;
     m_srDenoise = 0.0f;
     m_srDebounceDelayMs = 150;
+    m_srAutoTriggerMaxSourceMp = 1.0f;
     m_dynamicParams.clear();
 
     if (m_srVTable && m_srContext) {
@@ -437,10 +545,10 @@ void PluginHost::LoadConfig(const wchar_t* iniPath) {
     m_enableSrPlugin = (GetPrivateProfileIntW(L"SuperResolution", L"EnableSrPlugin", 0, iniPath) != 0);
 
     wchar_t pathBuf[MAX_PATH] = { 0 };
-    GetPrivateProfileStringW(L"SuperResolution", L"SrPluginPath", L"plugins\\sr_realesrgan_d3d11.qvx", pathBuf, MAX_PATH, iniPath);
+    GetPrivateProfileStringW(L"SuperResolution", L"SrPluginPath", L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx", pathBuf, MAX_PATH, iniPath);
     m_srPluginPath = pathBuf;
     if (m_srPluginPath.empty()) {
-        m_srPluginPath = L"plugins\\sr_realesrgan_d3d11.qvx";
+        m_srPluginPath = L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx";
     }
 
     wchar_t modelBuf[128] = { 0 };
@@ -480,6 +588,48 @@ void PluginHost::LoadConfig(const wchar_t* iniPath) {
 
     int debounce = GetPrivateProfileIntW(L"SuperResolution", L"SrDebounceDelayMs", 3000, iniPath);
     m_srDebounceDelayMs = (debounce >= 0 && debounce <= 5000) ? debounce : 3000;
+
+    wchar_t maxMpBuf[32] = { 0 };
+    GetPrivateProfileStringW(L"SuperResolution", L"SrAutoTriggerMaxSourceMp", L"1.00", maxMpBuf, 32, iniPath);
+    wchar_t* endMp = nullptr;
+    float maxMp = wcstof(maxMpBuf, &endMp);
+    m_srAutoTriggerMaxSourceMp = (maxMp >= 0.1f && maxMp <= 16.0f) ? maxMp : 1.0f;
+
+    // Load plugin-specific dynamic parameters from [Plugin.<plugin_id>] section
+    EnsureSrModuleLoaded();
+    const char* pluginId = (m_srHeader && m_srHeader->plugin_id) ? m_srHeader->plugin_id : "sr_ncnn_vulkan";
+    wchar_t section[128];
+    MultiByteToWideChar(CP_UTF8, 0, pluginId, -1, section, 128);
+    std::wstring fullSection = L"Plugin." + std::wstring(section);
+
+    if (m_srHeader && m_srVTable && m_srVTable->get_param_count && m_srVTable->get_param_desc) {
+        uint32_t count = m_srVTable->get_param_count();
+        for (uint32_t i = 0; i < count; ++i) {
+            const QVX_ParamDesc* pDesc = m_srVTable->get_param_desc(i);
+            if (!pDesc || !pDesc->id) continue;
+            wchar_t keyWide[64];
+            wchar_t valWide[64] = { 0 };
+            MultiByteToWideChar(CP_UTF8, 0, pDesc->id, -1, keyWide, 64);
+            if (GetPrivateProfileStringW(fullSection.c_str(), keyWide, L"", valWide, 64, iniPath) > 0) {
+                wchar_t* pEnd = nullptr;
+                float fVal = wcstof(valWide, &pEnd);
+                setParamInternal(pDesc->id, fVal);
+            }
+        }
+    } else {
+        // Fallback standard parameters if plugin is not loaded during cold boot
+        const char* fallbackKeys[] = { "tile_size", "denoise" };
+        for (const char* k : fallbackKeys) {
+            wchar_t keyWide[64];
+            wchar_t valWide[64] = { 0 };
+            MultiByteToWideChar(CP_UTF8, 0, k, -1, keyWide, 64);
+            if (GetPrivateProfileStringW(fullSection.c_str(), keyWide, L"", valWide, 64, iniPath) > 0) {
+                wchar_t* pEnd = nullptr;
+                float fVal = wcstof(valWide, &pEnd);
+                setParamInternal(k, fVal);
+            }
+        }
+    }
 }
 
 void PluginHost::SaveConfig(const wchar_t* iniPath) const {
@@ -487,36 +637,41 @@ void PluginHost::SaveConfig(const wchar_t* iniPath) const {
 
     std::lock_guard<std::recursive_mutex> lock(m_srMutex);
 
-    WritePrivateProfileStringW(L"SuperResolution", L"EnableSrPlugin", m_enableSrPlugin ? L"1" : L"0", iniPath);
-    WritePrivateProfileStringW(L"SuperResolution", L"SrPluginPath", m_srPluginPath.c_str(), iniPath);
+    WritePrivateProfileStringW(L"SuperResolution", L"EnableSrPlugin", m_enableSrPlugin.load(std::memory_order_relaxed) ? L"1" : L"0", iniPath);
+
+    std::wstring relativeForIni;
+    ResolveEffectiveSrPluginPath(&relativeForIni);
+    WritePrivateProfileStringW(L"SuperResolution", L"SrPluginPath", relativeForIni.c_str(), iniPath);
 
     wchar_t modelWide[128] = { 0 };
     MultiByteToWideChar(CP_UTF8, 0, m_srModelId.c_str(), -1, modelWide, 128);
     WritePrivateProfileStringW(L"SuperResolution", L"SrModelId", modelWide, iniPath);
 
-    WritePrivateProfileStringW(L"SuperResolution", L"SrAutoTrigger", m_srAutoTrigger ? L"1" : L"0", iniPath);
-    WritePrivateProfileStringW(L"SuperResolution", L"SrOpenInCompareMode", m_srOpenInCompareMode ? L"1" : L"0", iniPath);
-    WritePrivateProfileStringW(L"SuperResolution", L"SrPromptModelOnHotkey", m_srPromptModelOnHotkey ? L"1" : L"0", iniPath);
+    WritePrivateProfileStringW(L"SuperResolution", L"SrAutoTrigger", m_srAutoTrigger.load(std::memory_order_relaxed) ? L"1" : L"0", iniPath);
+    WritePrivateProfileStringW(L"SuperResolution", L"SrOpenInCompareMode", m_srOpenInCompareMode.load(std::memory_order_relaxed) ? L"1" : L"0", iniPath);
+    WritePrivateProfileStringW(L"SuperResolution", L"SrPromptModelOnHotkey", m_srPromptModelOnHotkey.load(std::memory_order_relaxed) ? L"1" : L"0", iniPath);
 
     wchar_t numBuf[32];
-    swprintf_s(numBuf, L"%.2f", m_srDenoise);
+    swprintf_s(numBuf, L"%.2f", m_srDenoise.load(std::memory_order_relaxed));
     WritePrivateProfileStringW(L"SuperResolution", L"SrDenoise", numBuf, iniPath);
 
-    swprintf_s(numBuf, L"%d", m_srDebounceDelayMs);
+    swprintf_s(numBuf, L"%d", m_srDebounceDelayMs.load(std::memory_order_relaxed));
     WritePrivateProfileStringW(L"SuperResolution", L"SrDebounceDelayMs", numBuf, iniPath);
 
+    swprintf_s(numBuf, L"%.2f", m_srAutoTriggerMaxSourceMp.load(std::memory_order_relaxed));
+    WritePrivateProfileStringW(L"SuperResolution", L"SrAutoTriggerMaxSourceMp", numBuf, iniPath);
+
     // Save all dynamic params under active plugin ID section
-    if (m_srHeader && m_srHeader->plugin_id) {
-        wchar_t section[128];
-        MultiByteToWideChar(CP_UTF8, 0, m_srHeader->plugin_id, -1, section, 128);
-        std::wstring fullSection = L"Plugin." + std::wstring(section);
-        for (const auto& kv : m_dynamicParams) {
-            wchar_t keyWide[64];
-            wchar_t valWide[32];
-            MultiByteToWideChar(CP_UTF8, 0, kv.first.c_str(), -1, keyWide, 64);
-            swprintf_s(valWide, L"%.4f", kv.second);
-            WritePrivateProfileStringW(fullSection.c_str(), keyWide, valWide, iniPath);
-        }
+    const char* pluginId = (m_srHeader && m_srHeader->plugin_id) ? m_srHeader->plugin_id : "sr_ncnn_vulkan";
+    wchar_t section[128];
+    MultiByteToWideChar(CP_UTF8, 0, pluginId, -1, section, 128);
+    std::wstring fullSection = L"Plugin." + std::wstring(section);
+    for (const auto& kv : m_dynamicParams) {
+        wchar_t keyWide[64];
+        wchar_t valWide[32];
+        MultiByteToWideChar(CP_UTF8, 0, kv.first.c_str(), -1, keyWide, 64);
+        swprintf_s(valWide, L"%.4f", kv.second);
+        WritePrivateProfileStringW(fullSection.c_str(), keyWide, valWide, iniPath);
     }
 }
 
@@ -532,16 +687,7 @@ bool PluginHost::EnsureSrContext(ID3D11Device* pDevice) {
         return true;
     }
 
-    // Resolve full path (if relative, anchor to executable directory)
-    std::wstring fullPath = m_srPluginPath;
-    if (PathIsRelativeW(fullPath.c_str())) {
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        PathRemoveFileSpecW(exePath);
-        wchar_t combined[MAX_PATH];
-        PathCombineW(combined, exePath, fullPath.c_str());
-        fullPath = combined;
-    }
+    std::wstring fullPath = ResolveEffectiveSrPluginPath();
 
     // 2-microsecond hot-path file existence check
     DWORD attrs = GetFileAttributesW(fullPath.c_str());
@@ -624,18 +770,33 @@ int32_t PluginHost::ExecuteSrUpscaleGpu(
     ID3D11Texture2D* outTexture,
     uint32_t outWidth, uint32_t outHeight,
     QVX_CancelPredicate checkCancel,
-    void* cancelUserData
+    void* cancelUserData,
+    QVX_ProgressCallback onProgress,
+    void* progressUserData
 ) {
     if (!inTexture || !outTexture || inWidth == 0 || inHeight == 0 || outWidth == 0 || outHeight == 0) {
         return QVX_E_INVALIDARG;
     }
 
-    // Keep the module and its context alive for the whole call.  Downloads,
-    // model changes and shutdown all take this same recursive lock before
-    // destroying either object.
-    std::lock_guard<std::recursive_mutex> lock(m_srMutex);
-    if (!EnsureSrContext(pDevice)) {
-        OutputDebugStringA("[QVX-SR] Execute failed: EnsureSrContext returned false.\n");
+    const QVX_SR_VTable* vtable = nullptr;
+    QVX_SR_Context ctx = nullptr;
+    std::string pluginName = "Real-ESRGAN";
+    float denoiseVal = m_srDenoise.load(std::memory_order_relaxed);
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_srMutex);
+        if (!EnsureSrContext(pDevice)) {
+            OutputDebugStringA("[QVX-SR] Execute failed: EnsureSrContext returned false.\n");
+            return QVX_E_FAIL;
+        }
+        vtable = m_srVTable;
+        ctx = m_srContext;
+        if (m_srHeader && m_srHeader->plugin_name) {
+            pluginName = m_srHeader->plugin_name;
+        }
+    }
+
+    if (!vtable || !ctx || !vtable->upscale_gpu) {
         return QVX_E_FAIL;
     }
 
@@ -646,24 +807,31 @@ int32_t PluginHost::ExecuteSrUpscaleGpu(
     params.out_height = outHeight;
     params.check_cancel = checkCancel;
     params.cancel_user_data = cancelUserData;
-    params.denoise = m_srDenoise;
+    params.denoise = denoiseVal;
+    params.on_progress = onProgress;
+    params.progress_user_data = progressUserData;
 
     LARGE_INTEGER freq, t0, t1;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
 
-    // Direct invocation into plugin's GPU upscale routine
-    int32_t result = m_srVTable->upscale_gpu(m_srContext, inTexture, outTexture, &params);
+    // [Lock-Free GPU Forward] Forward inference executes completely OUTSIDE m_srMutex!
+    // UI thread will NEVER be blocked by heavy AI neural network execution!
+    int32_t result = vtable->upscale_gpu(ctx, inTexture, outTexture, &params);
 
     QueryPerformanceCounter(&t1);
-    m_lastDurationMs = (freq.QuadPart > 0) ? (t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart : 0.0;
+    double duration = (freq.QuadPart > 0) ? (t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart : 0.0;
+    m_lastDurationMs.store(duration, std::memory_order_relaxed);
 
     char logBuf[256];
     sprintf_s(logBuf, "[QVX-SR] Upscale %ux%u -> %ux%u with %s (Denoise=%.2f) took %.2f ms (ret=0x%08X)\n",
               inWidth, inHeight, outWidth, outHeight,
-              m_srHeader && m_srHeader->plugin_name ? m_srHeader->plugin_name : "Real-ESRGAN",
-              m_srDenoise, m_lastDurationMs, result);
-    m_lastLog = logBuf;
+              pluginName.c_str(),
+              denoiseVal, duration, result);
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_srMutex);
+        m_lastLog = logBuf;
+    }
     OutputDebugStringA(logBuf);
 
     return result;
@@ -691,16 +859,14 @@ void PluginHost::UnloadSrPlugin() {
 std::vector<PluginCandidate> PluginHost::ScanPluginsDirectory(const std::wstring& pluginsDir) {
     std::vector<PluginCandidate> candidates;
 
-    std::wstring searchPattern = pluginsDir;
-    if (searchPattern.empty()) {
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        PathRemoveFileSpecW(exePath);
-        searchPattern = std::wstring(exePath) + L"\\plugins";
-    }
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    PathRemoveFileSpecW(exePath);
 
-    std::wstring patternQvx = searchPattern + L"\\*.qvx";
-    std::wstring patternDll = searchPattern + L"\\*.dll";
+    std::wstring rootDir = pluginsDir;
+    if (rootDir.empty()) {
+        rootDir = std::wstring(exePath) + L"\\plugins";
+    }
 
     auto probeFile = [&](const std::wstring& fullPath) {
         HMODULE hMod = LoadLibraryExW(fullPath.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES | LOAD_LIBRARY_AS_DATAFILE);
@@ -715,39 +881,48 @@ std::vector<PluginCandidate> PluginHost::ScanPluginsDirectory(const std::wstring
             const QVX_PluginHeader* header = nullptr;
             if (pfnInit(&header) && header && header->abi_version == QVX_ABI_VERSION) {
                 PluginCandidate cand;
-                cand.filePath = fullPath;
+                size_t exeLen = wcslen(exePath);
+                if (fullPath.rfind(exePath, 0) == 0 && fullPath.length() > exeLen + 1) {
+                    cand.filePath = fullPath.substr(exeLen + 1);
+                } else {
+                    cand.filePath = fullPath;
+                }
                 cand.pluginId = header->plugin_id ? header->plugin_id : "";
                 cand.pluginName = header->plugin_name ? header->plugin_name : "";
                 cand.versionStr = header->version_str ? header->version_str : "";
                 cand.supportedInterfaces = header->supported_interfaces;
-                cand.isLoaded = (fullPath == m_srPluginPath && m_hSrModule != nullptr);
+                cand.isLoaded = (cand.filePath == m_srPluginPath && m_hSrModule != nullptr);
                 candidates.push_back(std::move(cand));
             }
         }
         FreeLibrary(hExec);
     };
 
-    WIN32_FIND_DATAW ffd;
-    HANDLE hFind = FindFirstFileW(patternQvx.c_str(), &ffd);
-    if (hFind != INVALID_HANDLE_VALUE) {
+    auto scanDirRecursive = [&](auto self, const std::wstring& dir, int depth) -> void {
+        if (depth > 3) return;
+        WIN32_FIND_DATAW ffd;
+        std::wstring pattern = dir + L"\\*";
+        HANDLE hFind = FindFirstFileW(pattern.c_str(), &ffd);
+        if (hFind == INVALID_HANDLE_VALUE) return;
+
         do {
-            if (!(ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                probeFile(searchPattern + L"\\" + ffd.cFileName);
+            if (wcscmp(ffd.cFileName, L".") == 0 || wcscmp(ffd.cFileName, L"..") == 0) continue;
+
+            std::wstring itemPath = dir + L"\\" + ffd.cFileName;
+            if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                self(self, itemPath, depth + 1);
+            } else {
+                std::wstring nameLower = ffd.cFileName;
+                std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::towlower);
+                if (nameLower.ends_with(L".qvx") || nameLower.ends_with(L".dll")) {
+                    probeFile(itemPath);
+                }
             }
         } while (FindNextFileW(hFind, &ffd));
         FindClose(hFind);
-    }
+    };
 
-    hFind = FindFirstFileW(patternDll.c_str(), &ffd);
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            if (!(ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                probeFile(searchPattern + L"\\" + ffd.cFileName);
-            }
-        } while (FindNextFileW(hFind, &ffd));
-        FindClose(hFind);
-    }
-
+    scanDirRecursive(scanDirRecursive, rootDir, 0);
     return candidates;
 }
 
@@ -799,10 +974,28 @@ static bool WinHttpDownloadSingleUrl(
         std::string hostStr = domainPath.substr(0, slashPos);
         std::string pathStr = domainPath.substr(slashPos);
 
-        // The built-in marketplace is intentionally single-publisher.  This
-        // prevents a compromised manifest from turning the downloader into an
-        // arbitrary binary fetcher.
-        if (hostStr != "justnullname.github.io" && hostStr != "raw.githubusercontent.com") {
+        // Trusted host check: Official publisher repos, CDN and verified proxy mirrors
+        auto isTrustedHost = [](const std::string& h) -> bool {
+            if (h == "justnullname.github.io" ||
+                h == "raw.githubusercontent.com" ||
+                h == "github.com" ||
+                h == "objects.githubusercontent.com" ||
+                h == "codeload.github.com" ||
+                h == "ghfast.top" ||
+                h == "ghproxy.net" ||
+                h == "ghproxy.cn" ||
+                h == "gh-proxy.com" ||
+                h == "fastly.jsdelivr.net" ||
+                h == "cdn.jsdelivr.net") {
+                return true;
+            }
+            if (h.ends_with(".github.io") || h.ends_with(".githubusercontent.com") || h.ends_with(".github.com")) {
+                return true;
+            }
+            return false;
+        };
+
+        if (!isTrustedHost(hostStr)) {
             LogDownloadDebug("[QVX-Download] Refusing untrusted host: %s\n", hostStr.c_str());
             return false;
         }
@@ -1011,7 +1204,7 @@ static bool WinHttpDownloadFile(
     return false;
 }
 
-bool PluginHost::DownloadPlugin(const std::wstring& pluginName, const std::string& downloadUrl, DownloadProgressCallback onProgress, void* userData) {
+bool PluginHost::DownloadPlugin(const std::wstring& pluginName, const std::string& downloadUrl, const std::string& expectedSha256, DownloadProgressCallback onProgress, void* userData) {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     PathRemoveFileSpecW(exePath);
@@ -1032,20 +1225,57 @@ bool PluginHost::DownloadPlugin(const std::wstring& pluginName, const std::strin
     LogDownloadDebug("[QVX-Download] DownloadPlugin: plugin='%ls', url='%s', isZip=%d\n", pluginName.c_str(), url.c_str(), isZip ? 1 : 0);
 
     if (isZip) {
-        std::wstring tempZipPath = destDir + L"\\temp_plugin.zip";
-        ok = WinHttpDownloadFile(url, tempZipPath, onProgress, userData);
-        if (ok) {
+        std::wstring tempZipPath = destDir + L"\\temp_plugin_download.zip";
+        bool dlOk = WinHttpDownloadFile(url, tempZipPath, onProgress, userData);
+        if (dlOk) {
+            if (!expectedSha256.empty()) {
+                std::string actualHash = CalculateSHA256(tempZipPath);
+                if (_stricmp(actualHash.c_str(), expectedSha256.c_str()) != 0) {
+                    LogDownloadDebug("[QVX-Download] Plugin SHA-256 mismatch: exp='%s', act='%s'\n", expectedSha256.c_str(), actualHash.c_str());
+                    DeleteFileW(tempZipPath.c_str());
+                    if (onProgress) onProgress(0.0f, true, false, userData);
+                    return false;
+                }
+            }
             ok = IArchive::ExtractZipToDirectory(tempZipPath, destDir);
             DeleteFileW(tempZipPath.c_str());
         }
     } else {
-        std::wstring targetPath = destDir + L"\\" + pluginName;
-        ok = WinHttpDownloadFile(url, targetPath, onProgress, userData);
+        std::wstring destFilePath = destDir + L"\\" + pluginName;
+        std::wstring tempFilePath = destFilePath + L".tmp";
+        bool dlOk = WinHttpDownloadFile(url, tempFilePath, onProgress, userData);
+        if (dlOk) {
+            if (!expectedSha256.empty()) {
+                std::string actualHash = CalculateSHA256(tempFilePath);
+                if (_stricmp(actualHash.c_str(), expectedSha256.c_str()) != 0) {
+                    LogDownloadDebug("[QVX-Download] Plugin SHA-256 mismatch: exp='%s', act='%s'\n", expectedSha256.c_str(), actualHash.c_str());
+                    DeleteFileW(tempFilePath.c_str());
+                    if (onProgress) onProgress(0.0f, true, false, userData);
+                    return false;
+                }
+            }
+            MoveFileExW(tempFilePath.c_str(), destFilePath.c_str(), MOVEFILE_REPLACE_EXISTING);
+            ok = true;
+        }
     }
 
     if (ok) {
         std::lock_guard<std::recursive_mutex> lock(m_srMutex);
-        m_srPluginPath = destDir + L"\\sr_realesrgan_d3d11.qvx";
+        if (isZip) {
+            std::wstring baseName = pluginName;
+            if (baseName.ends_with(L".zip")) baseName = baseName.substr(0, baseName.size() - 4);
+            std::wstring isolatedRel = L"plugins\\sr\\" + baseName + L"\\" + baseName + L".qvx";
+            std::wstring legacyRel = L"plugins\\" + baseName + L".qvx";
+            wchar_t combined[MAX_PATH];
+            PathCombineW(combined, exePath, isolatedRel.c_str());
+            if (GetFileAttributesW(combined) != INVALID_FILE_ATTRIBUTES) {
+                m_srPluginPath = isolatedRel;
+            } else {
+                m_srPluginPath = legacyRel;
+            }
+        } else {
+            m_srPluginPath = L"plugins\\" + pluginName;
+        }
         UnloadSrPlugin();
         EnsureSrModuleLoaded();
     }
@@ -1063,8 +1293,8 @@ static void FlattenModelDirectory(const std::wstring& fullModelsDir) {
                 wcscmp(fd.cFileName, L".") != 0 && wcscmp(fd.cFileName, L"..") != 0) {
                 std::wstring subDir = fullModelsDir + L"\\" + fd.cFileName;
                 WIN32_FIND_DATAW subFd;
-                std::wstring subSearch = subDir + L"\\*";
-                HANDLE hSubFind = FindFirstFileW(subSearch.c_str(), &subFd);
+                std::wstring subPattern = subDir + L"\\*";
+                HANDLE hSubFind = FindFirstFileW(subPattern.c_str(), &subFd);
                 if (hSubFind != INVALID_HANDLE_VALUE) {
                     do {
                         if (!(subFd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -1085,6 +1315,7 @@ static void FlattenModelDirectory(const std::wstring& fullModelsDir) {
 bool PluginHost::DownloadModel(
     const std::wstring& targetRelativePath, 
     const std::string& downloadUrl,
+    const std::string& expectedSha256,
     DownloadProgressCallback onProgress,
     void* userData
 ) {
@@ -1100,8 +1331,12 @@ bool PluginHost::DownloadModel(
     PathRemoveFileSpecW(exePath);
 
     std::wstring pluginsDir = std::wstring(exePath) + L"\\plugins";
-    std::wstring fullModelsDir = pluginsDir + L"\\models";
+    std::wstring srDir = pluginsDir + L"\\sr";
+    std::wstring ncnnDir = srDir + L"\\sr_ncnn_vulkan";
+    std::wstring fullModelsDir = ncnnDir + L"\\models";
     CreateDirectoryW(pluginsDir.c_str(), nullptr);
+    CreateDirectoryW(srDir.c_str(), nullptr);
+    CreateDirectoryW(ncnnDir.c_str(), nullptr);
     CreateDirectoryW(fullModelsDir.c_str(), nullptr);
 
     bool isAutoComposite = (targetRelativePath.find(L"realesr-animevideov3-auto") != std::wstring::npos ||
@@ -1189,6 +1424,15 @@ bool PluginHost::DownloadModel(
         LogDownloadDebug("[QVX-Download] [ZipModel] Downloading ZIP package '%s' -> '%ls'\n", zipUrl.c_str(), tempZipPath.c_str());
         bool dlZipOk = WinHttpDownloadFile(zipUrl, tempZipPath, onProgress ? internalProgress : nullptr, onProgress ? &ctx : nullptr);
         if (dlZipOk) {
+            if (!expectedSha256.empty()) {
+                std::string actualHash = CalculateSHA256(tempZipPath);
+                if (_stricmp(actualHash.c_str(), expectedSha256.c_str()) != 0) {
+                    LogDownloadDebug("[QVX-Download] Model SHA-256 mismatch: exp='%s', act='%s'\n", expectedSha256.c_str(), actualHash.c_str());
+                    DeleteFileW(tempZipPath.c_str());
+                    if (onProgress) onProgress(0.0f, true, false, userData);
+                    return false;
+                }
+            }
             if (onProgress) {
                 onProgress(0.95f, false, false, userData);
             }
@@ -1318,8 +1562,13 @@ void PluginHost::OpenModelsDirectory() const {
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     PathRemoveFileSpecW(exePath);
 
-    std::wstring fullModelsDir = std::wstring(exePath) + L"\\plugins\\models";
-    CreateDirectoryW((std::wstring(exePath) + L"\\plugins").c_str(), nullptr);
+    std::wstring pluginsDir = std::wstring(exePath) + L"\\plugins";
+    std::wstring srDir = pluginsDir + L"\\sr";
+    std::wstring ncnnDir = srDir + L"\\sr_ncnn_vulkan";
+    std::wstring fullModelsDir = ncnnDir + L"\\models";
+    CreateDirectoryW(pluginsDir.c_str(), nullptr);
+    CreateDirectoryW(srDir.c_str(), nullptr);
+    CreateDirectoryW(ncnnDir.c_str(), nullptr);
     CreateDirectoryW(fullModelsDir.c_str(), nullptr);
 
     ShellExecuteW(nullptr, L"open", fullModelsDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);

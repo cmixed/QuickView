@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include "ImageTypes.h"
+#include "Plugin/qvx_sr.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -160,7 +161,9 @@ public:
         UINT dstW, UINT dstH,
         float sharpness,
         SimplePredicate checkCancel,
-        ID3D11Texture2D** outTexture);
+        ID3D11Texture2D** outTexture,
+        QVX_ProgressCallback onProgress = nullptr,
+        void* progressUserData = nullptr);
 
     /// <summary>
     /// Generate Mipmaps for a texture.

@@ -379,16 +379,46 @@ target_link_libraries(QuickView PRIVATE
 # ============================================================================
 # Super-Resolution Plugins (QVX)
 # ============================================================================
-add_library(sr_realesrgan_d3d11 SHARED plugins/sr_realesrgan_d3d11.cpp)
-set_target_properties(sr_realesrgan_d3d11 PROPERTIES
-    SUFFIX ".qvx"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/plugins"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/plugins"
-)
-target_include_directories(sr_realesrgan_d3d11 PRIVATE QuickView)
-target_link_libraries(sr_realesrgan_d3d11 PRIVATE d3d11.lib d3dcompiler.lib dxgi.lib shlwapi.lib)
-add_dependencies(QuickView sr_realesrgan_d3d11)
+set(NCNN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ncnn/x64")
+if(EXISTS "${NCNN_DIR}/include/ncnn")
+    add_library(sr_ncnn_vulkan SHARED plugins/sr/sr_ncnn_vulkan/sr_ncnn_vulkan_engine.cpp)
+    set_target_properties(sr_ncnn_vulkan PROPERTIES
+        SUFFIX ".qvx"
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins/sr/sr_ncnn_vulkan"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/plugins/sr/sr_ncnn_vulkan"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/plugins/sr/sr_ncnn_vulkan"
+    )
+    target_include_directories(sr_ncnn_vulkan PRIVATE 
+        QuickView 
+        "${NCNN_DIR}/include"
+        "${NCNN_DIR}/include/ncnn"
+    )
+    target_link_libraries(sr_ncnn_vulkan PRIVATE 
+        d3d11.lib dxgi.lib shlwapi.lib
+        "${NCNN_DIR}/lib/ncnn.lib"
+        "${NCNN_DIR}/lib/glslang.lib"
+        "${NCNN_DIR}/lib/SPIRV.lib"
+        "${NCNN_DIR}/lib/MachineIndependent.lib"
+        "${NCNN_DIR}/lib/OGLCompiler.lib"
+        "${NCNN_DIR}/lib/OSDependent.lib"
+        "${NCNN_DIR}/lib/GenericCodeGen.lib"
+    )
+
+    # Sync plugin models and manifest to build directory
+    add_custom_command(TARGET sr_ncnn_vulkan POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/plugins/sr/sr_ncnn_vulkan/models"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/plugins/sr/sr_ncnn_vulkan/models"
+            "${CMAKE_BINARY_DIR}/plugins/sr/sr_ncnn_vulkan/models"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/plugins/plugins_manifest.json"
+            "${CMAKE_BINARY_DIR}/plugins/plugins_manifest.json"
+        COMMENT "Deploying isolated sr_ncnn_vulkan plugin assets & manifest..."
+    )
+
+    add_dependencies(QuickView sr_ncnn_vulkan)
+endif()
 
 # ============================================================================
 # Unit Tests
@@ -424,10 +454,14 @@ add_executable(QuickViewTests
     QuickView/ArchiveVFS.cpp 
     QuickView/exif.cpp
     QuickView/QuickViewETW.cpp
+    QuickView/AppStrings.cpp
     QuickView/Plugin/PluginHost.cpp
     third_party/yyjson/yyjson.c
     QuickView/pch.cpp
 )
+if(TARGET sr_ncnn_vulkan)
+    add_dependencies(QuickViewTests sr_ncnn_vulkan)
+endif()
 target_precompile_headers(QuickViewTests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:pch.h>)
 target_link_libraries(QuickViewTests PRIVATE 
     GTest::gtest_main 
@@ -449,7 +483,6 @@ target_link_libraries(QuickViewTests PRIVATE
 )
 target_include_directories(QuickViewTests PRIVATE QuickView third_party/yyjson third_party/unrar-mini)
 target_compile_definitions(QuickViewTests PRIVATE UNICODE _UNICODE)
-add_dependencies(QuickViewTests sr_realesrgan_d3d11)
 add_test(NAME QuickViewTests COMMAND QuickViewTests)
 
 # ============================================================================

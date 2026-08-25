@@ -48,6 +48,7 @@ struct RemotePluginItem {
     std::string downloadUrl;
     std::string fileName;
     uint64_t fileSize = 0;
+    std::string sha256;
     std::string minAppVersion;
 };
 
@@ -60,6 +61,7 @@ struct SrModelEntry {
     bool isInstalled = true;
     uint64_t fileSizeBytes = 0;
     std::string downloadUrl;
+    std::string sha256;
     uint32_t preferredTileSize = 0;
     uint32_t defaultDebounceMs = 150;
     bool defaultCompareMode = false;
@@ -108,11 +110,15 @@ public:
     int GetSrDebounceDelayMs() const;
     void SetSrDebounceDelayMs(int delayMs);
 
+    float GetSrAutoTriggerMaxSourceMp() const;
+    void SetSrAutoTriggerMaxSourceMp(float maxMp);
+
     // Multi-Language localization propagation to active plugin
     void SetLanguage(const std::string& langCode);
 
     // Reset all plugin host settings to defaults
     void ResetToDefaults();
+
 
     // VRAM Safety Guard: Check if input image dimensions are safe for AI Super-Resolution
     static constexpr uint32_t MAX_SR_INPUT_DIMENSION = 4096;
@@ -137,18 +143,25 @@ public:
     using DownloadProgressCallback = void (*)(float progress, bool finished, bool success, void* userData);
 
     // Download / update plugin or model asset into plugins/ directory
-    bool DownloadPlugin(const std::wstring& pluginName, const std::string& downloadUrl = "", DownloadProgressCallback onProgress = nullptr, void* userData = nullptr);
-    bool DownloadModel(const std::wstring& targetRelativePath, const std::string& downloadUrl, DownloadProgressCallback onProgress = nullptr, void* userData = nullptr);
+    bool DownloadPlugin(const std::wstring& pluginName, const std::string& downloadUrl, DownloadProgressCallback onProgress, void* userData = nullptr) {
+        return DownloadPlugin(pluginName, downloadUrl, "", onProgress, userData);
+    }
+    bool DownloadPlugin(const std::wstring& pluginName, const std::string& downloadUrl = "", const std::string& expectedSha256 = "", DownloadProgressCallback onProgress = nullptr, void* userData = nullptr);
+
+    bool DownloadModel(const std::wstring& targetRelativePath, const std::string& downloadUrl, DownloadProgressCallback onProgress, void* userData = nullptr) {
+        return DownloadModel(targetRelativePath, downloadUrl, "", onProgress, userData);
+    }
+    bool DownloadModel(const std::wstring& targetRelativePath, const std::string& downloadUrl, const std::string& expectedSha256, DownloadProgressCallback onProgress = nullptr, void* userData = nullptr);
     void OpenModelsDirectory() const;
+
+    // Fast Win32 Cryptographic SHA-256 calculation for download verification
+    static std::string CalculateSHA256(const std::wstring& filePath);
 
     std::string GetLastExecutionLog() const;
     double GetLastDurationMs() const;
-
-    // --- Hot-Path Execution ---
-    // Fast check if SR plugin is ready to execute (probes file & initializes if needed)
     bool EnsureSrContext(ID3D11Device* pDevice);
 
-    // Execute Super-Resolution with GPU VRAM Direct 0-Copy & Cancellation Token
+    // Execute Super-Resolution with GPU VRAM Direct 0-Copy, Cancellation Token & Progress
     // Returns S_OK (0), E_ABORT (0x80004004), or error code.
     int32_t ExecuteSrUpscaleGpu(
         ID3D11Device* pDevice,
@@ -156,8 +169,10 @@ public:
         uint32_t inWidth, uint32_t inHeight,
         ID3D11Texture2D* outTexture,
         uint32_t outWidth, uint32_t outHeight,
-        QVX_CancelPredicate checkCancel,
-        void* cancelUserData
+        QVX_CancelPredicate checkCancel = nullptr,
+        void* cancelUserData = nullptr,
+        QVX_ProgressCallback onProgress = nullptr,
+        void* progressUserData = nullptr
     );
 
     // Unload active SR plugin and destroy cached GPU context
@@ -183,7 +198,7 @@ public:
 
     // --- Cold Scanning ---
     // Discovers all .qvx / .dll files in plugins directory (Called from Settings UI)
-    std::vector<PluginCandidate> ScanPluginsDirectory(const std::wstring& pluginsDir);
+    std::vector<PluginCandidate> ScanPluginsDirectory(const std::wstring& pluginsDir = L"");
 
     // Explicit unload of all loaded plugins on app exit
     void Shutdown();
@@ -196,6 +211,7 @@ private:
     PluginHost& operator=(const PluginHost&) = delete;
 
     bool EnsureSrModuleLoaded();
+    std::wstring ResolveEffectiveSrPluginPath(std::wstring* pOutRelativeForIni = nullptr) const;
     void SyncDynamicParamsToContext();
 
     // Active Super-Resolution Plugin State
@@ -206,15 +222,16 @@ private:
     QVX_SR_Context m_srContext = nullptr;
     ID3D11Device* m_cachedDevice = nullptr;
 
-    // Config settings
-    bool m_enableSrPlugin = false;
-    std::wstring m_srPluginPath = L"plugins\\sr_realesrgan_d3d11.qvx";
+    // Config settings (Lock-Free Thread-Safe Atomic Storage)
+    std::atomic<bool> m_enableSrPlugin{false};
+    std::wstring m_srPluginPath = L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx";
     std::string m_srModelId = "realesr-animevideov3-auto";
-    bool m_srAutoTrigger = false;
-    bool m_srOpenInCompareMode = true;
-    bool m_srPromptModelOnHotkey = false;
-    float m_srDenoise = 0.00f;
-    int m_srDebounceDelayMs = 150;
+    std::atomic<bool> m_srAutoTrigger{false};
+    std::atomic<bool> m_srOpenInCompareMode{true};
+    std::atomic<bool> m_srPromptModelOnHotkey{false};
+    std::atomic<float> m_srDenoise{0.00f};
+    std::atomic<int> m_srDebounceDelayMs{150};
+    std::atomic<float> m_srAutoTriggerMaxSourceMp{1.0f};
     std::string m_currentLanguage = "zh-CN";
 
     // Dynamic Parameter storage: key -> value
@@ -224,11 +241,11 @@ private:
     std::wstring m_cachedIniPath;
 
     std::string m_lastLog;
-    double m_lastDurationMs = 0.0;
+    std::atomic<double> m_lastDurationMs{0.0};
 
     // Remote market cache
     std::vector<RemotePluginItem> m_cachedManifest;
-    bool m_isFetchingManifest = false;
+    std::atomic<bool> m_isFetchingManifest{false};
     UINotifyCallback m_uiNotifyCb = nullptr;
     void* m_uiNotifyUserData = nullptr;
 };
@@ -237,5 +254,3 @@ private:
 using PluginManager = PluginHost;
 
 } // namespace QuickView
-
-

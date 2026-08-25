@@ -557,11 +557,12 @@ std::wstring UIRenderer::MakeEndEllipsis(float maxWidth, std::wstring_view text,
     return std::wstring(text.substr(0, lo)) + L"...";
 }
 
-void UIRenderer::SetOSD(const std::wstring& text, float opacity, D2D1_COLOR_F color, OSDPosition pos) {
+void UIRenderer::SetOSD(const std::wstring& text, float opacity, D2D1_COLOR_F color, OSDPosition pos, float progress) {
     m_osdText = text;
     m_osdOpacity = opacity;
     m_osdColor = color;
     m_osdPos = pos;
+    m_osdProgress = progress;
     // Reset compare fields
     m_osdTextLeft = L"";
     m_osdTextRight = L"";
@@ -575,6 +576,7 @@ void UIRenderer::SetCompareOSD(const std::wstring& left, const std::wstring& rig
     m_osdOpacity = opacity;
     m_osdColor = color;
     m_osdPos = OSDPosition::Bottom;
+    m_osdProgress = -1.0f;
     m_isCompareOSD = true;
     m_osdText = L"COMPARE"; // dummy
     MarkOSDDirty();
@@ -1567,6 +1569,42 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
     
     if (textLayout && textBrush) {
         dc->DrawTextLayout(D2D1::Point2F(x + paddingH, y + paddingV), textLayout.Get(), textBrush.Get());
+    }
+
+    // [Glow Progress Underline] Inset 2px luminous sleek progress bar at the bottom inner edge of OSD pill
+    if (m_osdProgress >= 0.0f) {
+        float p = std::clamp(m_osdProgress, 0.0f, 1.0f);
+        float trackInsetH = std::max(16.0f * s, pillRadius * 0.75f);
+        float trackLeft = x + trackInsetH;
+        float trackRight = x + toastW - trackInsetH;
+        float trackW = trackRight - trackLeft;
+        float barH = 2.0f * s;
+        float barY = y + toastH - barH - 3.5f * s;
+
+        if (trackW > 0.0f) {
+            // Track rail (Subtle dark background)
+            D2D1_RECT_F railRect = D2D1::RectF(trackLeft, barY, trackRight, barY + barH);
+            ComPtr<ID2D1SolidColorBrush> railBrush;
+            dc->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.25f * m_osdOpacity), &railBrush);
+            dc->FillRoundedRectangle(D2D1::RoundedRect(railRect, barH * 0.5f, barH * 0.5f), railBrush.Get());
+
+            // Active progress fill with high-tech cyan/emerald luminous glow
+            float fillRight = trackLeft + trackW * p;
+            if (fillRight > trackLeft + 1.0f) {
+                D2D1_RECT_F fillRect = D2D1::RectF(trackLeft, barY, fillRight, barY + barH);
+                D2D1_RECT_F glowRect = D2D1::RectF(trackLeft, barY - 1.0f * s, fillRight, barY + barH + 1.0f * s);
+
+                ComPtr<ID2D1SolidColorBrush> glowBrush, fillBrush;
+                D2D1_COLOR_F glowColor = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 0.40f * m_osdOpacity);
+                D2D1_COLOR_F barColor  = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 0.95f * m_osdOpacity);
+
+                dc->CreateSolidColorBrush(glowColor, &glowBrush);
+                dc->CreateSolidColorBrush(barColor, &fillBrush);
+
+                dc->FillRoundedRectangle(D2D1::RoundedRect(glowRect, (barH + 2.0f * s) * 0.5f, (barH + 2.0f * s) * 0.5f), glowBrush.Get());
+                dc->FillRoundedRectangle(D2D1::RoundedRect(fillRect, barH * 0.5f, barH * 0.5f), fillBrush.Get());
+            }
+        }
     }
 }
 

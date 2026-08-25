@@ -143,6 +143,7 @@ static std::string GetAppVersionUTF8() {
 // Function Prototypes
 void SyncDCompState(HWND hwnd, float winW, float winH, bool animate);
 void UpdateTargetColorSpaceForEngine(HWND hwnd);
+void ScheduleDebouncedSuperResolution(HWND hwnd);
 
 
 // --- Globals ---
@@ -151,6 +152,7 @@ void UpdateTargetColorSpaceForEngine(HWND hwnd);
 #define WM_ENGINE_EVENT  (WM_APP + 3)
 #define WM_ROUTED_OPEN   (WM_APP + 10)  // [Phase 0] Reserved for pipe-routed file open
 #define WM_SR_COMPLETED  (WM_APP + 60)  // [QVX-SR] Background Neural Super-Resolution finished
+#define WM_SR_ANIMATION_COMPLETED (WM_APP + 61) // [QVX-SR] Background Full-Sequence Animation SR finished
 // WebContentHost::kCommitMessage (WM_APP+55) — document ready, need DComp Commit
 constexpr UINT_PTR TIMER_ID_STARTUP_SHOW = 992;
 constexpr UINT_PTR TIMER_ID_SR_DEBOUNCE = 3001;
@@ -4214,6 +4216,7 @@ static void PerformZoom100(HWND hwnd, bool allowResizeWindow = true) {
     RequestRepaint(PaintLayer::All);
     GetPaneContext(PaneSlot::Primary).view.IsInteracting = true;
     SetTimer(hwnd, IDT_INTERACTION, 150, nullptr);
+    ScheduleDebouncedSuperResolution(hwnd);
 }
 
 // Forward Declaration
@@ -4441,6 +4444,7 @@ static void PerformZoomFit(HWND hwnd, float maxScreenPct = 1.0f, bool allowResiz
             RequestRepaint(PaintLayer::All);
             GetPaneContext(PaneSlot::Primary).view.IsInteracting = true;
             SetTimer(hwnd, IDT_INTERACTION, 150, nullptr);
+            ScheduleDebouncedSuperResolution(hwnd);
             return;
         }
 
@@ -4451,6 +4455,7 @@ static void PerformZoomFit(HWND hwnd, float maxScreenPct = 1.0f, bool allowResiz
             GetPaneContext(PaneSlot::Primary).view.PanY = 0;
             g_osd.Show(hwnd, AppStrings::OSD_ZoomFit, false, false, D2D1::ColorF(D2D1::ColorF::White));
             RequestRepaint(PaintLayer::All);
+            ScheduleDebouncedSuperResolution(hwnd);
             return;
         }
 
@@ -4502,6 +4507,7 @@ static void PerformZoomFit(HWND hwnd, float maxScreenPct = 1.0f, bool allowResiz
         RequestRepaint(PaintLayer::All);
         GetPaneContext(PaneSlot::Primary).view.IsInteracting = true;
         SetTimer(hwnd, IDT_INTERACTION, 150, nullptr);
+        ScheduleDebouncedSuperResolution(hwnd);
     }
 }
 
@@ -4527,6 +4533,7 @@ static void PerformZoomFill(HWND hwnd) {
             RequestRepaint(PaintLayer::All);
             GetPaneContext(PaneSlot::Primary).view.IsInteracting = true;
             SetTimer(hwnd, IDT_INTERACTION, 150, nullptr);
+            ScheduleDebouncedSuperResolution(hwnd);
         }
     }
 }
@@ -5115,6 +5122,7 @@ void SaveConfig() {
     WriteConfigInt(L"Controls", L"ZoomModeOut", g_config.ZoomModeOut, iniPath.c_str());
     WriteConfigFloat(L"Controls", L"FsrSharpness", g_config.FsrSharpness, iniPath.c_str());
     WriteConfigInt(L"Controls", L"SrDebounceDelayMs", g_config.SrDebounceDelayMs, iniPath.c_str());
+    WriteConfigFloat(L"Controls", L"SrAutoTriggerMaxSourceMp", g_config.SrAutoTriggerMaxSourceMp, iniPath.c_str());
     WriteConfigBool(L"Controls", L"InvertWheel", g_config.InvertWheel, iniPath.c_str());
     WriteConfigInt(L"Controls", L"WheelActionMode", g_config.WheelActionMode, iniPath.c_str());
     WriteConfigInt(L"Controls", L"ThumbWheelMode", g_config.ThumbWheelMode, iniPath.c_str());
@@ -5438,6 +5446,13 @@ void LoadConfig() {
     g_config.SrDebounceDelayMs = GetPrivateProfileIntW(L"Controls", L"SrDebounceDelayMs", 3000, iniPath.c_str());
     if (g_config.SrDebounceDelayMs < 0 || g_config.SrDebounceDelayMs > 5000) g_config.SrDebounceDelayMs = 3000;
     QuickView::PluginHost::Instance().SetSrDebounceDelayMs(g_config.SrDebounceDelayMs);
+    {
+        wchar_t maxMpBuf[64];
+        GetPrivateProfileStringW(L"Controls", L"SrAutoTriggerMaxSourceMp", L"1.00", maxMpBuf, 64, iniPath.c_str());
+        float val = (float)_wtof(maxMpBuf);
+        g_config.SrAutoTriggerMaxSourceMp = std::clamp(val, 0.1f, 16.0f);
+    }
+    QuickView::PluginHost::Instance().SetSrAutoTriggerMaxSourceMp(g_config.SrAutoTriggerMaxSourceMp);
     g_config.InvertWheel = GetPrivateProfileIntW(L"Controls", L"InvertWheel", 0, iniPath.c_str()) != 0;
     g_config.WheelActionMode = GetPrivateProfileIntW(L"Controls", L"WheelActionMode", 0, iniPath.c_str());
     g_config.ThumbWheelMode = GetPrivateProfileIntW(L"Controls", L"ThumbWheelMode", 0, iniPath.c_str());
@@ -6399,12 +6414,71 @@ struct AsyncSrResult {
     HRESULT hr = E_FAIL;
 };
 
+// [QVX-SR] High-Performance In-Memory Animated Player holding Super-Resolved Frames
+class SrMemoryAnimator : public QuickView::IAnimationDecoder {
+public:
+    SrMemoryAnimator(std::vector<std::shared_ptr<QuickView::RawImageFrame>> frames,
+                     std::shared_ptr<QuickView::IAnimationDecoder> originalDecoder)
+        : m_frames(std::move(frames)), m_originalDecoder(std::move(originalDecoder)) {}
+
+    bool Initialize(std::shared_ptr<QuickView::MappedFile>, QuickView::PixelFormat) override { return true; }
+
+    std::shared_ptr<QuickView::RawImageFrame> GetNextFrame() override {
+        if (m_frames.empty()) return nullptr;
+        m_currentIndex = (m_currentIndex + 1) % m_frames.size();
+        return m_frames[m_currentIndex];
+    }
+
+    std::shared_ptr<QuickView::RawImageFrame> SeekToFrame(uint32_t targetIndex) override {
+        if (m_frames.empty()) return nullptr;
+        m_currentIndex = targetIndex % m_frames.size();
+        return m_frames[m_currentIndex];
+    }
+
+    uint32_t GetTotalFrames() const override {
+        return static_cast<uint32_t>(m_frames.size());
+    }
+
+    bool IsAnimated() const override {
+        return m_frames.size() > 1;
+    }
+
+    bool SupportsDirtyRect() const override {
+        return false;
+    }
+
+    bool IsSrDecoder() const override {
+        return true;
+    }
+
+    std::shared_ptr<QuickView::IAnimationDecoder> GetOriginalDecoder() const {
+        return m_originalDecoder;
+    }
+
+private:
+    std::vector<std::shared_ptr<QuickView::RawImageFrame>> m_frames;
+    uint32_t m_currentIndex = 0;
+    std::shared_ptr<QuickView::IAnimationDecoder> m_originalDecoder;
+};
+
+struct AsyncSrAnimationResult {
+    uint64_t requestId = 0;
+    std::wstring imagePath;
+    std::string modelId;
+    float modelScale = 4.0f;
+    std::shared_ptr<SrMemoryAnimator> srAnimator;
+    uint32_t totalFrames = 0;
+    double durationMs = 0.0;
+    HRESULT hr = E_FAIL;
+};
+
 static std::atomic<uint64_t> s_srRequestSeq{0};
 static std::atomic<bool> s_isSrInProgress{false};
 
 // [QVX-SR] Single-Pass Promoted SR Texture Controller with Zero-Recomputation Viewport Caching
 static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false) {
-    if (!QuickView::PluginHost::Instance().IsSrPluginEnabled()) {
+    if (!QuickView::PluginHost::Instance().IsSrPluginEnabled() ||
+        QuickView::PluginHost::Instance().GetSrPluginInstallState() == QuickView::PluginInstallState::NotInstalled) {
         if (forceManual) {
             g_osd.Show(hwnd, AppStrings::OSD_SrPluginDisabledOrMissing, true, false, D2D1::ColorF(1.0f, 0.4f, 0.4f), OSDPosition::Bottom, 3000);
             RequestRepaint(PaintLayer::Dynamic);
@@ -6429,16 +6503,10 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
         return;
     }
 
-    auto frame = primaryPane.currentFrame;
-    if (!frame || !frame->pixels) {
-        frame = g_pImageEngine->GetCachedImage(primaryPane.path);
-    }
-    if (!frame || !frame->pixels) return;
-
-    std::wstring safetyReason;
-    if (!QuickView::PluginHost::Instance().CanExecuteSrOnDimensions(frame->width, frame->height, &safetyReason)) {
+    // [Vector / SVG Guard] Vector graphics scale losslessly without super-resolution
+    if (primaryPane.resource.isSvg || primaryPane.resource.isWebView) {
         if (forceManual) {
-            g_osd.Show(hwnd, safetyReason.c_str(), false, false, D2D1::ColorF(1.0f, 0.4f, 0.4f), OSDPosition::Bottom, 4000);
+            g_osd.Show(hwnd, AppStrings::OSD_SrVectorLosslessSkipped, false, false, D2D1::ColorF(0.4f, 0.8f, 1.0f), OSDPosition::Bottom, 3000);
             RequestRepaint(PaintLayer::Dynamic);
         }
         return;
@@ -6459,6 +6527,172 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
 
     float currentDisplayedW = vs.VisualSize.width * baseFit * primaryPane.view.Zoom;
     float pixelStretchRatio = (nativeW > 0.0f) ? (currentDisplayedW / nativeW) : 1.0f;
+
+    // =========================================================================
+    // [Full-Sequence Animated SR] Handle Multi-Frame Animation Super-Resolution
+    // =========================================================================
+    bool isAnimatedImage = (primaryPane.resource.animator != nullptr && primaryPane.resource.animator->IsAnimated());
+    if (isAnimatedImage) {
+        // If already converted to high-resolution memory animation, reuse directly
+        if (primaryPane.resource.animator->IsSrDecoder()) {
+            return;
+        }
+
+        // Trigger when forced manual or when zoomed in > 100% with auto-trigger enabled
+        if (!forceManual && pixelStretchRatio <= 1.001f) {
+            return;
+        }
+
+        auto animDecoder = primaryPane.resource.animator;
+        uint32_t totalFrames = animDecoder ? animDecoder->GetTotalFrames() : 0;
+        if (totalFrames <= 1) {
+            return;
+        }
+
+        // Safety threshold against abnormally long animations
+        constexpr uint32_t MAX_SR_ANIMATION_FRAMES = 200;
+        if (totalFrames > MAX_SR_ANIMATION_FRAMES) {
+            if (forceManual) {
+                wchar_t limitBuf[128];
+                swprintf_s(limitBuf, AppStrings::OSD_SrAnimationTooManyFrames, MAX_SR_ANIMATION_FRAMES);
+                g_osd.Show(hwnd, limitBuf, false, true, D2D1::ColorF(1.0f, 0.4f, 0.4f), OSDPosition::Bottom, 4000);
+                RequestRepaint(PaintLayer::Dynamic);
+            }
+            return;
+        }
+
+        if (s_isSrInProgress.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        // Pause animation playback immediately while computing full sequence
+        g_animPlaying = false;
+        KillTimer(hwnd, IDT_ANIMATION);
+
+        uint64_t curReqId = ++s_srRequestSeq;
+        s_isSrInProgress.store(true, std::memory_order_release);
+
+        std::string activeModelId = QuickView::PluginHost::Instance().GetSrModelId();
+        float targetScale = QuickView::PluginHost::Instance().GetCurrentSrModelScale();
+        if (targetScale < 2.0f) targetScale = 2.0f;
+
+        wchar_t initMsg[128];
+        swprintf_s(initMsg, AppStrings::OSD_SrAnimationProcessingFormat, 0, totalFrames);
+        g_osd.StartPersistentTask(hwnd, initMsg, D2D1::ColorF(1.0f, 0.85f, 0.2f), OSDPosition::Bottom, 0.0f);
+        RequestRepaint(PaintLayer::Dynamic);
+
+        std::wstring curPath = primaryPane.path;
+        std::thread([hwnd, curReqId, curPath, activeModelId, targetScale, animDecoder, totalFrames]() {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+
+            LARGE_INTEGER freq, t0, t1;
+            QueryPerformanceFrequency(&freq);
+            QueryPerformanceCounter(&t0);
+
+            std::vector<std::shared_ptr<QuickView::RawImageFrame>> srFrames;
+            srFrames.reserve(totalFrames);
+
+            bool allSucceeded = true;
+
+            for (uint32_t fIdx = 0; fIdx < totalFrames; ++fIdx) {
+                if (s_srRequestSeq.load(std::memory_order_acquire) != curReqId) {
+                    allSucceeded = false;
+                    break;
+                }
+
+                std::shared_ptr<QuickView::RawImageFrame> rawFrame;
+                {
+                    extern std::mutex g_animatorMutex;
+                    std::lock_guard<std::mutex> lock(g_animatorMutex);
+                    rawFrame = animDecoder->SeekToFrame(fIdx);
+                }
+
+                if (!rawFrame || !rawFrame->pixels) {
+                    allSucceeded = false;
+                    break;
+                }
+
+                QuickView::SimplePredicate cancelPred;
+                cancelPred.ctx = reinterpret_cast<void*>(static_cast<uintptr_t>(curReqId));
+                cancelPred.pfn = [](void* ctx) -> bool {
+                    uint64_t req = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ctx));
+                    return s_srRequestSeq.load(std::memory_order_acquire) != req;
+                };
+
+                ComPtr<ID3D11Texture2D> srTex;
+                HRESULT hr = g_renderEngine ? g_renderEngine->GenerateSuperResolutionTexture(*rawFrame, targetScale, &srTex, cancelPred, nullptr, nullptr) : E_FAIL;
+                if (FAILED(hr) || !srTex) {
+                    allSucceeded = false;
+                    break;
+                }
+
+                auto srFrame = std::make_shared<QuickView::RawImageFrame>();
+                HRESULT hrExtract = g_renderEngine ? g_renderEngine->ExtractTexturePixels(srTex.Get(), srFrame.get()) : E_FAIL;
+                if (FAILED(hrExtract) || !srFrame->pixels) {
+                    allSucceeded = false;
+                    break;
+                }
+
+                srFrame->frameMeta = rawFrame->frameMeta;
+                srFrames.push_back(std::move(srFrame));
+
+                // Update live OSD progress
+                float prog = static_cast<float>(fIdx + 1) / static_cast<float>(totalFrames);
+                wchar_t progBuf[128];
+                swprintf_s(progBuf, AppStrings::OSD_SrAnimationProcessingFormat, fIdx + 1, totalFrames);
+                g_osd.SetProgress(hwnd, prog);
+                g_osd.Show(hwnd, progBuf, false, false, D2D1::ColorF(1.0f, 0.85f, 0.2f), OSDPosition::Bottom, 60000, prog);
+            }
+
+            QueryPerformanceCounter(&t1);
+            double duration = (freq.QuadPart > 0) ? (t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart : 0.0;
+
+            auto* animRes = new AsyncSrAnimationResult();
+            animRes->requestId = curReqId;
+            animRes->imagePath = curPath;
+            animRes->modelId = activeModelId;
+            animRes->modelScale = targetScale;
+            animRes->totalFrames = static_cast<uint32_t>(srFrames.size());
+            animRes->durationMs = duration;
+
+            if (allSucceeded && srFrames.size() == totalFrames) {
+                animRes->srAnimator = std::make_shared<SrMemoryAnimator>(std::move(srFrames), animDecoder);
+                animRes->hr = S_OK;
+            } else {
+                animRes->hr = E_FAIL;
+            }
+
+            PostMessageW(hwnd, WM_SR_ANIMATION_COMPLETED, 0, reinterpret_cast<LPARAM>(animRes));
+        }).detach();
+
+        return;
+    }
+
+    auto frame = primaryPane.currentFrame;
+    if (!frame || !frame->pixels) {
+        frame = g_pImageEngine->GetCachedImage(primaryPane.path);
+    }
+    if (!frame || !frame->pixels) return;
+
+    // [QVX-SR] Check source image megapixel limit for auto trigger
+    if (!forceManual) {
+        float maxMp = QuickView::PluginHost::Instance().GetSrAutoTriggerMaxSourceMp();
+        if (maxMp < 16.0f - 0.05f) { // Values < 16.0 MP are strictly constrained limits (16.0 = unlimited)
+            float imageMp = static_cast<float>(static_cast<uint64_t>(frame->width) * frame->height) / 1000000.0f;
+            if (imageMp > maxMp) {
+                return; // Exceeds user-configured auto trigger limit, skip
+            }
+        }
+    }
+
+    std::wstring safetyReason;
+    if (!QuickView::PluginHost::Instance().CanExecuteSrOnDimensions(frame->width, frame->height, &safetyReason)) {
+        if (forceManual) {
+            g_osd.Show(hwnd, safetyReason.c_str(), false, false, D2D1::ColorF(1.0f, 0.4f, 0.4f), OSDPosition::Bottom, 4000);
+            RequestRepaint(PaintLayer::Dynamic);
+        }
+        return;
+    }
 
     std::string activeModelId = QuickView::PluginHost::Instance().GetSrModelId();
     float targetScale = 2.0f;
@@ -6508,22 +6742,38 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
         }
 
         // If already in progress for this request sequence, avoid duplicate threads
-        if (s_isSrInProgress.load()) {
+        if (s_isSrInProgress.load(std::memory_order_acquire)) {
             return;
         }
 
         uint64_t curReqId = ++s_srRequestSeq;
-        s_isSrInProgress.store(true);
+        s_isSrInProgress.store(true, std::memory_order_release);
 
-        // Immediate OSD feedback on UI thread
-        g_osd.Show(hwnd, AppStrings::OSD_SrProcessing, false, false, D2D1::ColorF(1.0f, 0.85f, 0.2f), OSDPosition::Bottom, 10000);
+        // Immediate persistent OSD task feedback on UI thread with initial glow underline
+        g_osd.StartPersistentTask(hwnd, AppStrings::OSD_SrProcessing, D2D1::ColorF(1.0f, 0.85f, 0.2f), OSDPosition::Bottom, 0.0f);
         RequestRepaint(PaintLayer::Dynamic);
 
         std::wstring curPath = primaryPane.path;
         bool hasAlpha = (frame->format != QuickView::PixelFormat::BGRX8888);
         std::thread([hwnd, curReqId, curPath, activeModelId, targetScale, frame, hasAlpha, forceManual]() {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+
+            QuickView::SimplePredicate cancelPred;
+            cancelPred.ctx = reinterpret_cast<void*>(static_cast<uintptr_t>(curReqId));
+            cancelPred.pfn = [](void* ctx) -> bool {
+                uint64_t req = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ctx));
+                return s_srRequestSeq.load(std::memory_order_acquire) != req;
+            };
+
+            QVX_ProgressCallback onProgress = [](float prog, void* userData) {
+                HWND h = reinterpret_cast<HWND>(userData);
+                if (h && s_isSrInProgress.load(std::memory_order_acquire)) {
+                    g_osd.SetProgress(h, prog);
+                }
+            };
+
             ComPtr<ID3D11Texture2D> srTex;
-            HRESULT hr = g_renderEngine ? g_renderEngine->GenerateSuperResolutionTexture(*frame, targetScale, &srTex) : E_FAIL;
+            HRESULT hr = g_renderEngine ? g_renderEngine->GenerateSuperResolutionTexture(*frame, targetScale, &srTex, cancelPred, onProgress, reinterpret_cast<void*>(hwnd)) : E_FAIL;
 
             auto* res = new AsyncSrResult();
             res->requestId = curReqId;
@@ -6560,6 +6810,18 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
             RenderImageToDComp(hwnd, primaryPane.resource, true);
             SyncDCompState(hwnd, winW, winH, false);
             RequestRepaint(PaintLayer::Dynamic | PaintLayer::Image | PaintLayer::Static);
+        }
+    }
+}
+
+// [QVX-SR] Centralized Debounced Super-Resolution Scheduler
+void ScheduleDebouncedSuperResolution(HWND hwnd) {
+    if (!hwnd || !g_renderEngine) return;
+    if (QuickView::PluginHost::Instance().IsSrPluginEnabled() && QuickView::PluginHost::Instance().IsSrAutoTriggerEnabled()) {
+        if (g_config.SrDebounceDelayMs > 0) {
+            SetTimer(hwnd, TIMER_ID_SR_DEBOUNCE, (UINT)g_config.SrDebounceDelayMs, nullptr);
+        } else {
+            TriggerDebouncedSuperResolution(hwnd, false);
         }
     }
 }
@@ -8420,6 +8682,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         s_maintainAbsoluteScale = false;
         s_resizeSnapLocked = false;
+        ScheduleDebouncedSuperResolution(hwnd);
         return 0;
     }
     case WM_WINDOWPOSCHANGED: {
@@ -8568,10 +8831,68 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                                modelDisplayName.c_str(),
                                res->durationMs);
                 }
-                g_osd.Show(hwnd, msg, false, false, D2D1::ColorF(0.4f, 1.0f, 0.4f), OSDPosition::Bottom, 2000);
+                g_osd.EndPersistentTask(hwnd, msg, false, D2D1::ColorF(0.4f, 1.0f, 0.4f), 2000);
             }
         } else if (FAILED(res->hr) && res->requestId == s_srRequestSeq.load()) {
-            g_osd.Show(hwnd, AppStrings::OSD_SrFailed, true, false, D2D1::ColorF(1.0f, 0.3f, 0.3f), OSDPosition::Bottom, 3000);
+            g_osd.EndPersistentTask(hwnd, AppStrings::OSD_SrFailed, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+        }
+        return 0;
+    }
+
+    // [QVX-SR] Background Full-Sequence Animation Neural Super-Resolution finished
+    case WM_SR_ANIMATION_COMPLETED: {
+        s_isSrInProgress.store(false, std::memory_order_release);
+        auto* res = reinterpret_cast<AsyncSrAnimationResult*>(lParam);
+        if (!res) return 0;
+
+        std::unique_ptr<AsyncSrAnimationResult> autoDelete(res);
+        auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+
+        if (SUCCEEDED(res->hr) && res->srAnimator && res->requestId == s_srRequestSeq.load() && primaryPane.path == res->imagePath) {
+            primaryPane.resource.animator = res->srAnimator;
+            primaryPane.metadata.SrWidth = static_cast<UINT>(primaryPane.metadata.Width * res->modelScale);
+            primaryPane.metadata.SrHeight = static_cast<UINT>(primaryPane.metadata.Height * res->modelScale);
+            primaryPane.metadata.SrScale = res->modelScale;
+            primaryPane.metadata.HasSr = true;
+            primaryPane.resource.srScale = res->modelScale;
+            primaryPane.resource.currentSrLevel = res->modelScale;
+
+            // Extract and upload Frame 0
+            auto firstFrame = primaryPane.resource.animator->SeekToFrame(0);
+            if (firstFrame && firstFrame->pixels) {
+                ComPtr<ID2D1Bitmap> firstBitmap;
+                if (g_renderEngine && SUCCEEDED(g_renderEngine->UploadRawFrameToGPU(*firstFrame, &firstBitmap)) && firstBitmap) {
+                    primaryPane.resource.bitmap = firstBitmap;
+                    primaryPane.resource.frameMeta = firstFrame->frameMeta;
+                }
+            }
+
+            // Resume playback immediately with high-resolution animation sequence
+            g_animPlaying = true;
+            uint32_t delayMs = primaryPane.resource.frameMeta.delayMs;
+            if (delayMs < 10) delayMs = 100;
+            float speedMult = g_toolbar.GetAnimSpeedMult();
+            if (speedMult > 0.01f) delayMs = static_cast<uint32_t>(delayMs / speedMult);
+            if (delayMs < 1) delayMs = 1;
+            SetTimer(hwnd, IDT_ANIMATION, delayMs, NULL);
+
+            RECT rcClient{};
+            GetClientRect(hwnd, &rcClient);
+            float winW = (float)rcClient.right;
+            float winH = (float)rcClient.bottom;
+            RenderImageToDComp(hwnd, primaryPane.resource, true);
+            SyncDCompState(hwnd, winW, winH, false);
+            RequestRepaint(PaintLayer::Dynamic | PaintLayer::Image | PaintLayer::Static);
+
+            std::wstring modelDisplayName = QuickView::PluginHost::Instance().GetModelDisplayName(res->modelId);
+            wchar_t msg[128];
+            swprintf_s(msg, AppStrings::OSD_SrAnimationSuccessFormat,
+                       modelDisplayName.c_str(),
+                       res->totalFrames,
+                       res->durationMs / 1000.0);
+            g_osd.EndPersistentTask(hwnd, msg, false, D2D1::ColorF(0.4f, 1.0f, 0.4f), 3000);
+        } else if (FAILED(res->hr) && res->requestId == s_srRequestSeq.load()) {
+            g_osd.EndPersistentTask(hwnd, AppStrings::OSD_SrFailed, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
         }
         return 0;
     }
@@ -9009,6 +9330,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 if (GetClientRect(hwnd, &rcIdle)) {
                     SyncDCompState(hwnd, (float)rcIdle.right, (float)rcIdle.bottom, false);
                 }
+                ScheduleDebouncedSuperResolution(hwnd);
             }
             // Keep minimap + edge overflow indicators in sync while DComp zoom animates.
             RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
@@ -9063,12 +9385,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         if (wParam == OSD_TIMER_ID) {
              RequestRepaint(PaintLayer::Dynamic);  // Heartbeat for smooth fade
              if (!g_osd.IsVisible()) {
-                 if (s_isSrInProgress.load()) {
-                     // Auto-resume background neural SR status when transient zoom OSD expires
-                     g_osd.Show(hwnd, L"神经网络计算中 (AI Upscaling)...", false, false, D2D1::ColorF(1.0f, 0.85f, 0.2f), OSDPosition::Bottom, 10000);
-                 } else {
-                     KillTimer(hwnd, OSD_TIMER_ID);
-                 }
+                 KillTimer(hwnd, OSD_TIMER_ID);
              }
         }
 
@@ -9369,6 +9686,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 OnPaint(hwnd);
             } else if (forceCommit && g_compEngine) {
                 g_compEngine->Commit();
+            }
+
+            if (!g_isLoading) {
+                ScheduleDebouncedSuperResolution(hwnd);
             }
         }
         return 0;
@@ -13146,6 +13467,7 @@ SKIP_EDGE_NAV:;
             }
             // Trigger repaint to center/resize image
             RequestRepaint(PaintLayer::All);
+            ScheduleDebouncedSuperResolution(hwnd);
             break;
         }
         case IDM_RENAME: {
@@ -14688,6 +15010,11 @@ void ProcessEngineEvents(HWND hwnd) {
                 } else if (!isPreview) {
                     KillTimer(hwnd, IDT_ANIMATION);
                 }
+
+                // [QVX-SR] Trigger debounced Super-Resolution check when image/animation is loaded and displayed
+                if (!isPreview) {
+                    ScheduleDebouncedSuperResolution(hwnd);
+                }
                 
                 // Cursor Update
                 POINT pt;
@@ -16227,20 +16554,20 @@ void OnPaint(HWND hwnd) {
         // Sync pin state
         g_uiRenderer->SetPinActive(g_config.AlwaysOnTop);
         
-        // Sync OSD state (Instant cut, zero fade animation)
+        // Sync OSD state (Instant cut, zero fade animation, seamless persistent task fallback)
         if (g_osd.IsVisible()) {
-            // Resolve text color from OSDState
-            D2D1_COLOR_F osdColor = g_osd.CustomColor;
-            if (osdColor.a == 0.0f) {
-                // No custom color - use default based on type
-                if (g_osd.IsError) osdColor = D2D1::ColorF(D2D1::ColorF::Red);
-                else if (g_osd.IsWarning) osdColor = D2D1::ColorF(D2D1::ColorF::Yellow);
-                else osdColor = D2D1::ColorF(D2D1::ColorF::White);
-            }
-            if (g_osd.IsCompareOSD) {
-                g_uiRenderer->SetCompareOSD(g_osd.MessageLeft, g_osd.MessageRight, 1.0f, osdColor);
+            std::wstring activeMsg;
+            float activeProg = -1.0f;
+            D2D1_COLOR_F activeColor = D2D1::ColorF(D2D1::ColorF::White);
+            OSDPosition activePos = OSDPosition::Bottom;
+            bool isCompare = false;
+
+            g_osd.GetActiveState(activeMsg, activeProg, activeColor, activePos, isCompare);
+
+            if (isCompare) {
+                g_uiRenderer->SetCompareOSD(g_osd.MessageLeft, g_osd.MessageRight, 1.0f, activeColor);
             } else {
-                g_uiRenderer->SetOSD(g_osd.Message, 1.0f, osdColor, g_osd.Position);
+                g_uiRenderer->SetOSD(activeMsg, 1.0f, activeColor, activePos, activeProg);
             }
         } else {
             g_uiRenderer->SetOSD(L"", 0);
@@ -16539,11 +16866,7 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
     RefreshSvgSurfaceAfterZoom(hwnd);
 
     // [QVX-SR] Trigger debounced Super-Resolution upscale when zoom settles
-    if (QuickView::PluginHost::Instance().IsSrPluginEnabled()) {
-        if (g_config.SrDebounceDelayMs > 0) {
-            SetTimer(hwnd, TIMER_ID_SR_DEBOUNCE, (UINT)g_config.SrDebounceDelayMs, nullptr);
-        }
-    }
+    ScheduleDebouncedSuperResolution(hwnd);
 }
 
 

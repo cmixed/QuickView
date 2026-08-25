@@ -2,6 +2,7 @@
 #include "AppStrings.h"
 #include <windows.h> // For GetUserDefaultUILanguage
 #include "EditState.h"
+#include "Plugin/PluginHost.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -400,6 +401,9 @@ const wchar_t *Settings_Label_EnableSrPlugin = nullptr;
 const wchar_t *Settings_Tooltip_EnableSrPlugin = nullptr;
 const wchar_t *Settings_Label_SrPluginModule = nullptr;
 const wchar_t *Settings_Label_SrAutoTrigger = nullptr;
+const wchar_t *Settings_Label_SrAutoTriggerMaxSourceMp = nullptr;
+const wchar_t *Settings_Tooltip_SrAutoTriggerMaxSourceMp = nullptr;
+const wchar_t *Settings_Value_Unlimited = nullptr;
 const wchar_t *Settings_Label_SrOpenInCompare = nullptr;
 const wchar_t *Settings_Label_SrPromptModel = nullptr;
 const wchar_t *Settings_Button_DownloadSrPlugin = nullptr;
@@ -416,13 +420,33 @@ const wchar_t *Settings_Label_SrSharpness = nullptr;
 const wchar_t *Settings_Tooltip_SrSharpness = nullptr;
 const wchar_t *Settings_Label_SrDenoise = nullptr;
 const wchar_t *Settings_Tooltip_SrDenoise = nullptr;
-const wchar_t *Settings_Label_SrDownload = nullptr;
-const wchar_t *Settings_Tooltip_SrDownload = nullptr;
+const wchar_t *Settings_Segment_InstalledPlugins = nullptr;
+const wchar_t *Settings_Segment_Marketplace = nullptr;
+const wchar_t *Settings_Label_SrEngine = nullptr;
+const wchar_t *Settings_Label_SrModelStatus = nullptr;
+const wchar_t *Settings_Format_DownloadModel = nullptr;
+const wchar_t *Settings_Header_SrComponent = nullptr;
+const wchar_t *Settings_Label_QuickEnableEngine = nullptr;
+const wchar_t *Settings_Button_QuickEnableNcnn = nullptr;
+const wchar_t *Settings_Label_OnlineExtensions = nullptr;
+const wchar_t *Settings_Button_BrowseMarketplace = nullptr;
+const wchar_t *Settings_Label_MarketManifest = nullptr;
+const wchar_t *Settings_Button_RefreshManifest = nullptr;
+const wchar_t *Settings_Button_SyncingManifest = nullptr;
+const wchar_t *Settings_Format_PluginPackageSize = nullptr;
+const wchar_t *Settings_Button_InstalledUpToDate = nullptr;
+const wchar_t *Settings_Format_UpdateTo = nullptr;
+const wchar_t *Settings_Button_InstallPlugin = nullptr;
 const wchar_t *OSD_SrProcessing = nullptr;
 const wchar_t *OSD_SrSuccessFormat = nullptr;
 const wchar_t *OSD_SrSuccessFormatSimple = nullptr;
 const wchar_t *OSD_SrFailed = nullptr;
 const wchar_t *OSD_SrPluginDisabledOrMissing = nullptr;
+const wchar_t *OSD_SrAnimationProcessingFormat = nullptr;
+const wchar_t *OSD_SrAnimationSuccessFormat = nullptr;
+const wchar_t *OSD_SrVectorLosslessSkipped = nullptr;
+const wchar_t *OSD_SrAnimationTooManyFrames = nullptr;
+const wchar_t *OSD_SrImageTooLargeFormat = nullptr;
 const wchar_t *Dialog_Title_SelectSrModel = nullptr;
 const wchar_t *Dialog_Msg_SelectSrModel = nullptr;
 const wchar_t *Dialog_Checkbox_RememberSrModelChoice = nullptr;
@@ -1004,6 +1028,9 @@ struct LanguageTable {
     const wchar_t *Settings_Tooltip_EnableSrPlugin;
     const wchar_t *Settings_Label_SrPluginModule;
     const wchar_t *Settings_Label_SrAutoTrigger;
+    const wchar_t *Settings_Label_SrAutoTriggerMaxSourceMp;
+    const wchar_t *Settings_Tooltip_SrAutoTriggerMaxSourceMp;
+    const wchar_t *Settings_Value_Unlimited;
     const wchar_t *Settings_Label_SrOpenInCompare;
     const wchar_t *Settings_Label_SrPromptModel;
     const wchar_t *Settings_Button_DownloadSrPlugin;
@@ -1019,13 +1046,33 @@ struct LanguageTable {
     const wchar_t *Settings_Tooltip_SrSharpness;
     const wchar_t *Settings_Label_SrDenoise;
     const wchar_t *Settings_Tooltip_SrDenoise;
-    const wchar_t *Settings_Label_SrDownload;
-    const wchar_t *Settings_Tooltip_SrDownload;
+    const wchar_t *Settings_Segment_InstalledPlugins;
+    const wchar_t *Settings_Segment_Marketplace;
+    const wchar_t *Settings_Label_SrEngine;
+    const wchar_t *Settings_Label_SrModelStatus;
+    const wchar_t *Settings_Format_DownloadModel;
+    const wchar_t *Settings_Header_SrComponent;
+    const wchar_t *Settings_Label_QuickEnableEngine;
+    const wchar_t *Settings_Button_QuickEnableNcnn;
+    const wchar_t *Settings_Label_OnlineExtensions;
+    const wchar_t *Settings_Button_BrowseMarketplace;
+    const wchar_t *Settings_Label_MarketManifest;
+    const wchar_t *Settings_Button_RefreshManifest;
+    const wchar_t *Settings_Button_SyncingManifest;
+    const wchar_t *Settings_Format_PluginPackageSize;
+    const wchar_t *Settings_Button_InstalledUpToDate;
+    const wchar_t *Settings_Format_UpdateTo;
+    const wchar_t *Settings_Button_InstallPlugin;
     const wchar_t *OSD_SrProcessing;
     const wchar_t *OSD_SrSuccessFormat;
     const wchar_t *OSD_SrSuccessFormatSimple;
     const wchar_t *OSD_SrFailed;
     const wchar_t *OSD_SrPluginDisabledOrMissing;
+    const wchar_t *OSD_SrAnimationProcessingFormat;
+    const wchar_t *OSD_SrAnimationSuccessFormat;
+    const wchar_t *OSD_SrVectorLosslessSkipped;
+    const wchar_t *OSD_SrAnimationTooManyFrames;
+    const wchar_t *OSD_SrImageTooLargeFormat;
     const wchar_t *Dialog_Title_SelectSrModel;
     const wchar_t *Dialog_Msg_SelectSrModel;
     const wchar_t *Dialog_Checkbox_RememberSrModelChoice;
@@ -1611,6 +1658,9 @@ static const LanguageTable Table_EN = {
     L"Enable external neural upscaling / super-resolution plugin (.qvx) from plugins folder.", // Settings_Tooltip_EnableSrPlugin
     L"Plugin Module", // Settings_Label_SrPluginModule
     L"Auto Trigger", // Settings_Label_SrAutoTrigger
+    L"Max Source Size", // Settings_Label_SrAutoTriggerMaxSourceMp
+    L"Limit the maximum source image megapixels (MP) for automatic super-resolution. Images exceeding this size will skip auto SR to save VRAM and compute. Drag to the far right for unlimited.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Unlimited", // Settings_Value_Unlimited
     L"Show in Compare Mode on Manual Trigger", // Settings_Label_SrOpenInCompare
     L"Prompt Model Selection on Manual Trigger", // Settings_Label_SrPromptModel
     L"Download Super-Resolution Plugin (~15 MB)", // Settings_Button_DownloadSrPlugin
@@ -1626,13 +1676,33 @@ static const LanguageTable Table_EN = {
     L"Adjust edge sharpening strength for AI super-resolution plugin.", // Settings_Tooltip_SrSharpness
     L"AI Denoise", // Settings_Label_SrDenoise
     L"Adjust pre-denoising strength for neural super-resolution.", // Settings_Tooltip_SrDenoise
-    L"Download / Update Plugins", // Settings_Label_SrDownload
-    L"Download or update super-resolution plugin from official release.", // Settings_Tooltip_SrDownload
+    L"Installed Extensions", // Settings_Segment_InstalledPlugins
+    L"Marketplace", // Settings_Segment_Marketplace
+    L"Backend Engine", // Settings_Label_SrEngine
+    L"Model Status", // Settings_Label_SrModelStatus
+    L"Download Model (~%llu MB)", // Settings_Format_DownloadModel
+    L"Super-Resolution AI Component", // Settings_Header_SrComponent
+    L"Quick Enable Engine", // Settings_Label_QuickEnableEngine
+    L"⚡ Enable Real-ESRGAN NCNN Vulkan Engine", // Settings_Button_QuickEnableNcnn
+    L"Online Extensions & Models", // Settings_Label_OnlineExtensions
+    L"🌐 Browse Online Marketplace", // Settings_Button_BrowseMarketplace
+    L"Marketplace Manifest", // Settings_Label_MarketManifest
+    L"🔄 Refresh Manifest", // Settings_Button_RefreshManifest
+    L"Syncing from cloud...", // Settings_Button_SyncingManifest
+    L"Plugin Package (~%llu MB)", // Settings_Format_PluginPackageSize
+    L"✓ Installed (Up-to-date)", // Settings_Button_InstalledUpToDate
+    L"⚡ Update to v%ls", // Settings_Format_UpdateTo
+    L"⚡ Install", // Settings_Button_InstallPlugin
     L"AI Super-Resolution Processing...", // OSD_SrProcessing
     L"✓ AI Upscale Ready: %s [%.0fx] (%.1f ms)", // OSD_SrSuccessFormat
     L"✓ AI Upscale Ready: %s (%.1f ms)", // OSD_SrSuccessFormatSimple
     L"✗ AI Super-Resolution Failed", // OSD_SrFailed
     L"AI Super-Resolution plugin is not enabled or not installed", // OSD_SrPluginDisabledOrMissing
+    L"Upscaling animation sequence (%u/%u frames)...", // OSD_SrAnimationProcessingFormat
+    L"✓ Animation AI Upscale Ready: %s (%u frames in %.2f s)", // OSD_SrAnimationSuccessFormat
+    L"Vector graphics scale losslessly without AI super-resolution", // OSD_SrVectorLosslessSkipped
+    L"Animation has too many frames (> %u), skipped full-sequence SR", // OSD_SrAnimationTooManyFrames
+    L"Image resolution is too large (%ux%u, >16 MP), skipped AI upscale to avoid VRAM overflow", // OSD_SrImageTooLargeFormat
     L"Select AI Super-Resolution Model", // Dialog_Title_SelectSrModel
     L"Choose the AI Super-Resolution model to execute:", // Dialog_Msg_SelectSrModel
     L"Remember choice and do not prompt on manual trigger", // Dialog_Checkbox_RememberSrModelChoice
@@ -2218,6 +2288,9 @@ static const LanguageTable Table_CN = {
     L"启用位于 plugins 目录的外部神经网络超分辨率扩展插件 (.qvx)。", // Settings_Tooltip_EnableSrPlugin
     L"超分辨率插件模块", // Settings_Label_SrPluginModule
     L"自动触发", // Settings_Label_SrAutoTrigger
+    L"原图尺寸限制", // Settings_Label_SrAutoTriggerMaxSourceMp
+    L"限制自动触发超分辨率的原始图片最大像素（MP）。超过此大小的图片将跳过自动超分以节省显存与算力，拖至最右侧为无限制。", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"无限制", // Settings_Value_Unlimited
     L"手动触发后在对比模式中显示", // Settings_Label_SrOpenInCompare
     L"手动触发时提示选择模型", // Settings_Label_SrPromptModel
     L"一键下载超分辨率插件 (~15 MB)", // Settings_Button_DownloadSrPlugin
@@ -2233,13 +2306,33 @@ static const LanguageTable Table_CN = {
     L"调节 AI 超分辨率插件的边缘轮廓锐化强度。", // Settings_Tooltip_SrSharpness
     L"AI 去噪强度", // Settings_Label_SrDenoise
     L"调节 AI 神经超分的预降噪处理强度。", // Settings_Tooltip_SrDenoise
-    L"下载 / 更新插件", // Settings_Label_SrDownload
-    L"从官方发布源自动下载最新超分插件包并放置于 plugins/ 目录。", // Settings_Tooltip_SrDownload
+    L"已安装扩展", // Settings_Segment_InstalledPlugins
+    L"云端市场", // Settings_Segment_Marketplace
+    L"超分辨率后端引擎", // Settings_Label_SrEngine
+    L"模型资源状态", // Settings_Label_SrModelStatus
+    L"下载该模型 (~%llu MB)", // Settings_Format_DownloadModel
+    L"超分辨率 AI 增强组件", // Settings_Header_SrComponent
+    L"快速启用超分引擎", // Settings_Label_QuickEnableEngine
+    L"⚡ 启用 Real-ESRGAN NCNN Vulkan 超分引擎", // Settings_Button_QuickEnableNcnn
+    L"在线扩展与模型", // Settings_Label_OnlineExtensions
+    L"🌐 前往云端市场浏览更多扩展", // Settings_Button_BrowseMarketplace
+    L"插件市场清单", // Settings_Label_MarketManifest
+    L"🔄 刷新插件清单", // Settings_Button_RefreshManifest
+    L"正在从云端同步清单...", // Settings_Button_SyncingManifest
+    L"插件组件包 (~%llu MB)", // Settings_Format_PluginPackageSize
+    L"✓ 已安装", // Settings_Button_InstalledUpToDate
+    L"⚡ 更新至 v%ls", // Settings_Format_UpdateTo
+    L"⚡ 获取并安装", // Settings_Button_InstallPlugin
     L"AI 超分辨率计算中...", // OSD_SrProcessing
     L"✓ AI 超分完成: %s [%.0fx] (耗时: %.1f ms)", // OSD_SrSuccessFormat
     L"✓ AI 超分完成: %s (耗时: %.1f ms)", // OSD_SrSuccessFormatSimple
     L"✗ AI 超分辨率执行失败", // OSD_SrFailed
     L"AI 超分辨率插件未启用或未安装", // OSD_SrPluginDisabledOrMissing
+    L"正在超分动画序列 (%u/%u 帧)...", // OSD_SrAnimationProcessingFormat
+    L"✓ 动画全帧超分完成: %s (%u 帧, 耗时: %.2f 秒)", // OSD_SrAnimationSuccessFormat
+    L"矢量图像支持无限无损缩放，无需神经网络超分辨率", // OSD_SrVectorLosslessSkipped
+    L"动图帧数过多（超过 %u 帧上限），已跳过全序列超分", // OSD_SrAnimationTooManyFrames
+    L"图像分辨率过大 (%ux%u, 超过 1600 万像素)，已阻止全图超分以防止显存溢出", // OSD_SrImageTooLargeFormat
     L"选择 AI 超分辨率模型", // Dialog_Title_SelectSrModel
     L"请选择要应用的 AI 超分辨率模型：", // Dialog_Msg_SelectSrModel
     L"记住选择，下次手动触发直接使用", // Dialog_Checkbox_RememberSrModelChoice
@@ -2825,6 +2918,9 @@ static const LanguageTable Table_TW = {
     L"啟用位於 plugins 目錄的外部神經網路超解析度擴充外掛 (.qvx)。", // Settings_Tooltip_EnableSrPlugin
     L"超解析度外掛模組", // Settings_Label_SrPluginModule
     L"自動觸發", // Settings_Label_SrAutoTrigger
+    L"原圖尺寸限制", // Settings_Label_SrAutoTriggerMaxSourceMp
+    L"限制自動觸發超解析度的原始圖片最大像素（MP）。超過此大小的圖片將跳過自動超分以節省顯存與算力，拖至最右側為無限制。", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"無限制", // Settings_Value_Unlimited
     L"手動觸發後在對比模式中顯示", // Settings_Label_SrOpenInCompare
     L"手動觸發時提示選擇模型", // Settings_Label_SrPromptModel
     L"一鍵下載超解析度外掛 (~15 MB)", // Settings_Button_DownloadSrPlugin
@@ -2840,13 +2936,33 @@ static const LanguageTable Table_TW = {
     L"調節 AI 超解析度外掛程式的邊緣輪廓銳化強度。", // Settings_Tooltip_SrSharpness
     L"AI 去噪強度", // Settings_Label_SrDenoise
     L"調節 AI 神經超分的預降噪處理強度。", // Settings_Tooltip_SrDenoise
-    L"下載 / 更新外掛程式", // Settings_Label_SrDownload
-    L"從官方發布源自動下載最新超分外掛程式包並放置於 plugins/ 目錄。", // Settings_Tooltip_SrDownload
+    L"已安裝擴充", // Settings_Segment_InstalledPlugins
+    L"雲端市場", // Settings_Segment_Marketplace
+    L"超解析度後端引擎", // Settings_Label_SrEngine
+    L"模型資源狀態", // Settings_Label_SrModelStatus
+    L"下載該模型 (~%llu MB)", // Settings_Format_DownloadModel
+    L"超解析度 AI 增強元件", // Settings_Header_SrComponent
+    L"快速啟用超分引擎", // Settings_Label_QuickEnableEngine
+    L"⚡ 啟用 Real-ESRGAN NCNN Vulkan 超分引擎", // Settings_Button_QuickEnableNcnn
+    L"線上擴充與模型", // Settings_Label_OnlineExtensions
+    L"🌐 前往雲端市場瀏覽更多擴充", // Settings_Button_BrowseMarketplace
+    L"外掛市場清單", // Settings_Label_MarketManifest
+    L"🔄 重新整理外掛清單", // Settings_Button_RefreshManifest
+    L"正在從雲端同步清單...", // Settings_Button_SyncingManifest
+    L"外掛元件包 (~%llu MB)", // Settings_Format_PluginPackageSize
+    L"✓ 已安裝", // Settings_Button_InstalledUpToDate
+    L"⚡ 更新至 v%ls", // Settings_Format_UpdateTo
+    L"⚡ 取得並安裝", // Settings_Button_InstallPlugin
     L"AI 超解析度計算中...", // OSD_SrProcessing
     L"✓ AI 超解析度完成: %s [%.0fx] (耗時: %.1f ms)", // OSD_SrSuccessFormat
     L"✓ AI 超解析度完成: %s (耗時: %.1f ms)", // OSD_SrSuccessFormatSimple
     L"✗ AI 超解析度執行失敗", // OSD_SrFailed
     L"AI 超解析度外掛程式未啟用或未安裝", // OSD_SrPluginDisabledOrMissing
+    L"正在超解析度動畫序列 (%u/%u 幀)...", // OSD_SrAnimationProcessingFormat
+    L"✓ 動畫全幀超解析度完成: %s (%u 幀, 耗時: %.2f 秒)", // OSD_SrAnimationSuccessFormat
+    L"向量圖形支援無限無損縮放，無需神經網路超解析度", // OSD_SrVectorLosslessSkipped
+    L"動圖幀數過多（超過 %u 幀上限），已跳過全序列超解析度", // OSD_SrAnimationTooManyFrames
+    L"影像解析度過大 (%ux%u, 超過 1600 萬像素)，已阻止全圖超解析度以防止視訊記憶體溢位", // OSD_SrImageTooLargeFormat
     L"選擇 AI 超解析度模型", // Dialog_Title_SelectSrModel
     L"請選擇要套用的 AI 超解析度模型：", // Dialog_Msg_SelectSrModel
     L"記住選擇，下次手動觸發直接使用", // Dialog_Checkbox_RememberSrModelChoice
@@ -3432,6 +3548,9 @@ static const LanguageTable Table_JA = {
     L"plugins フォルダ内の外部超解像プラグイン (.qvx) を有効にします。", // Settings_Tooltip_EnableSrPlugin
     L"プラグインモジュール", // Settings_Label_SrPluginModule
     L"自動トリガー", // Settings_Label_SrAutoTrigger
+    L"元画像サイズ制限", // Settings_Label_SrAutoTriggerMaxSourceMp
+    L"自動超解像を適用する元画像の最大画素数（MP）を制限します。このサイズを超える画像はVRAMとGPU負荷を抑えるため自動超解像をスキップします。右端までドラッグすると無制限になります。", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"無制限", // Settings_Value_Unlimited
     L"手動実行後に比較モードで表示", // Settings_Label_SrOpenInCompare
     L"手動トリガー時にモデル選択を表示", // Settings_Label_SrPromptModel
     L"超解像プラグインをダウンロード (~15 MB)", // Settings_Button_DownloadSrPlugin
@@ -3447,13 +3566,33 @@ static const LanguageTable Table_JA = {
     L"AI 超解像プラグインのエッジシャープネス強度を調整します。", // Settings_Tooltip_SrSharpness
     L"AI ノイズ低減", // Settings_Label_SrDenoise
     L"AI 超解像の事前ノイズ除去強度を調整します。", // Settings_Tooltip_SrDenoise
-    L"プラグインのダウンロード / 更新", // Settings_Label_SrDownload
-    L"公式リリースから最新の超解像プラグインを自動ダウンロードします。", // Settings_Tooltip_SrDownload
+    L"インストール済み拡張", // Settings_Segment_InstalledPlugins
+    L"マーケットプレイス", // Settings_Segment_Marketplace
+    L"超解像バックエンドエンジン", // Settings_Label_SrEngine
+    L"モデル状態", // Settings_Label_SrModelStatus
+    L"このモデルをダウンロード (~%llu MB)", // Settings_Format_DownloadModel
+    L"超解像 AI コンポーネント", // Settings_Header_SrComponent
+    L"超解像エンジンを有効化", // Settings_Label_QuickEnableEngine
+    L"⚡ Real-ESRGAN NCNN Vulkan エンジンを有効化", // Settings_Button_QuickEnableNcnn
+    L"オンライン拡張機能とモデル", // Settings_Label_OnlineExtensions
+    L"🌐 マーケットプレイスを表示", // Settings_Button_BrowseMarketplace
+    L"プラグインリスト", // Settings_Label_MarketManifest
+    L"🔄 プラグインリストを更新", // Settings_Button_RefreshManifest
+    L"クラウドから同期中...", // Settings_Button_SyncingManifest
+    L"プラグインパッケージ (~%llu MB)", // Settings_Format_PluginPackageSize
+    L"✓ インストール済み", // Settings_Button_InstalledUpToDate
+    L"⚡ v%ls に更新", // Settings_Format_UpdateTo
+    L"⚡ 入手してインストール", // Settings_Button_InstallPlugin
     L"AI 超解像処理中...", // OSD_SrProcessing
     L"✓ AI 超解像完了: %s [%.0fx] (処理時間: %.1f ms)", // OSD_SrSuccessFormat
     L"✓ AI 超解像完了: %s (処理時間: %.1f ms)", // OSD_SrSuccessFormatSimple
     L"✗ AI 超解像の実行に失敗しました", // OSD_SrFailed
     L"AI 超解像プラグインが無効または未インストールです", // OSD_SrPluginDisabledOrMissing
+    L"アニメーションシーケンスを超解像処理中 (%u/%u フレーム)...", // OSD_SrAnimationProcessingFormat
+    L"✓ アニメーション全フレーム超解像完了: %s (%u フレーム, 処理時間: %.2f 秒)", // OSD_SrAnimationSuccessFormat
+    L"ベクター画像は可逆拡大に対応しているため、AI超解像は不要です", // OSD_SrVectorLosslessSkipped
+    L"アニメーションのフレーム数が多すぎるため（%u フレーム超過）、処理をスキップしました", // OSD_SrAnimationTooManyFrames
+    L"画像解像度が大きすぎます (%ux%u, 1600万画素超)。VRAMオーバーフロー防止のためAI超解像をスキップしました", // OSD_SrImageTooLargeFormat
     L"AI 超解像モデルを選択", // Dialog_Title_SelectSrModel
     L"適用する AI 超解像モデルを選択してください:", // Dialog_Msg_SelectSrModel
     L"選択を記憶し、次回の手動実行時に再確認しない", // Dialog_Checkbox_RememberSrModelChoice
@@ -4039,6 +4178,9 @@ static const LanguageTable Table_RU = {
     L"Включить внешний плагин сверхразрешения (.qvx) из папки plugins.", // Settings_Tooltip_EnableSrPlugin
     L"Модуль плагина", // Settings_Label_SrPluginModule
     L"Автоматический запуск", // Settings_Label_SrAutoTrigger
+    L"Лимит размера оригинала", // Settings_Label_SrAutoTriggerMaxSourceMp
+    L"Ограничение максимального разрешения оригинала (МП) для автоматического супер-разрешения. Изображения большего размера будут пропущены. Крайнее правое положение — без ограничений.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Без ограничений", // Settings_Value_Unlimited
     L"Показать в режиме сравнения при ручном запуске", // Settings_Label_SrOpenInCompare
     L"Запрашивать выбор модели при ручном запуске", // Settings_Label_SrPromptModel
     L"Скачать плагин AI сверхразрешения (~15 MB)", // Settings_Button_DownloadSrPlugin
@@ -4054,13 +4196,33 @@ static const LanguageTable Table_RU = {
     L"Настройка резкости краев для AI плагина.", // Settings_Tooltip_SrSharpness
     L"AI Шумоподавление", // Settings_Label_SrDenoise
     L"Настройка предварительного шумоподавления для AI сверхразрешения.", // Settings_Tooltip_SrDenoise
-    L"Скачать / Обновить плагины", // Settings_Label_SrDownload
-    L"Скачать или обновить плагины из официального репозитория.", // Settings_Tooltip_SrDownload
+    L"Установленные расширения", // Settings_Segment_InstalledPlugins
+    L"Каталог расширений", // Settings_Segment_Marketplace
+    L"Движок сверхразрешения", // Settings_Label_SrEngine
+    L"Состояние модели", // Settings_Label_SrModelStatus
+    L"Скачать эту модель (~%llu МБ)", // Settings_Format_DownloadModel
+    L"Компонент AI сверхразрешения", // Settings_Header_SrComponent
+    L"Включить движок сверхразрешения", // Settings_Label_QuickEnableEngine
+    L"⚡ Включить движок Real-ESRGAN NCNN Vulkan", // Settings_Button_QuickEnableNcnn
+    L"Онлайн расширения и модели", // Settings_Label_OnlineExtensions
+    L"🌐 Открыть каталог расширений", // Settings_Button_BrowseMarketplace
+    L"Список плагинов", // Settings_Label_MarketManifest
+    L"🔄 Обновить список плагинов", // Settings_Button_RefreshManifest
+    L"Синхронизация с облаком...", // Settings_Button_SyncingManifest
+    L"Пакет плагина (~%llu МБ)", // Settings_Format_PluginPackageSize
+    L"✓ Установлено", // Settings_Button_InstalledUpToDate
+    L"⚡ Обновить до v%ls", // Settings_Format_UpdateTo
+    L"⚡ Скачать и установить", // Settings_Button_InstallPlugin
     L"Идет обработка сверхразрешения ИИ...", // OSD_SrProcessing
     L"✓ ИИ Сверхразрешение готово: %s [%.0fx] (%.1f мс)", // OSD_SrSuccessFormat
     L"✓ ИИ Сверхразрешение готово: %s (%.1f мс)", // OSD_SrSuccessFormatSimple
     L"✗ Ошибка выполнения ИИ сверхразрешения", // OSD_SrFailed
     L"Плагин ИИ сверхразрешения отключен или не установлен", // OSD_SrPluginDisabledOrMissing
+    L"Идет обработка анимации (%u/%u кадров)...", // OSD_SrAnimationProcessingFormat
+    L"✓ ИИ Сверхразрешение анимации готово: %s (%u кадров за %.2f с)", // OSD_SrAnimationSuccessFormat
+    L"Векторная графика масштабируется без потерь, ИИ сверхразрешение не требуется", // OSD_SrVectorLosslessSkipped
+    L"Слишком много кадров анимации (> %u), пропуск полного сверхразрешения", // OSD_SrAnimationTooManyFrames
+    L"Слишком высокое разрешение изображения (%ux%u, >16 Мп), ИИ-масштабирование пропущено во избежание переполнения видеопамяти", // OSD_SrImageTooLargeFormat
     L"Выбор модели ИИ сверхразрешения", // Dialog_Title_SelectSrModel
     L"Выберите модель ИИ сверхразрешения для применения:", // Dialog_Msg_SelectSrModel
     L"Запомнить выбор и не запрашивать при ручном запуске", // Dialog_Checkbox_RememberSrModelChoice
@@ -4646,6 +4808,9 @@ static const LanguageTable Table_DE = {
     L"Externes KI-Upscaling / Super-Resolution-Plugin (.qvx) aus dem plugins-Ordner aktivieren.", // Settings_Tooltip_EnableSrPlugin
     L"Plugin-Modul", // Settings_Label_SrPluginModule
     L"Automatisches Auslösen", // Settings_Label_SrAutoTrigger
+    L"Maximale Quellgröße", // Settings_Label_SrAutoTriggerMaxSourceMp
+    L"Begrenzt die maximale Megapixelzahl (MP) des Quellbildes für die automatische Super-Resolution. Größere Bilder werden übersprungen. Ganz rechts bedeutet unbegrenzt.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Unbegrenzt", // Settings_Value_Unlimited
     L"Nach manuellem Auslösen im Vergleichsmodus anzeigen", // Settings_Label_SrOpenInCompare
     L"Modellauswahl bei manuellem Auslösen abfragen", // Settings_Label_SrPromptModel
     L"Super-Resolution Plugin herunterladen (~15 MB)", // Settings_Button_DownloadSrPlugin
@@ -4661,13 +4826,33 @@ static const LanguageTable Table_DE = {
     L"Kantenschärfe für KI-Super-Resolution-Plugin anpassen.", // Settings_Tooltip_SrSharpness
     L"KI-Rauschunterdrückung", // Settings_Label_SrDenoise
     L"Vorab-Rauschunterdrückung für neuronale Super-Resolution anpassen.", // Settings_Tooltip_SrDenoise
-    L"Plugins herunterladen / aktualisieren", // Settings_Label_SrDownload
-    L"Super-Resolution-Plugin aus offiziellem Release herunterladen oder aktualisieren.", // Settings_Tooltip_SrDownload
+    L"Installierte Erweiterungen", // Settings_Segment_InstalledPlugins
+    L"Marktplatz", // Settings_Segment_Marketplace
+    L"Super-Resolution-Engine", // Settings_Label_SrEngine
+    L"Modellstatus", // Settings_Label_SrModelStatus
+    L"Dieses Modell herunterladen (~%llu MB)", // Settings_Format_DownloadModel
+    L"KI-Super-Resolution-Komponente", // Settings_Header_SrComponent
+    L"Super-Resolution-Engine aktivieren", // Settings_Label_QuickEnableEngine
+    L"⚡ Real-ESRGAN NCNN Vulkan Engine aktivieren", // Settings_Button_QuickEnableNcnn
+    L"Online-Erweiterungen & Modelle", // Settings_Label_OnlineExtensions
+    L"🌐 Marktplatz durchsuchen", // Settings_Button_BrowseMarketplace
+    L"Plugin-Übersicht", // Settings_Label_MarketManifest
+    L"🔄 Plugin-Übersicht aktualisieren", // Settings_Button_RefreshManifest
+    L"Synchronisiere aus der Cloud...", // Settings_Button_SyncingManifest
+    L"Plugin-Paket (~%llu MB)", // Settings_Format_PluginPackageSize
+    L"✓ Installiert", // Settings_Button_InstalledUpToDate
+    L"⚡ Aktualisieren auf v%ls", // Settings_Format_UpdateTo
+    L"⚡ Herunterladen & Installieren", // Settings_Button_InstallPlugin
     L"KI-Super-Resolution wird berechnet...", // OSD_SrProcessing
     L"✓ KI-Super-Resolution fertig: %s [%.0fx] (%.1f ms)", // OSD_SrSuccessFormat
     L"✓ KI-Super-Resolution fertig: %s (%.1f ms)", // OSD_SrSuccessFormatSimple
     L"✗ KI-Super-Resolution fehlgeschlagen", // OSD_SrFailed
     L"KI-Super-Resolution-Plugin ist deaktiviert oder nicht installiert", // OSD_SrPluginDisabledOrMissing
+    L"Animationssequenz wird berechnet (%u/%u Bilder)...", // OSD_SrAnimationProcessingFormat
+    L"✓ KI-Super-Resolution für Animation fertig: %s (%u Bilder in %.2f s)", // OSD_SrAnimationSuccessFormat
+    L"Vektorgrafiken skalieren verlustfrei, KI-Super-Resolution nicht erforderlich", // OSD_SrVectorLosslessSkipped
+    L"Animation enthält zu viele Bilder (> %u), vollständige Super-Resolution übersprungen", // OSD_SrAnimationTooManyFrames
+    L"Bildauflösung zu groß (%ux%u, >16 MP), KI-Hochskalierung übersprungen, um VRAM-Überlauf zu verhindern", // OSD_SrImageTooLargeFormat
     L"KI-Super-Resolution-Modell auswählen", // Dialog_Title_SelectSrModel
     L"Wählen Sie das anzuwendende KI-Super-Resolution-Modell:", // Dialog_Msg_SelectSrModel
     L"Auswahl merken und bei manuellem Auslösen nicht erneut fragen", // Dialog_Checkbox_RememberSrModelChoice
@@ -5253,6 +5438,9 @@ static const LanguageTable Table_ES = {
     L"Habilita el complemento de superresolución / escalado por IA (.qvx) desde la carpeta plugins.", // Settings_Tooltip_EnableSrPlugin
     L"Módulo de plugin", // Settings_Label_SrPluginModule
     L"Activación automática", // Settings_Label_SrAutoTrigger
+    L"Límite de tamaño original", // Settings_Label_SrAutoTriggerMaxSourceMp
+    L"Limita los megapíxeles (MP) máximos de la imagen original para la superresolución automática. Las imágenes más grandes se omitirán. Arrastre hacia la derecha para sin límite.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Ilimitado", // Settings_Value_Unlimited
     L"Mostrar en modo comparación al activar manualmente", // Settings_Label_SrOpenInCompare
     L"Preguntar modelo al activar manualmente", // Settings_Label_SrPromptModel
     L"Descargar plugin de superresolución (~15 MB)", // Settings_Button_DownloadSrPlugin
@@ -5268,13 +5456,33 @@ static const LanguageTable Table_ES = {
     L"Ajusta la nitidez del complemento de superresolución IA.", // Settings_Tooltip_SrSharpness
     L"Reducción de ruido IA", // Settings_Label_SrDenoise
     L"Ajusta la reducción de ruido previa para superresolución IA.", // Settings_Tooltip_SrDenoise
-    L"Descargar / Actualizar complementos", // Settings_Label_SrDownload
-    L"Descargar o actualizar complementos desde el repositorio oficial.", // Settings_Tooltip_SrDownload
+    L"Extensiones instaladas", // Settings_Segment_InstalledPlugins
+    L"Catálogo", // Settings_Segment_Marketplace
+    L"Motor de superresolución", // Settings_Label_SrEngine
+    L"Estado del modelo", // Settings_Label_SrModelStatus
+    L"Descargar este modelo (~%llu MB)", // Settings_Format_DownloadModel
+    L"Componente de superresolución IA", // Settings_Header_SrComponent
+    L"Activar motor de superresolución", // Settings_Label_QuickEnableEngine
+    L"⚡ Activar motor Real-ESRGAN NCNN Vulkan", // Settings_Button_QuickEnableNcnn
+    L"Extensiones y modelos online", // Settings_Label_OnlineExtensions
+    L"🌐 Explorar catálogo", // Settings_Button_BrowseMarketplace
+    L"Lista de complementos", // Settings_Label_MarketManifest
+    L"🔄 Actualizar lista", // Settings_Button_RefreshManifest
+    L"Sincronizando con la nube...", // Settings_Button_SyncingManifest
+    L"Paquete del complemento (~%llu MB)", // Settings_Format_PluginPackageSize
+    L"✓ Instalado", // Settings_Button_InstalledUpToDate
+    L"⚡ Actualizar a v%ls", // Settings_Format_UpdateTo
+    L"⚡ Obtener e instalar", // Settings_Button_InstallPlugin
     L"Procesando superresolución IA...", // OSD_SrProcessing
     L"✓ Superresolución IA completada: %s [%.0fx] (%.1f ms)", // OSD_SrSuccessFormat
     L"✓ Superresolución IA completada: %s (%.1f ms)", // OSD_SrSuccessFormatSimple
     L"✗ Error al ejecutar superresolución IA", // OSD_SrFailed
     L"El plugin de superresolución IA no está habilitado o no está instalado", // OSD_SrPluginDisabledOrMissing
+    L"Procesando secuencia de animación (%u/%u fotogramas)...", // OSD_SrAnimationProcessingFormat
+    L"✓ Superresolución IA de animación lista: %s (%u fotogramas en %.2f s)", // OSD_SrAnimationSuccessFormat
+    L"Los gráficos vectoriales escalan sin pérdidas, no requieren superresolución IA", // OSD_SrVectorLosslessSkipped
+    L"La animación tiene demasiados fotogramas (> %u), se omitió la superresolución completa", // OSD_SrAnimationTooManyFrames
+    L"Resolución de imagen demasiado grande (%ux%u, >16 MP), escalado IA omitido para evitar desbordamiento de VRAM", // OSD_SrImageTooLargeFormat
     L"Seleccionar modelo de superresolución IA", // Dialog_Title_SelectSrModel
     L"Seleccione el modelo de superresolución IA que desea aplicar:", // Dialog_Msg_SelectSrModel
     L"Recordar elección y no preguntar al activar manualmente", // Dialog_Checkbox_RememberSrModelChoice
@@ -5860,6 +6068,9 @@ static const LanguageTable Table_FR = {
     L"Activer le plugin de super-résolution IA (.qvx) externe depuis le dossier plugins.", // Settings_Tooltip_EnableSrPlugin
     L"Module de plugin", // Settings_Label_SrPluginModule
     L"Déclenchement automatique", // Settings_Label_SrAutoTrigger
+    L"Taille max de la source", // Settings_Label_SrAutoTriggerMaxSourceMp
+    L"Limite le nombre maximal de mégapixels (MP) de l'image d'origine pour la super-résolution automatique. Les images plus grandes seront ignorées. Glissez tout à droite pour illimité.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Illimité", // Settings_Value_Unlimited
     L"Afficher en mode comparaison après déclenchement manuel", // Settings_Label_SrOpenInCompare
     L"Demander le modèle lors du déclenchement manuel", // Settings_Label_SrPromptModel
     L"Télécharger le plugin de super-résolution (~15 MB)", // Settings_Button_DownloadSrPlugin
@@ -5875,13 +6086,33 @@ static const LanguageTable Table_FR = {
     L"Ajuster la netteté du plugin de super-résolution IA.", // Settings_Tooltip_SrSharpness
     L"Débruitage IA", // Settings_Label_SrDenoise
     L"Ajuster le pré-débruitage pour la super-résolution IA.", // Settings_Tooltip_SrDenoise
-    L"Télécharger / Mettre à jour les plugins", // Settings_Label_SrDownload
-    L"Télécharger ou mettre à jour les plugins depuis la release officielle.", // Settings_Tooltip_SrDownload
+    L"Extensions installées", // Settings_Segment_InstalledPlugins
+    L"Catalogue", // Settings_Segment_Marketplace
+    L"Moteur de super-résolution", // Settings_Label_SrEngine
+    L"État du modèle", // Settings_Label_SrModelStatus
+    L"Télécharger ce modèle (~%llu MB)", // Settings_Format_DownloadModel
+    L"Composant de super-résolution IA", // Settings_Header_SrComponent
+    L"Activer le moteur de super-résolution", // Settings_Label_QuickEnableEngine
+    L"⚡ Activer le moteur Real-ESRGAN NCNN Vulkan", // Settings_Button_QuickEnableNcnn
+    L"Extensions et modèles en ligne", // Settings_Label_OnlineExtensions
+    L"🌐 Explorer le catalogue", // Settings_Button_BrowseMarketplace
+    L"Liste des plugins", // Settings_Label_MarketManifest
+    L"🔄 Actualiser la liste", // Settings_Button_RefreshManifest
+    L"Synchronisation avec le cloud...", // Settings_Button_SyncingManifest
+    L"Package du plugin (~%llu MB)", // Settings_Format_PluginPackageSize
+    L"✓ Installé", // Settings_Button_InstalledUpToDate
+    L"⚡ Mettre à jour vers v%ls", // Settings_Format_UpdateTo
+    L"⚡ Obtenir et installer", // Settings_Button_InstallPlugin
     L"Calcul de super-résolution IA en cours...", // OSD_SrProcessing
     L"✓ Super-résolution IA prête: %s [%.0fx] (%.1f ms)", // OSD_SrSuccessFormat
     L"✓ Super-résolution IA prête: %s (%.1f ms)", // OSD_SrSuccessFormatSimple
     L"✗ Échec de la super-résolution IA", // OSD_SrFailed
     L"Le plugin de super-résolution IA n'est pas activé ou non installé", // OSD_SrPluginDisabledOrMissing
+    L"Super-résolution de la séquence d'animation en cours (%u/%u images)...", // OSD_SrAnimationProcessingFormat
+    L"✓ Super-résolution IA d'animation prête: %s (%u images en %.2f s)", // OSD_SrAnimationSuccessFormat
+    L"Les graphiques vectoriels s'adaptent sans perte, la super-résolution IA n'est pas nécessaire", // OSD_SrVectorLosslessSkipped
+    L"L'animation contient trop d'images (> %u), super-résolution complète ignorée", // OSD_SrAnimationTooManyFrames
+    L"Résolution d'image trop élevée (%ux%u, >16 MP), mise à l'échelle IA ignorée pour éviter le dépassement de VRAM", // OSD_SrImageTooLargeFormat
     L"Sélectionner le modèle de super-résolution IA", // Dialog_Title_SelectSrModel
     L"Choisissez le modèle de super-résolution IA à appliquer :", // Dialog_Msg_SelectSrModel
     L"Mémoriser le choix et ne plus demander lors du déclenchement manuel", // Dialog_Checkbox_RememberSrModelChoice
@@ -6472,6 +6703,9 @@ void Apply(const LanguageTable& t) {
   Settings_Tooltip_EnableSrPlugin = t.Settings_Tooltip_EnableSrPlugin;
   Settings_Label_SrPluginModule = t.Settings_Label_SrPluginModule;
   Settings_Label_SrAutoTrigger = t.Settings_Label_SrAutoTrigger;
+  Settings_Label_SrAutoTriggerMaxSourceMp = t.Settings_Label_SrAutoTriggerMaxSourceMp;
+  Settings_Tooltip_SrAutoTriggerMaxSourceMp = t.Settings_Tooltip_SrAutoTriggerMaxSourceMp;
+  Settings_Value_Unlimited = t.Settings_Value_Unlimited;
   Settings_Label_SrOpenInCompare = t.Settings_Label_SrOpenInCompare;
   Settings_Label_SrPromptModel = t.Settings_Label_SrPromptModel;
   Settings_Button_DownloadSrPlugin = t.Settings_Button_DownloadSrPlugin;
@@ -6486,13 +6720,33 @@ void Apply(const LanguageTable& t) {
   Settings_Tooltip_SrSharpness = t.Settings_Tooltip_SrSharpness;
   Settings_Label_SrDenoise = t.Settings_Label_SrDenoise;
   Settings_Tooltip_SrDenoise = t.Settings_Tooltip_SrDenoise;
-  Settings_Label_SrDownload = t.Settings_Label_SrDownload;
-  Settings_Tooltip_SrDownload = t.Settings_Tooltip_SrDownload;
+  Settings_Segment_InstalledPlugins = t.Settings_Segment_InstalledPlugins;
+  Settings_Segment_Marketplace = t.Settings_Segment_Marketplace;
+  Settings_Label_SrEngine = t.Settings_Label_SrEngine;
+  Settings_Label_SrModelStatus = t.Settings_Label_SrModelStatus;
+  Settings_Format_DownloadModel = t.Settings_Format_DownloadModel;
+  Settings_Header_SrComponent = t.Settings_Header_SrComponent;
+  Settings_Label_QuickEnableEngine = t.Settings_Label_QuickEnableEngine;
+  Settings_Button_QuickEnableNcnn = t.Settings_Button_QuickEnableNcnn;
+  Settings_Label_OnlineExtensions = t.Settings_Label_OnlineExtensions;
+  Settings_Button_BrowseMarketplace = t.Settings_Button_BrowseMarketplace;
+  Settings_Label_MarketManifest = t.Settings_Label_MarketManifest;
+  Settings_Button_RefreshManifest = t.Settings_Button_RefreshManifest;
+  Settings_Button_SyncingManifest = t.Settings_Button_SyncingManifest;
+  Settings_Format_PluginPackageSize = t.Settings_Format_PluginPackageSize;
+  Settings_Button_InstalledUpToDate = t.Settings_Button_InstalledUpToDate;
+  Settings_Format_UpdateTo = t.Settings_Format_UpdateTo;
+  Settings_Button_InstallPlugin = t.Settings_Button_InstallPlugin;
   OSD_SrProcessing = t.OSD_SrProcessing;
   OSD_SrSuccessFormat = t.OSD_SrSuccessFormat;
   OSD_SrSuccessFormatSimple = t.OSD_SrSuccessFormatSimple;
   OSD_SrFailed = t.OSD_SrFailed;
   OSD_SrPluginDisabledOrMissing = t.OSD_SrPluginDisabledOrMissing;
+  OSD_SrAnimationProcessingFormat = t.OSD_SrAnimationProcessingFormat;
+  OSD_SrAnimationSuccessFormat = t.OSD_SrAnimationSuccessFormat;
+  OSD_SrVectorLosslessSkipped = t.OSD_SrVectorLosslessSkipped;
+  OSD_SrAnimationTooManyFrames = t.OSD_SrAnimationTooManyFrames;
+  OSD_SrImageTooLargeFormat = t.OSD_SrImageTooLargeFormat;
   Dialog_Title_SelectSrModel = t.Dialog_Title_SelectSrModel;
   Dialog_Msg_SelectSrModel = t.Dialog_Msg_SelectSrModel;
   Dialog_Checkbox_RememberSrModelChoice = t.Dialog_Checkbox_RememberSrModelChoice;
@@ -6878,6 +7132,36 @@ void SetLanguage(Language lang) {
     Settings_Header_PluginParams = L"Plugin Parameters";
     break;
   }
+
+  std::string pluginLang = "en-US";
+  switch (target) {
+  case Language::ChineseSimplified:
+    pluginLang = "zh-CN";
+    break;
+  case Language::ChineseTraditional:
+    pluginLang = "zh-TW";
+    break;
+  case Language::Japanese:
+    pluginLang = "ja-JP";
+    break;
+  case Language::Russian:
+    pluginLang = "ru-RU";
+    break;
+  case Language::German:
+    pluginLang = "de-DE";
+    break;
+  case Language::Spanish:
+    pluginLang = "es-ES";
+    break;
+  case Language::French:
+    pluginLang = "fr-FR";
+    break;
+  case Language::English:
+  default:
+    pluginLang = "en-US";
+    break;
+  }
+  QuickView::PluginHost::Instance().SetLanguage(pluginLang);
 }
 
 static std::wstring CleanLabel(const wchar_t* label) {

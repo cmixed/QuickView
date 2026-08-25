@@ -1677,7 +1677,9 @@ HRESULT QuickView::ComputeEngine::ExecuteSuperResolution(
     UINT dstW, UINT dstH,
     float sharpness,
     SimplePredicate checkCancel,
-    ID3D11Texture2D** outTexture)
+    ID3D11Texture2D** outTexture,
+    QVX_ProgressCallback onProgress,
+    void* progressUserData)
 {
     if (!m_valid || !srcTexture || !outTexture || srcW == 0 || srcH == 0 || dstW == 0 || dstH == 0) {
         return E_INVALIDARG;
@@ -1710,7 +1712,9 @@ HRESULT QuickView::ComputeEngine::ExecuteSuperResolution(
                 srcTexture, srcW, srcH,
                 pDstTex.Get(), dstW, dstH,
                 checkCancel ? cancelWrapper : nullptr,
-                checkCancel ? &checkCancel : nullptr
+                checkCancel ? &checkCancel : nullptr,
+                onProgress,
+                progressUserData
             );
 
             if (srRes == (int32_t)S_OK) {

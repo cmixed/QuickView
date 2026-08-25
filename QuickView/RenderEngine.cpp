@@ -3046,22 +3046,33 @@ bool TryLoadProfileBytesForPrimaries(QuickView::ColorPrimaries primaries, std::v
 }
 
 HRESULT CRenderEngine::GenerateSuperResolutionTexture(
-    const QuickView::RawImageFrame& frame, float targetScale, ID3D11Texture2D** outTexture) {
+    const QuickView::RawImageFrame& frame,
+    float targetScale,
+    ID3D11Texture2D** outTexture,
+    QuickView::SimplePredicate checkCancel,
+    QVX_ProgressCallback onProgress,
+    void* progressUserData
+) {
   if (!outTexture) return E_POINTER;
   *outTexture = nullptr;
 
-  std::lock_guard<std::recursive_mutex> lock(m_gpuContextMutex);
-
-  if (!m_computeEngine || !m_computeEngine->IsAvailable() || !frame.pixels ||
-      frame.width == 0 || frame.height == 0) {
-    return E_FAIL;
-  }
-
   ComPtr<ID3D11Texture2D> pSrcTex;
-  HRESULT hr = m_computeEngine->UploadAndConvert(
-      frame.pixels, (int)frame.width, (int)frame.height, (int)frame.stride, frame.format,
-      &pSrcTex);
-  if (FAILED(hr) || !pSrcTex) return hr;
+  {
+      // [Lock-Free Decoupling] Strictly scope m_gpuContextMutex to the initial upload phase (sub-millisecond).
+      // The subsequent heavy neural inference (DirectML / Vulkan / FSR) executes asynchronously
+      // without holding the rendering lock, guaranteeing a perfectly smooth 144Hz/240Hz UI response.
+      std::lock_guard<std::recursive_mutex> lock(m_gpuContextMutex);
+
+      if (!m_computeEngine || !m_computeEngine->IsAvailable() || !frame.pixels ||
+          frame.width == 0 || frame.height == 0) {
+        return E_FAIL;
+      }
+
+      HRESULT hr = m_computeEngine->UploadAndConvert(
+          frame.pixels, (int)frame.width, (int)frame.height, (int)frame.stride, frame.format,
+          &pSrcTex);
+      if (FAILED(hr) || !pSrcTex) return hr;
+  }
 
   float modelScale = QuickView::PluginHost::Instance().GetCurrentSrModelScale();
   uint32_t scaleMultiplier = (modelScale >= 3.0f) ? 4 : 2;
@@ -3073,9 +3084,10 @@ HRESULT CRenderEngine::GenerateSuperResolutionTexture(
   ComPtr<ID3D11Texture2D> pSrTex;
   float sharpness = g_config.FsrSharpness;
 
-  hr = m_computeEngine->ExecuteSuperResolution(
+  HRESULT hr = m_computeEngine->ExecuteSuperResolution(
       pSrcTex.Get(), (uint32_t)frame.width, (uint32_t)frame.height,
-      targetW, targetH, sharpness, {}, &pSrTex);
+      targetW, targetH, sharpness, checkCancel, &pSrTex,
+      onProgress, progressUserData);
 
   if (SUCCEEDED(hr) && pSrTex) {
     *outTexture = pSrTex.Detach();

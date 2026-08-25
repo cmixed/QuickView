@@ -470,6 +470,9 @@ namespace AppStrings {
     extern const wchar_t* Settings_Label_SrModel;
     extern const wchar_t* Settings_Tooltip_SrModel;
     extern const wchar_t* Settings_Label_SrAutoTrigger;
+    extern const wchar_t* Settings_Label_SrAutoTriggerMaxSourceMp;
+    extern const wchar_t* Settings_Tooltip_SrAutoTriggerMaxSourceMp;
+    extern const wchar_t* Settings_Value_Unlimited;
     extern const wchar_t* Settings_Label_SrOpenInCompare;
     extern const wchar_t* Settings_Label_SrPromptModel;
     extern const wchar_t* Settings_Button_DownloadSrPlugin;
@@ -487,8 +490,23 @@ namespace AppStrings {
     extern const wchar_t* Settings_Tooltip_SrSharpness;
     extern const wchar_t* Settings_Label_SrDenoise;
     extern const wchar_t* Settings_Tooltip_SrDenoise;
-    extern const wchar_t* Settings_Label_SrDownload;
-    extern const wchar_t* Settings_Tooltip_SrDownload;
+    extern const wchar_t* Settings_Segment_InstalledPlugins;
+    extern const wchar_t* Settings_Segment_Marketplace;
+    extern const wchar_t* Settings_Label_SrEngine;
+    extern const wchar_t* Settings_Label_SrModelStatus;
+    extern const wchar_t* Settings_Format_DownloadModel;
+    extern const wchar_t* Settings_Header_SrComponent;
+    extern const wchar_t* Settings_Label_QuickEnableEngine;
+    extern const wchar_t* Settings_Button_QuickEnableNcnn;
+    extern const wchar_t* Settings_Label_OnlineExtensions;
+    extern const wchar_t* Settings_Button_BrowseMarketplace;
+    extern const wchar_t* Settings_Label_MarketManifest;
+    extern const wchar_t* Settings_Button_RefreshManifest;
+    extern const wchar_t* Settings_Button_SyncingManifest;
+    extern const wchar_t* Settings_Format_PluginPackageSize;
+    extern const wchar_t* Settings_Button_InstalledUpToDate;
+    extern const wchar_t* Settings_Format_UpdateTo;
+    extern const wchar_t* Settings_Button_InstallPlugin;
     extern const wchar_t* Settings_Button_Download;
 
     // Super-Resolution OSD & Dialog
@@ -497,6 +515,11 @@ namespace AppStrings {
     extern const wchar_t* OSD_SrSuccessFormatSimple;
     extern const wchar_t* OSD_SrFailed;
     extern const wchar_t* OSD_SrPluginDisabledOrMissing;
+    extern const wchar_t* OSD_SrAnimationProcessingFormat;
+    extern const wchar_t* OSD_SrAnimationSuccessFormat;
+    extern const wchar_t* OSD_SrVectorLosslessSkipped;
+    extern const wchar_t* OSD_SrAnimationTooManyFrames;
+    extern const wchar_t* OSD_SrImageTooLargeFormat;
     extern const wchar_t* Dialog_Title_SelectSrModel;
     extern const wchar_t* Dialog_Msg_SelectSrModel;
     extern const wchar_t* Dialog_Checkbox_RememberSrModelChoice;

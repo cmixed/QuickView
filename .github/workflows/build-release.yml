@@ -87,12 +87,14 @@ jobs:
           $zipName = "QuickView_${tag}_${archUpper}.zip"
           Compress-Archive -Path $exePath -DestinationPath "Release/dist/$zipName" -Force
 
-          # Package standalone QVX plugin artifact
-          $pluginPath = "${{ github.workspace }}/out/build/${{ matrix.preset }}/plugins/sr_realesrgan_d3d11.qvx"
-          if (Test-Path $pluginPath) {
-              Copy-Item -Path $pluginPath -Destination "Release/dist/sr_realesrgan_d3d11_${archUpper}.qvx" -Force
+          # Package standalone QVX plugin artifact (sr_ncnn_vulkan + models + manifest)
+          $pluginDir = "${{ github.workspace }}/out/build/${{ matrix.preset }}/plugins/sr/sr_ncnn_vulkan"
+          if (Test-Path "$pluginDir/sr_ncnn_vulkan.qvx") {
+              $pluginZip = "Release/dist/sr_ncnn_vulkan_${archUpper}.zip"
+              Compress-Archive -Path "$pluginDir/*" -DestinationPath $pluginZip -Force
               if ("${{ matrix.platform }}" -eq "x64") {
-                  Copy-Item -Path $pluginPath -Destination "Release/dist/sr_realesrgan_d3d11.qvx" -Force
+                  Copy-Item -Path $pluginZip -Destination "Release/dist/sr_ncnn_vulkan.zip" -Force
+                  Copy-Item -Path "${{ github.workspace }}/plugins/plugins_manifest.json" -Destination "Release/dist/plugins_manifest.json" -Force
               }
           }
 

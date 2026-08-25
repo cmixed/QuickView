@@ -155,7 +155,7 @@ public:
     D2D1_RECT_F GetPanelCloseRect() const { return m_panelCloseRect; }
     
     // ===== UI State Updates =====
-    void SetOSD(const std::wstring& text, float opacity, D2D1_COLOR_F color = D2D1::ColorF(D2D1::ColorF::White), OSDPosition pos = OSDPosition::Bottom);
+    void SetOSD(const std::wstring& text, float opacity, D2D1_COLOR_F color = D2D1::ColorF(D2D1::ColorF::White), OSDPosition pos = OSDPosition::Bottom, float progress = -1.0f);
     void SetCompareOSD(const std::wstring& left, const std::wstring& right, float opacity, D2D1_COLOR_F color = D2D1::ColorF(D2D1::ColorF::White));
     void SetDebugHUDVisible(bool visible) { m_showDebugHUD = visible; MarkDynamicDirty(); }
     void SetTileGridVisible(bool visible) { m_showTileGrid = visible; MarkDynamicDirty(); }
@@ -323,6 +323,7 @@ private:
     float m_osdOpacity = 0.0f;
     D2D1_COLOR_F m_osdColor = D2D1::ColorF(D2D1::ColorF::White);
     OSDPosition m_osdPos = OSDPosition::Bottom;
+    float m_osdProgress = -1.0f;
     
     // Debug HUD V4 State
     bool m_showDebugHUD = false;

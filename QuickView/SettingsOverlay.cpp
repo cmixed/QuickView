@@ -2544,15 +2544,17 @@ void SettingsOverlay::BuildMenu() {
 
     static bool s_srPluginExpanded = true;
 
-    QuickView::PluginHost::Instance().SetUINotifyCallback([]([[maybe_unused]] void* u) {
+    QuickView::PluginHost::Instance().SetUINotifyCallback([](void* u) {
+        auto* overlay = static_cast<SettingsOverlay*>(u);
+        if (overlay) {
+            overlay->RequestRebuild();
+        }
         extern HWND g_mainHwnd;
-        // Manifest fetching completes on a worker thread.  Do not mutate the
-        // overlay there; invalidation schedules the normal UI-thread redraw.
         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
-    });
+    }, this);
 
     // Top Segmented Switch: [ 已安装扩展 | 云端市场 ] (Horizontally Centered, with Header Divider)
-    SettingsItem itemSegment = { L"", OptionType::Segment, nullptr, nullptr, &s_pluginViewMode, nullptr, 0, 0, { L"已安装扩展", L"云端市场" } };
+    SettingsItem itemSegment = { L"", OptionType::Segment, nullptr, nullptr, &s_pluginViewMode, nullptr, 0, 0, { std::wstring_view(AppStrings::Settings_Segment_InstalledPlugins), std::wstring_view(AppStrings::Settings_Segment_Marketplace) } };
     itemSegment.onChange = [](SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
         if (overlay) overlay->RequestRebuild();
         extern HWND g_mainHwnd;
@@ -2565,7 +2567,7 @@ void SettingsOverlay::BuildMenu() {
         // VIEW 0: 已安装插件管理 (Installed Plugins - Blender Style Accordion)
         // ====================================================================
         if (installState != QuickView::PluginInstallState::NotInstalled) {
-            // 1. Data-Driven Dynamic Model Selector & Downloader
+            // 1. Data-Driven Dynamic Model Selector & Downloader pre-fetch
             static std::vector<QuickView::SrModelEntry> s_models;
             static std::vector<std::wstring> s_modelDisplayNames;
             static std::vector<std::wstring> s_modelDescriptions;
@@ -2636,6 +2638,64 @@ void SettingsOverlay::BuildMenu() {
 
             // If expanded, render details & subheaders (二级标题)
             if (s_srPluginExpanded) {
+                // Engine Switcher Dropdown (Placed ABOVE AI Model, clean label, without redundant tooltip)
+                static std::vector<std::wstring> s_engineLabels;
+                static std::vector<std::wstring_view> s_engineViews;
+                static std::vector<std::wstring> s_enginePaths;
+                static int s_engineChoiceIndex = 0;
+
+                s_engineLabels.clear();
+                s_engineViews.clear();
+                s_enginePaths.clear();
+
+                auto candidates = pluginHost.ScanPluginsDirectory();
+                std::wstring curPath = pluginHost.GetSrPluginPath();
+
+                for (const auto& cand : candidates) {
+                    if (cand.supportedInterfaces & (1 << QVX_IFACE_SUPER_RESOLUTION)) {
+                        wchar_t wName[128] = { 0 };
+                        MultiByteToWideChar(CP_UTF8, 0, cand.pluginName.c_str(), -1, wName, 128);
+                        std::wstring label = wName;
+                        if (label.empty()) {
+                            label = cand.filePath;
+                        }
+                        s_engineLabels.push_back(label);
+                        s_enginePaths.push_back(cand.filePath);
+                    }
+                }
+
+                if (s_engineLabels.empty()) {
+                    s_engineLabels.push_back(L"Real-ESRGAN NCNN Vulkan");
+                    s_enginePaths.push_back(L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx");
+                }
+
+                s_engineChoiceIndex = 0;
+                for (size_t e = 0; e < s_enginePaths.size(); ++e) {
+                    if (curPath == s_enginePaths[e] || (curPath.empty() && e == 0)) {
+                        s_engineChoiceIndex = static_cast<int>(e);
+                    }
+                }
+                for (const auto& l : s_engineLabels) {
+                    s_engineViews.push_back(l);
+                }
+
+                if (!s_engineViews.empty()) {
+                    SettingsItem itemEngine = { AppStrings::Settings_Label_SrEngine, OptionType::ComboBox, nullptr, nullptr, BindEnum(&s_engineChoiceIndex), nullptr, 0, 0, s_engineViews };
+                    itemEngine.tooltipText = nullptr; // Clean: no redundant tooltip
+                    itemEngine.isDisabled = !s_srPluginEnabled;
+                    itemEngine.onChange = [](SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        if (s_engineChoiceIndex >= 0 && s_engineChoiceIndex < static_cast<int>(s_enginePaths.size())) {
+                            auto& host = QuickView::PluginHost::Instance();
+                            host.SetSrPluginPath(s_enginePaths[s_engineChoiceIndex]);
+                            SaveConfig();
+                            if (overlay) overlay->RequestRebuild();
+                            extern HWND g_mainHwnd;
+                            if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
+                        }
+                    };
+                    tabPlugins.items.push_back(itemEngine);
+                }
+
                 // AI Model Selector
                 if (!s_models.empty()) {
                     SettingsItem itemModel = { AppStrings::Settings_Label_SrModel, OptionType::ComboBox, nullptr, nullptr, BindEnum(&s_modelChoiceIndex), nullptr, 0, 0, s_modelOptionViews };
@@ -2664,9 +2724,11 @@ void SettingsOverlay::BuildMenu() {
                     // Single model on-demand download button if not installed locally
                     if (s_modelChoiceIndex >= 0 && s_modelChoiceIndex < (int)s_models.size() && !s_models[s_modelChoiceIndex].isInstalled && !s_models[s_modelChoiceIndex].downloadUrl.empty()) {
                         uint64_t bytes = s_models[s_modelChoiceIndex].fileSizeBytes;
-                        std::wstring s_dlBtnText = L"下载该模型 (~" + std::to_wstring((bytes + 1024 * 1024 - 1) / (1024 * 1024)) + L" MB)";
+                        wchar_t dlBuf[128] = { 0 };
+                        swprintf_s(dlBuf, AppStrings::Settings_Format_DownloadModel, (bytes + 1024 * 1024 - 1) / (1024 * 1024));
+                        std::wstring s_dlBtnText = dlBuf;
                         
-                        SettingsItem itemDl = { L"模型资源状态", OptionType::ActionButton };
+                        SettingsItem itemDl = { AppStrings::Settings_Label_SrModelStatus, OptionType::ActionButton };
                         itemDl.buttonText = s_dlBtnText;
 
                         std::string curModelId = s_models[s_modelChoiceIndex].modelId;
@@ -2683,6 +2745,7 @@ void SettingsOverlay::BuildMenu() {
                             if (s_modelChoiceIndex >= 0 && s_modelChoiceIndex < (int)s_models.size()) {
                                 std::string url = s_models[s_modelChoiceIndex].downloadUrl;
                                 std::string curModelId = s_models[s_modelChoiceIndex].modelId;
+                                std::string curSha256 = s_models[s_modelChoiceIndex].sha256;
                                 std::string filename = curModelId + ".zip";
                                 std::wstring wFilename(filename.begin(), filename.end());
 
@@ -2702,8 +2765,9 @@ void SettingsOverlay::BuildMenu() {
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                                std::thread([wFilename, url, curModelId]() {
-                                    auto progressCb = [](float progress, bool finished, bool success, [[maybe_unused]] void* uData) {
+                                std::thread([wFilename, url, curSha256, curModelId, overlay]() {
+                                    auto progressCb = [](float progress, bool finished, bool success, void* uData) {
+                                        auto* pOverlay = static_cast<SettingsOverlay*>(uData);
                                         char cbLog[512];
                                         sprintf_s(cbLog, "[QVX-UI] progressCb: progress=%.2f, finished=%d, success=%d\n", progress, finished ? 1 : 0, success ? 1 : 0);
                                         OutputDebugStringA(cbLog);
@@ -2724,16 +2788,19 @@ void SettingsOverlay::BuildMenu() {
                                                 s_srDownloadText = L"Downloading (" + std::to_wstring(percent) + L"%)...";
                                             }
                                         }
+                                        if (pOverlay) pOverlay->RequestRebuild();
                                         extern HWND g_mainHwnd;
                                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                                     };
 
-                                    bool ok = QuickView::PluginHost::Instance().DownloadModel(wFilename, url, progressCb, nullptr);
+                                    bool ok = QuickView::PluginHost::Instance().DownloadModel(wFilename, url, curSha256, progressCb, overlay);
                                     char finishLog[512];
                                     sprintf_s(finishLog, "[QVX-UI] DownloadModel returned ok=%d for '%s'\n", ok ? 1 : 0, curModelId.c_str());
                                     OutputDebugStringA(finishLog);
+                                    if (overlay) overlay->RequestRebuild();
                                     if (ok) {
-                                        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                        if (overlay) overlay->RequestRebuild();
                                         extern HWND g_mainHwnd;
                                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                                         extern void RefreshImageDisplay(HWND hwnd);
@@ -2767,6 +2834,33 @@ void SettingsOverlay::BuildMenu() {
                 tabPlugins.items.push_back(itemAutoTrigger);
 
                 if (s_srAutoTrigger) {
+                    static float s_srMaxSourceMp = g_config.SrAutoTriggerMaxSourceMp;
+                    s_srMaxSourceMp = QuickView::PluginHost::Instance().GetSrAutoTriggerMaxSourceMp();
+                    SettingsItem itemMaxSourceMp = { AppStrings::Settings_Label_SrAutoTriggerMaxSourceMp, OptionType::Slider, nullptr, &s_srMaxSourceMp };
+                    itemMaxSourceMp.tooltipText = AppStrings::Settings_Tooltip_SrAutoTriggerMaxSourceMp;
+                    itemMaxSourceMp.minVal = 0.1f;
+                    itemMaxSourceMp.maxVal = 16.0f;
+                    itemMaxSourceMp.step = 0.1f;
+                    itemMaxSourceMp.displayFormat = L"%.1f MP";
+                    itemMaxSourceMp.isDisabled = !s_srPluginEnabled;
+                    itemMaxSourceMp.onChange2 = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        g_config.SrAutoTriggerMaxSourceMp = s_srMaxSourceMp;
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxSourceMp(s_srMaxSourceMp);
+                        SaveConfig();
+                    };
+                    itemMaxSourceMp.onLiveUpdate = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        g_config.SrAutoTriggerMaxSourceMp = s_srMaxSourceMp;
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxSourceMp(s_srMaxSourceMp);
+                    };
+                    itemMaxSourceMp.onReset = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        s_srMaxSourceMp = 1.0f;
+                        g_config.SrAutoTriggerMaxSourceMp = 1.0f;
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxSourceMp(1.0f);
+                        SaveConfig();
+                        if (overlay) overlay->RequestRebuild();
+                    };
+                    tabPlugins.items.push_back(itemMaxSourceMp);
+
                     static float s_srDebounceFloat = (float)g_config.SrDebounceDelayMs;
                     s_srDebounceFloat = (float)g_config.SrDebounceDelayMs;
                     SettingsItem itemDebounce = { AppStrings::Settings_Label_SrDebounce, OptionType::Slider, nullptr, &s_srDebounceFloat };
@@ -2780,6 +2874,10 @@ void SettingsOverlay::BuildMenu() {
                         g_config.SrDebounceDelayMs = (int)(s_srDebounceFloat + 0.5f);
                         QuickView::PluginHost::Instance().SetSrDebounceDelayMs(g_config.SrDebounceDelayMs);
                         SaveConfig();
+                    };
+                    itemDebounce.onLiveUpdate = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        g_config.SrDebounceDelayMs = (int)(s_srDebounceFloat + 0.5f);
+                        QuickView::PluginHost::Instance().SetSrDebounceDelayMs(g_config.SrDebounceDelayMs);
                     };
                     itemDebounce.onReset = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
                         s_srDebounceFloat = 3000.0f;
@@ -2887,9 +2985,6 @@ void SettingsOverlay::BuildMenu() {
                                 int idx = static_cast<int>(item->pFloatVal - s_dynFloats);
                                 if (idx >= 0 && idx < static_cast<int>(s_dynParams.size())) {
                                     QuickView::PluginHost::Instance().SetParamValue(s_dynParams[idx].desc.id, *item->pFloatVal);
-                                    extern HWND g_mainHwnd;
-                                    extern void RefreshImageDisplay(HWND hwnd);
-                                    RefreshImageDisplay(g_mainHwnd);
                                 }
                             };
                             itemParam.onReset = []([[maybe_unused]] SettingsOverlay* overlay, SettingsItem* item) {
@@ -2945,6 +3040,14 @@ void SettingsOverlay::BuildMenu() {
                                     extern HWND g_mainHwnd;
                                     extern void RefreshImageDisplay(HWND hwnd);
                                     RefreshImageDisplay(g_mainHwnd);
+                                }
+                            };
+                            itemParam.onLiveUpdate = []([[maybe_unused]] SettingsOverlay* overlay, SettingsItem* item) {
+                                if (!item || !item->pFloatVal) return;
+                                int idx = static_cast<int>(item->pFloatVal - s_dynFloats);
+                                if (idx >= 0 && idx < static_cast<int>(s_dynParams.size())) {
+                                    float quantVal = static_cast<float>(static_cast<int>(*item->pFloatVal + 0.5f));
+                                    QuickView::PluginHost::Instance().SetParamValue(s_dynParams[idx].desc.id, quantVal);
                                 }
                             };
                             itemParam.onReset = []([[maybe_unused]] SettingsOverlay* overlay, SettingsItem* item) {
@@ -3007,6 +3110,33 @@ void SettingsOverlay::BuildMenu() {
                 QuickView::PluginHost::Instance().OpenModelsDirectory();
             };
             tabPlugins.items.push_back(itemOpenFolder);
+        } else {
+            // Uninstalled guidance card in View 0
+            SettingsItem itemEmptyHeader = { AppStrings::Settings_Header_SrComponent, OptionType::Header };
+            tabPlugins.items.push_back(itemEmptyHeader);
+
+            SettingsItem itemQuickInstall = { AppStrings::Settings_Label_QuickEnableEngine, OptionType::ActionButton };
+            itemQuickInstall.buttonText = AppStrings::Settings_Button_QuickEnableNcnn;
+            itemQuickInstall.onChange = [](SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                auto& host = QuickView::PluginHost::Instance();
+                host.SetSrPluginPath(L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx");
+                host.SetSrPluginEnabled(true);
+                SaveConfig();
+                if (overlay) overlay->RequestRebuild();
+                extern HWND g_mainHwnd;
+                if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
+            };
+            tabPlugins.items.push_back(itemQuickInstall);
+
+            SettingsItem itemGoMarket = { AppStrings::Settings_Label_OnlineExtensions, OptionType::ActionButton };
+            itemGoMarket.buttonText = AppStrings::Settings_Button_BrowseMarketplace;
+            itemGoMarket.onChange = [](SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                s_pluginViewMode = 1;
+                if (overlay) overlay->RequestRebuild();
+                extern HWND g_mainHwnd;
+                if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
+            };
+            tabPlugins.items.push_back(itemGoMarket);
         }
 
     } else {
@@ -3025,8 +3155,8 @@ void SettingsOverlay::BuildMenu() {
         }
 
         // Refresh action button
-        SettingsItem itemRefresh = { L"插件市场清单", OptionType::ActionButton };
-        itemRefresh.buttonText = isFetching ? L"正在从云端同步清单..." : L"🔄 刷新插件清单";
+        SettingsItem itemRefresh = { AppStrings::Settings_Label_MarketManifest, OptionType::ActionButton };
+        itemRefresh.buttonText = isFetching ? AppStrings::Settings_Button_SyncingManifest : AppStrings::Settings_Button_RefreshManifest;
         itemRefresh.isDisabled = isFetching;
         itemRefresh.onChange = [](SettingsOverlay* overlay, SettingsItem* item) {
             if (!item) return;
@@ -3037,14 +3167,19 @@ void SettingsOverlay::BuildMenu() {
         };
         tabPlugins.items.push_back(itemRefresh);
 
-        static std::vector<std::pair<std::wstring, std::string>> s_marketPluginSpecs;
+        struct MarketPluginSpec {
+            std::wstring fileName;
+            std::string downloadUrl;
+            std::string sha256;
+        };
+        static std::vector<MarketPluginSpec> s_marketPluginSpecs;
         static int s_marketIndices[64];
         s_marketPluginSpecs.clear();
 
         if (!remotePlugins.empty()) {
             for (size_t rpIdx = 0; rpIdx < remotePlugins.size() && rpIdx < 64; ++rpIdx) {
                 const auto& rp = remotePlugins[rpIdx];
-                s_marketPluginSpecs.push_back({ std::wstring(rp.fileName.begin(), rp.fileName.end()), rp.downloadUrl });
+                s_marketPluginSpecs.push_back({ std::wstring(rp.fileName.begin(), rp.fileName.end()), rp.downloadUrl, rp.sha256 });
                 s_marketIndices[rpIdx] = static_cast<int>(rpIdx);
 
                 std::wstring wName(rp.name.begin(), rp.name.end());
@@ -3059,7 +3194,9 @@ void SettingsOverlay::BuildMenu() {
 
                 // 2. Action row: Label on left, ActionButton on right with progress & feedback
                 uint64_t mb = (rp.fileSize + 1024 * 1024 - 1) / (1024 * 1024);
-                std::wstring pkgLabel = L"插件组件包 (~" + std::to_wstring(mb > 0 ? mb : 2) + L" MB)";
+                wchar_t pkgBuf[128] = { 0 };
+                swprintf_s(pkgBuf, AppStrings::Settings_Format_PluginPackageSize, mb > 0 ? mb : 2);
+                std::wstring pkgLabel = pkgBuf;
                 SettingsItem itemMarketAction = { pkgLabel, OptionType::ActionButton };
                 itemMarketAction.pIntVal = &s_marketIndices[rpIdx];
 
@@ -3070,11 +3207,13 @@ void SettingsOverlay::BuildMenu() {
                 static std::mutex s_mktDlMutex;
 
                 if (installState == QuickView::PluginInstallState::Installed && (curVer == rp.version || rp.version.empty())) {
-                    itemMarketAction.buttonText = L"✓ 已安装 (Up-to-date)";
+                    itemMarketAction.buttonText = AppStrings::Settings_Button_InstalledUpToDate;
                     itemMarketAction.isDisabled = true;
                     itemMarketAction.isSuccess = true;
                 } else if (installState == QuickView::PluginInstallState::UpdateAvailable || (!curVer.empty() && curVer != rp.version)) {
-                    itemMarketAction.buttonText = L"⚡ 更新至 v" + wVer;
+                    wchar_t updBuf[128] = { 0 };
+                    swprintf_s(updBuf, AppStrings::Settings_Format_UpdateTo, wVer.c_str());
+                    itemMarketAction.buttonText = updBuf;
                     if (s_mktIsDownloading.load() && s_mktDownloadingUrl == rp.downloadUrl) {
                         itemMarketAction.progress = s_mktDownloadProgress.load();
                         itemMarketAction.buttonText = s_mktDownloadText;
@@ -3087,8 +3226,9 @@ void SettingsOverlay::BuildMenu() {
                         if (!item || !item->pIntVal) return;
                         size_t idx = static_cast<size_t>(*item->pIntVal);
                         if (idx >= s_marketPluginSpecs.size()) return;
-                        std::wstring wFile = s_marketPluginSpecs[idx].first;
-                        std::string dlUrl = s_marketPluginSpecs[idx].second;
+                        std::wstring wFile = s_marketPluginSpecs[idx].fileName;
+                        std::string dlUrl = s_marketPluginSpecs[idx].downloadUrl;
+                        std::string expectedSha = s_marketPluginSpecs[idx].sha256;
 
                         {
                             std::lock_guard<std::mutex> lock(s_mktDlMutex);
@@ -3102,8 +3242,9 @@ void SettingsOverlay::BuildMenu() {
                         extern HWND g_mainHwnd;
                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                        std::thread([wFile, dlUrl]() {
-                            auto progressCb = [](float progress, bool finished, bool success, [[maybe_unused]] void* uData) {
+                        std::thread([wFile, dlUrl, expectedSha, overlay]() {
+                            auto progressCb = [](float progress, bool finished, bool success, void* uData) {
+                                auto* pOverlay = static_cast<SettingsOverlay*>(uData);
                                 {
                                     std::lock_guard<std::mutex> lock(s_mktDlMutex);
                                     if (finished) {
@@ -3121,13 +3262,16 @@ void SettingsOverlay::BuildMenu() {
                                         s_mktDownloadText = L"Updating (" + std::to_wstring(percent) + L"%)...";
                                     }
                                 }
+                                if (pOverlay) pOverlay->RequestRebuild();
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                             };
 
-                            bool ok = QuickView::PluginHost::Instance().DownloadPlugin(wFile, dlUrl, progressCb, nullptr);
+                            bool ok = QuickView::PluginHost::Instance().DownloadPlugin(wFile, dlUrl, expectedSha, progressCb, overlay);
+                            if (overlay) overlay->RequestRebuild();
                             if (ok) {
-                                std::this_thread::sleep_for(std::chrono::milliseconds(600));
+                                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                if (overlay) overlay->RequestRebuild();
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                                 extern void RefreshImageDisplay(HWND hwnd);
@@ -3136,7 +3280,7 @@ void SettingsOverlay::BuildMenu() {
                         }).detach();
                     };
                 } else {
-                    itemMarketAction.buttonText = L"⬇ 获取插件";
+                    itemMarketAction.buttonText = AppStrings::Settings_Button_InstallPlugin;
                     if (s_mktIsDownloading.load() && s_mktDownloadingUrl == rp.downloadUrl) {
                         itemMarketAction.progress = s_mktDownloadProgress.load();
                         itemMarketAction.buttonText = s_mktDownloadText;
@@ -3149,8 +3293,9 @@ void SettingsOverlay::BuildMenu() {
                         if (!item || !item->pIntVal) return;
                         size_t idx = static_cast<size_t>(*item->pIntVal);
                         if (idx >= s_marketPluginSpecs.size()) return;
-                        std::wstring wFile = s_marketPluginSpecs[idx].first;
-                        std::string dlUrl = s_marketPluginSpecs[idx].second;
+                        std::wstring wFile = s_marketPluginSpecs[idx].fileName;
+                        std::string dlUrl = s_marketPluginSpecs[idx].downloadUrl;
+                        std::string expectedSha = s_marketPluginSpecs[idx].sha256;
 
                         {
                             std::lock_guard<std::mutex> lock(s_mktDlMutex);
@@ -3164,8 +3309,9 @@ void SettingsOverlay::BuildMenu() {
                         extern HWND g_mainHwnd;
                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                        std::thread([wFile, dlUrl]() {
-                            auto progressCb = [](float progress, bool finished, bool success, [[maybe_unused]] void* uData) {
+                        std::thread([wFile, dlUrl, expectedSha, overlay]() {
+                            auto progressCb = [](float progress, bool finished, bool success, void* uData) {
+                                auto* pOverlay = static_cast<SettingsOverlay*>(uData);
                                 {
                                     std::lock_guard<std::mutex> lock(s_mktDlMutex);
                                     if (finished) {
@@ -3183,15 +3329,18 @@ void SettingsOverlay::BuildMenu() {
                                         s_mktDownloadText = L"Downloading (" + std::to_wstring(percent) + L"%)...";
                                     }
                                 }
+                                if (pOverlay) pOverlay->RequestRebuild();
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                             };
 
-                            bool ok = QuickView::PluginHost::Instance().DownloadPlugin(wFile, dlUrl, progressCb, nullptr);
+                            bool ok = QuickView::PluginHost::Instance().DownloadPlugin(wFile, dlUrl, expectedSha, progressCb, overlay);
+                            if (overlay) overlay->RequestRebuild();
                             if (ok) {
                                 QuickView::PluginHost::Instance().SetSrPluginEnabled(true);
                                 SaveConfig();
-                                std::this_thread::sleep_for(std::chrono::milliseconds(600));
+                                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                if (overlay) overlay->RequestRebuild();
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
                                 extern void RefreshImageDisplay(HWND hwnd);
@@ -5852,7 +6001,11 @@ void SettingsOverlay::DrawSlider(ID2D1DeviceContext* pRT, const D2D1_RECT_F& rec
             if (maxV <= 1.05f && wcsstr(format, L"%%") != nullptr) {
                 displayVal *= 100.0f;
             }
-            swprintf_s(buf, format, displayVal);
+            if (wcsstr(format, L"MP") != nullptr && val >= maxV - 0.05f) {
+                swprintf_s(buf, L"%s", AppStrings::Settings_Value_Unlimited ? AppStrings::Settings_Value_Unlimited : L"Unlimited");
+            } else {
+                swprintf_s(buf, format, displayVal);
+            }
         }
     }
 

@@ -55,6 +55,7 @@ TEST_F(PluginHostTests, ConfigPersistence) {
     host.SetSrPluginPath(L"plugins\\test_custom.qvx");
     host.SetSrModelId("anime_2x");
     host.SetSrDenoise(0.15f);
+    host.SetSrAutoTriggerMaxSourceMp(2.5f);
 
     host.SaveConfig(m_tempIniPath.c_str());
 
@@ -63,6 +64,7 @@ TEST_F(PluginHostTests, ConfigPersistence) {
     host.SetSrPluginPath(L"");
     host.SetSrModelId("");
     host.SetSrDenoise(0.0f);
+    host.SetSrAutoTriggerMaxSourceMp(1.0f);
 
     // Reload
     host.LoadConfig(m_tempIniPath.c_str());
@@ -71,6 +73,7 @@ TEST_F(PluginHostTests, ConfigPersistence) {
     EXPECT_EQ(host.GetSrPluginPath(), L"plugins\\test_custom.qvx");
     EXPECT_EQ(host.GetSrModelId(), "anime_2x");
     EXPECT_NEAR(host.GetSrDenoise(), 0.15f, 0.01f);
+    EXPECT_NEAR(host.GetSrAutoTriggerMaxSourceMp(), 2.5f, 0.01f);
 }
 
 // 2. Test missing plugin graceful fallback
@@ -82,17 +85,20 @@ TEST_F(PluginHostTests, MissingPluginGracefulFallback) {
     EXPECT_FALSE(host.EnsureSrContext(m_d3dDevice.Get()));
 }
 
-// 3. Test Real-ESRGAN Deep Residual Neural Upscale
-TEST_F(PluginHostTests, RealESRGANGpuUpscale) {
+// 3. Test Real-ESRGAN NCNN Vulkan In-Process Super-Resolution
+TEST_F(PluginHostTests, NcnnVulkanGpuUpscaleAndProgress) {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     PathRemoveFileSpecW(exePath);
 
-    std::wstring pluginPath = std::wstring(exePath) + L"\\plugins\\sr_realesrgan_d3d11.qvx";
+    std::wstring pluginPath = std::wstring(exePath) + L"\\plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx";
     if (GetFileAttributesW(pluginPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        pluginPath = L"plugins\\sr_realesrgan_d3d11.qvx";
+        pluginPath = std::wstring(exePath) + L"\\plugins\\sr_ncnn_vulkan.qvx";
         if (GetFileAttributesW(pluginPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            GTEST_SKIP() << "sr_realesrgan_d3d11.qvx not found, skipping Real-ESRGAN test.";
+            pluginPath = L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx";
+            if (GetFileAttributesW(pluginPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+                GTEST_SKIP() << "sr_ncnn_vulkan.qvx not found, skipping NCNN Vulkan test.";
+            }
         }
     }
 
@@ -100,19 +106,21 @@ TEST_F(PluginHostTests, RealESRGANGpuUpscale) {
     host.UnloadSrPlugin();
     host.SetSrPluginEnabled(true);
     host.SetSrPluginPath(pluginPath);
-    host.SetSrModelId("realesr-animevideov3-x2");
+    host.SetSrModelId("realesr-animevideov3-auto");
 
     ASSERT_TRUE(host.EnsureSrContext(m_d3dDevice.Get()));
 
-    // Verify Model Catalog
+    // Verify 7 Models Catalog
     auto models = host.GetCurrentSrModels();
-    EXPECT_GE(models.size(), 6u);
+    EXPECT_GE(models.size(), 7u);
     EXPECT_EQ(models[0].modelId, "realesr-animevideov3-auto");
     EXPECT_EQ(models[1].modelId, "realesr-animevideov3-x2");
 
-    // Verify Dynamic Parameters
+    // Verify Dynamic Parameters (Denoise & Tile Size)
     auto params = host.GetCurrentSrParams();
-    EXPECT_GE(params.size(), 1u);
+    EXPECT_GE(params.size(), 2u);
+    EXPECT_STREQ(params[0].desc.id, "denoise");
+    EXPECT_STREQ(params[1].desc.id, "tile_size");
 
     // 64x64 Source Texture
     D3D11_TEXTURE2D_DESC srcDesc{};
@@ -140,36 +148,62 @@ TEST_F(PluginHostTests, RealESRGANGpuUpscale) {
     std::vector<uint32_t> srcPixels(64 * 64, 0xFF55AAFF);
     m_d3dContext->UpdateSubresource(pSrcTex.Get(), 0, nullptr, srcPixels.data(), 64 * 4, 0);
 
-    std::wstring exeBinary = std::wstring(exePath) + L"\\plugins\\realesrgan-ncnn-vulkan.exe";
-    std::wstring modelBin = std::wstring(exePath) + L"\\plugins\\models\\realesr-animevideov3-x2.bin";
-    if (GetFileAttributesW(exeBinary.c_str()) == INVALID_FILE_ATTRIBUTES ||
-        GetFileAttributesW(modelBin.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        GTEST_SKIP() << "realesrgan-ncnn-vulkan.exe or model weights not downloaded yet, skipping GPU execution.";
+    std::wstring modelBin = std::wstring(exePath) + L"\\plugins\\sr\\sr_ncnn_vulkan\\models\\realesr-animevideov3-x2.bin";
+    if (GetFileAttributesW(modelBin.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        modelBin = std::wstring(exePath) + L"\\plugins\\models\\realesr-animevideov3-x2.bin";
+        if (GetFileAttributesW(modelBin.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            GTEST_SKIP() << "Model weights not downloaded yet, skipping GPU execution.";
+        }
     }
 
-    // Execute Real-ESRGAN Deep Residual GPU Upscale
+    struct ProgressRecord {
+        float lastVal = -1.0f;
+        int callCount = 0;
+    } progRecord;
+
+    auto onProgress = [](float p, void* uData) {
+        auto* rec = static_cast<ProgressRecord*>(uData);
+        rec->lastVal = p;
+        rec->callCount++;
+    };
+
+    // Execute Real-ESRGAN Deep Residual GPU Upscale with Progress Callback
     int32_t result = host.ExecuteSrUpscaleGpu(
         m_d3dDevice.Get(),
         pSrcTex.Get(), 64, 64,
         pDstTex.Get(), 128, 128,
-        nullptr, nullptr
+        nullptr, nullptr,
+        onProgress, &progRecord
     );
 
-    printf("Real-ESRGAN ExecuteSrUpscaleGpu result = 0x%08X\n", (uint32_t)result);
+    printf("Real-ESRGAN NCNN Vulkan ExecuteSrUpscaleGpu result = 0x%08X (Progress calls: %d, final: %.2f)\n",
+           (uint32_t)result, progRecord.callCount, progRecord.lastVal);
     EXPECT_EQ(result, (int32_t)S_OK);
+    EXPECT_GT(progRecord.callCount, 0);
+    EXPECT_NEAR(progRecord.lastVal, 1.0f, 0.05f);
 
-    // Also test 0.3.0 General Photo Model (realesr-general-x4v3) if downloaded
-    std::wstring genBin = std::wstring(exePath) + L"\\plugins\\models\\realesr-general-x4v3.bin";
-    if (GetFileAttributesW(genBin.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        host.SetSrModelId("realesr-general-x4v3");
-        int32_t resultGeneral = host.ExecuteSrUpscaleGpu(
-            m_d3dDevice.Get(),
-            pSrcTex.Get(), 64, 64,
-            pDstTex.Get(), 128, 128,
-            nullptr, nullptr
-        );
-        printf("Real-ESRGAN 0.3.0 General-x4v3 result = 0x%08X\n", (uint32_t)resultGeneral);
-        EXPECT_EQ(resultGeneral, (int32_t)S_OK);
+    // Verify output pixels are valid non-black image with valid alpha
+    D3D11_TEXTURE2D_DESC readDesc = dstDesc;
+    readDesc.Usage = D3D11_USAGE_STAGING;
+    readDesc.BindFlags = 0;
+    readDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> pStaging;
+    if (SUCCEEDED(m_d3dDevice->CreateTexture2D(&readDesc, nullptr, &pStaging))) {
+        m_d3dContext->CopyResource(pStaging.Get(), pDstTex.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (SUCCEEDED(m_d3dContext->Map(pStaging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+            const uint32_t* pPixels = static_cast<const uint32_t*>(mapped.pData);
+            // Center pixel must not be pure black (0x00000000)
+            uint32_t samplePix = pPixels[64 * (mapped.RowPitch / 4) + 64];
+            uint8_t a = (samplePix >> 24) & 0xFF;
+            uint8_t r = (samplePix >> 16) & 0xFF;
+            uint8_t g = (samplePix >> 8) & 0xFF;
+            uint8_t b = samplePix & 0xFF;
+            printf("Sample Pixel BGRA: 0x%08X (R=%u, G=%u, B=%u, A=%u)\n", samplePix, r, g, b, a);
+            EXPECT_GT(r + g + b, 0); // Must not be black
+            EXPECT_EQ(a, 255);       // Must be fully opaque
+            m_d3dContext->Unmap(pStaging.Get(), 0);
+        }
     }
 }
 
@@ -182,6 +216,7 @@ TEST_F(PluginHostTests, ResetToDefaults) {
     host.SetSrOpenInCompareMode(false);
     host.SetSrPromptModelOnHotkey(true);
     host.SetSrDenoise(0.5f);
+    host.SetSrAutoTriggerMaxSourceMp(8.0f);
 
     host.ResetToDefaults();
 
@@ -191,6 +226,7 @@ TEST_F(PluginHostTests, ResetToDefaults) {
     EXPECT_TRUE(host.IsSrOpenInCompareMode());
     EXPECT_FALSE(host.IsSrPromptModelOnHotkey());
     EXPECT_NEAR(host.GetSrDenoise(), 0.0f, 0.001f);
+    EXPECT_NEAR(host.GetSrAutoTriggerMaxSourceMp(), 1.0f, 0.001f);
 }
 
 // 5. Test native zero-subprocess in-memory ZIP extractor (replaces tar.exe)
@@ -203,40 +239,128 @@ TEST_F(PluginHostTests, NativeZipExtraction) {
 
     // Non-existent ZIP should gracefully fail
     EXPECT_FALSE(QuickView::IArchive::ExtractZipToDirectory(dummyZip, extractDir));
+}
 
-    // Test downloading and extracting all model zips with callback
-    const char* modelIds[] = {
-        "realesr-animevideov3-x2",
-        "realesr-animevideov3-x3",
-        "realesr-animevideov3-x4",
-        "realesr-general-x4v3",
-        "realesrgan-x4plus-anime",
-        "realesrgan-x4plus"
-    };
+// 6. Test Transparent Alpha preservation in Neural Upscaling
+TEST_F(PluginHostTests, TransparentAlphaPreservation) {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    PathRemoveFileSpecW(exePath);
 
-    struct TestProgressCtx {
-        float lastProgress = 0.0f;
-        bool finished = false;
-        bool success = false;
-    };
+    std::wstring pluginPath = std::wstring(exePath) + L"\\plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx";
+    if (GetFileAttributesW(pluginPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        GTEST_SKIP() << "sr_ncnn_vulkan.qvx not found, skipping Alpha test.";
+    }
 
-    auto testCb = [](float progress, bool finished, bool success, void* uData) {
-        auto* ctx = static_cast<TestProgressCtx*>(uData);
-        ctx->lastProgress = progress;
-        ctx->finished = finished;
-        ctx->success = success;
-    };
+    std::wstring modelBin = std::wstring(exePath) + L"\\plugins\\sr\\sr_ncnn_vulkan\\models\\realesr-animevideov3-x2.bin";
+    if (GetFileAttributesW(modelBin.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        GTEST_SKIP() << "Model weights not found, skipping Alpha test.";
+    }
 
-    for (const char* mId : modelIds) {
-        std::string filename = std::string(mId) + ".zip";
-        std::wstring wFilename(filename.begin(), filename.end());
-        std::string url = "https://justnullname.github.io/QuickView/models/" + filename;
-        TestProgressCtx pCtx;
-        bool res = QuickView::PluginHost::Instance().DownloadModel(wFilename, url, testCb, &pCtx);
-        EXPECT_TRUE(res) << "Failed to download/extract: " << mId;
-        EXPECT_TRUE(pCtx.finished) << "Callback was not finished for: " << mId;
-        EXPECT_TRUE(pCtx.success) << "Callback success was false for: " << mId;
+    auto& host = QuickView::PluginHost::Instance();
+    host.UnloadSrPlugin();
+    host.SetSrPluginEnabled(true);
+    host.SetSrPluginPath(pluginPath);
+    host.SetSrModelId("realesr-animevideov3-x2");
+
+    ASSERT_TRUE(host.EnsureSrContext(m_d3dDevice.Get()));
+
+    // 64x64 Source Texture with transparent corner (Alpha = 0) and opaque center (Alpha = 255)
+    D3D11_TEXTURE2D_DESC srcDesc{};
+    srcDesc.Width = 64;
+    srcDesc.Height = 64;
+    srcDesc.MipLevels = 1;
+    srcDesc.ArraySize = 1;
+    srcDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    srcDesc.SampleDesc.Count = 1;
+    srcDesc.Usage = D3D11_USAGE_DEFAULT;
+    srcDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    ComPtr<ID3D11Texture2D> pSrcTex;
+    ASSERT_TRUE(SUCCEEDED(m_d3dDevice->CreateTexture2D(&srcDesc, nullptr, &pSrcTex)));
+
+    D3D11_TEXTURE2D_DESC dstDesc = srcDesc;
+    dstDesc.Width = 128;
+    dstDesc.Height = 128;
+    dstDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
+
+    ComPtr<ID3D11Texture2D> pDstTex;
+    ASSERT_TRUE(SUCCEEDED(m_d3dDevice->CreateTexture2D(&dstDesc, nullptr, &pDstTex)));
+
+    std::vector<uint32_t> srcPixels(64 * 64, 0x0055AAFF); // Transparent Alpha = 0x00
+    // Fill center 32x32 with opaque Alpha = 0xFF
+    for (int y = 16; y < 48; ++y) {
+        for (int x = 16; x < 48; ++x) {
+            srcPixels[y * 64 + x] = 0xFF55AAFF;
+        }
+    }
+    m_d3dContext->UpdateSubresource(pSrcTex.Get(), 0, nullptr, srcPixels.data(), 64 * 4, 0);
+
+    int32_t result = host.ExecuteSrUpscaleGpu(
+        m_d3dDevice.Get(),
+        pSrcTex.Get(), 64, 64,
+        pDstTex.Get(), 128, 128,
+        nullptr, nullptr, nullptr, nullptr
+    );
+    EXPECT_EQ(result, (int32_t)S_OK);
+
+    // Verify Corner Alpha is transparent (< 10) and Center Alpha is opaque (> 240)
+    D3D11_TEXTURE2D_DESC readDesc = dstDesc;
+    readDesc.Usage = D3D11_USAGE_STAGING;
+    readDesc.BindFlags = 0;
+    readDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> pStaging;
+    if (SUCCEEDED(m_d3dDevice->CreateTexture2D(&readDesc, nullptr, &pStaging))) {
+        m_d3dContext->CopyResource(pStaging.Get(), pDstTex.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (SUCCEEDED(m_d3dContext->Map(pStaging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+            const uint32_t* pPixels = static_cast<const uint32_t*>(mapped.pData);
+            uint32_t cornerPix = pPixels[0];
+            uint32_t centerPix = pPixels[64 * (mapped.RowPitch / 4) + 64];
+
+            uint8_t cornerA = (cornerPix >> 24) & 0xFF;
+            uint8_t centerA = (centerPix >> 24) & 0xFF;
+
+            printf("Alpha Test - Corner Alpha: %u (expected 0), Center Alpha: %u (expected 255)\n", cornerA, centerA);
+            EXPECT_LE(cornerA, 10);
+            EXPECT_GE(centerA, 240);
+
+            m_d3dContext->Unmap(pStaging.Get(), 0);
+        }
     }
 }
+
+// 7. Test Self-Healing Path Resolution (e.g. Moved directory or imported old absolute path)
+TEST_F(PluginHostTests, SelfHealingPathResolution) {
+    auto& host = QuickView::PluginHost::Instance();
+    // Simulate imported old absolute path from previous device
+    host.SetSrPluginPath(L"X:\\OldMachineFolder\\QuickView\\plugins\\sr_ncnn_vulkan.qvx");
+    
+    // Verify self-healing kicks in and resolves to current executable's relative plugin
+    auto installState = host.GetSrPluginInstallState();
+    EXPECT_EQ(installState, QuickView::PluginInstallState::Installed);
+    
+    // Check that configured path is auto-healed to relative
+    std::wstring healedPath = host.GetSrPluginPath();
+    EXPECT_TRUE(PathIsRelativeW(healedPath.c_str()));
+    
+    // Verify context initializes cleanly with self-healed path
+    host.SetSrPluginEnabled(true);
+    EXPECT_TRUE(host.EnsureSrContext(m_d3dDevice.Get()));
+}
+
+// 8. Test Missing Plugin Graceful Degradation (Imported backup ini with enabled SR but missing plugin files)
+TEST_F(PluginHostTests, MissingPluginGracefulDegradation) {
+    auto& host = QuickView::PluginHost::Instance();
+    // Simulate configured dummy non-existent plugin
+    host.SetSrPluginPath(L"plugins\\non_existent_fake_plugin_12345.qvx");
+    host.SetSrPluginEnabled(true);
+
+    // Should gracefully report NotInstalled
+    EXPECT_EQ(host.GetSrPluginInstallState(), QuickView::PluginInstallState::NotInstalled);
+    // Should gracefully fail context creation without crashing
+    EXPECT_FALSE(host.EnsureSrContext(m_d3dDevice.Get()));
+}
+
 
 

@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include "TileTypes.h"  // [Titan]
 #include "ComputeEngine.h"
+#include "Plugin/qvx_sr.h"
 #include <mutex>
 #include <map>
 #include <string>
@@ -129,7 +130,14 @@ public:
     /// <summary>
     /// Thread-safe pure D3D11 Super-Resolution computation (Safe for worker threads).
     /// </summary>
-    HRESULT GenerateSuperResolutionTexture(const QuickView::RawImageFrame& frame, float targetScale, ID3D11Texture2D** outTexture);
+    HRESULT GenerateSuperResolutionTexture(
+        const QuickView::RawImageFrame& frame,
+        float targetScale,
+        ID3D11Texture2D** outTexture,
+        QuickView::SimplePredicate checkCancel = {},
+        QVX_ProgressCallback onProgress = nullptr,
+        void* progressUserData = nullptr
+    );
 
     /// <summary>
     /// Fast wrapper to create D2D bitmap from a D3D11 texture on main UI thread.
