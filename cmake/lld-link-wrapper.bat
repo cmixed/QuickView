@@ -72,14 +72,14 @@ echo [QuickViewLinker] LIB After = "!LIB!" >&2
 :: 3. Locate lld-link.exe dynamically
 set "LLVM_LINKER_EXE="
 
-:: Priority 1: Standalone LLVM in standard locations
-if exist "C:\Program Files\LLVM\bin\lld-link.exe" set "LLVM_LINKER_EXE=C:\Program Files\LLVM\bin\lld-link.exe"
-if not defined LLVM_LINKER_EXE if exist "D:\Program Files\LLVM\bin\lld-link.exe" set "LLVM_LINKER_EXE=D:\Program Files\LLVM\bin\lld-link.exe"
-if not defined LLVM_LINKER_EXE if exist "C:\Program Files (x86)\LLVM\bin\lld-link.exe" set "LLVM_LINKER_EXE=C:\Program Files (x86)\LLVM\bin\lld-link.exe"
-
-:: Priority 2: Visual Studio internal LLVM tools
+:: Priority 1: Visual Studio internal LLVM tools (guarantees bitcode version match with clang-cl)
 if not defined LLVM_LINKER_EXE if exist "!VS_PATH!\VC\Tools\Llvm\x64\bin\lld-link.exe" set "LLVM_LINKER_EXE=!VS_PATH!\VC\Tools\Llvm\x64\bin\lld-link.exe"
 if not defined LLVM_LINKER_EXE if exist "!VS_PATH!\VC\Tools\Llvm\bin\lld-link.exe" set "LLVM_LINKER_EXE=!VS_PATH!\VC\Tools\Llvm\bin\lld-link.exe"
+
+:: Priority 2: Standalone LLVM in standard locations
+if not defined LLVM_LINKER_EXE if exist "C:\Program Files\LLVM\bin\lld-link.exe" set "LLVM_LINKER_EXE=C:\Program Files\LLVM\bin\lld-link.exe"
+if not defined LLVM_LINKER_EXE if exist "D:\Program Files\LLVM\bin\lld-link.exe" set "LLVM_LINKER_EXE=D:\Program Files\LLVM\bin\lld-link.exe"
+if not defined LLVM_LINKER_EXE if exist "C:\Program Files (x86)\LLVM\bin\lld-link.exe" set "LLVM_LINKER_EXE=C:\Program Files (x86)\LLVM\bin\lld-link.exe"
 
 :: Priority 3: System PATH
 if not defined LLVM_LINKER_EXE (

@@ -29,8 +29,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install Toolchain
-        run: choco install llvm -y
+      # Note: Visual Studio on GitHub Actions runner already includes matched LLVM/Clang-cl/lld-link
 
       - name: Setup Ninja
         uses: seanmiddleditch/gha-setup-ninja@master
@@ -65,7 +64,7 @@ jobs:
       - name: Prepare Portable Version
         shell: pwsh
         run: |
-          $archUpper = if ("${{ matrix.platform }}" -eq "x64") { "X64" } else { "ARM64" }
+          $archUpper = if ("${{ matrix.platform }}" -eq "x64") { "AMD64" } else { "ARM64" }
           
           # Path for CMake build artifact (Ninja puts it in root)
           $exePath = "${{ github.workspace }}/out/build/${{ matrix.preset }}/QuickView.exe"
@@ -87,13 +86,12 @@ jobs:
           $zipName = "QuickView_${tag}_${archUpper}.zip"
           Compress-Archive -Path $exePath -DestinationPath "Release/dist/$zipName" -Force
 
-          # Package standalone QVX plugin artifact (sr_ncnn_vulkan + models + manifest)
+          # Package standalone QVX plugin artifact (sr_ncnn_vulkan + models)
           $pluginDir = "${{ github.workspace }}/out/build/${{ matrix.preset }}/plugins/sr/sr_ncnn_vulkan"
           if (Test-Path "$pluginDir/sr_ncnn_vulkan.qvx") {
               $pluginZip = "Release/dist/sr_ncnn_vulkan_${archUpper}.zip"
               Compress-Archive -Path "$pluginDir/*" -DestinationPath $pluginZip -Force
               if ("${{ matrix.platform }}" -eq "x64") {
-                  Copy-Item -Path $pluginZip -Destination "Release/dist/sr_ncnn_vulkan.zip" -Force
                   Copy-Item -Path "${{ github.workspace }}/plugins/plugins_manifest.json" -Destination "Release/dist/plugins_manifest.json" -Force
               }
           }
@@ -102,7 +100,7 @@ jobs:
         shell: pwsh
         run: |
           $arch = "${{ matrix.platform }}".ToLower()
-          $archUpper = if ("${{ matrix.platform }}" -eq "x64") { "X64" } else { "ARM64" }
+          $archUpper = if ("${{ matrix.platform }}" -eq "x64") { "AMD64" } else { "ARM64" }
           $tag = "${{ env.DETECTED_TAG }}"
           $version = $tag.TrimStart('v')
           

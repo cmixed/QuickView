@@ -99,6 +99,14 @@ std::vector<RemotePluginItem> PluginHost::GetCachedRemoteManifest() const {
     }
 
     // Default built-in manifest fallback to ensure offline / initial launch availability
+#if defined(_M_ARM64) || defined(__aarch64__)
+    const char* defaultPkgUrl = "https://justnullname.github.io/QuickView/plugins/sr_ncnn_vulkan_ARM64.zip";
+    const char* defaultPkgFile = "sr_ncnn_vulkan_ARM64.zip";
+#else
+    const char* defaultPkgUrl = "https://justnullname.github.io/QuickView/plugins/sr_ncnn_vulkan_AMD64.zip";
+    const char* defaultPkgFile = "sr_ncnn_vulkan_AMD64.zip";
+#endif
+
     std::vector<RemotePluginItem> defaultList;
     defaultList.push_back({
         "com.quickview.sr.ncnn_vulkan",
@@ -107,8 +115,8 @@ std::vector<RemotePluginItem> PluginHost::GetCachedRemoteManifest() const {
         "QuickView Core Team",
         "SuperResolution",
         "High-Performance In-Process Vulkan Compute Neural Super-Resolution Engine (0-Copy, 0 Disk I/O).",
-        "https://justnullname.github.io/QuickView/plugins/sr_ncnn_vulkan.zip",
-        "sr_ncnn_vulkan.zip",
+        defaultPkgUrl,
+        defaultPkgFile,
         2600000,
         "0.1.0",
         ""
@@ -1261,20 +1269,13 @@ bool PluginHost::DownloadPlugin(const std::wstring& pluginName, const std::strin
 
     if (ok) {
         std::lock_guard<std::recursive_mutex> lock(m_srMutex);
-        if (isZip) {
-            std::wstring baseName = pluginName;
-            if (baseName.ends_with(L".zip")) baseName = baseName.substr(0, baseName.size() - 4);
-            std::wstring isolatedRel = L"plugins\\sr\\" + baseName + L"\\" + baseName + L".qvx";
-            std::wstring legacyRel = L"plugins\\" + baseName + L".qvx";
-            wchar_t combined[MAX_PATH];
-            PathCombineW(combined, exePath, isolatedRel.c_str());
-            if (GetFileAttributesW(combined) != INVALID_FILE_ATTRIBUTES) {
-                m_srPluginPath = isolatedRel;
-            } else {
-                m_srPluginPath = legacyRel;
-            }
+        m_srPluginPath.clear();
+        std::wstring relForIni;
+        std::wstring effective = ResolveEffectiveSrPluginPath(&relForIni);
+        if (!effective.empty()) {
+            m_srPluginPath = relForIni;
         } else {
-            m_srPluginPath = L"plugins\\" + pluginName;
+            m_srPluginPath = L"plugins\\sr\\sr_ncnn_vulkan\\sr_ncnn_vulkan.qvx";
         }
         UnloadSrPlugin();
         EnsureSrModuleLoaded();
@@ -1511,10 +1512,25 @@ void PluginHost::FetchRemoteManifestAsync(ManifestCallback callback, void* userD
                                     if (v && yyjson_get_str(v)) r.interfaceName = yyjson_get_str(v);
                                     v = yyjson_obj_get(item, "description");
                                     if (v && yyjson_get_str(v)) r.description = yyjson_get_str(v);
-                                    v = yyjson_obj_get(item, "download_url");
+                                    // Architecture-aware URL and file name selection
+#if defined(_M_ARM64) || defined(__aarch64__)
+                                    v = yyjson_obj_get(item, "download_url_arm64");
+                                    if (!v || !yyjson_get_str(v)) v = yyjson_obj_get(item, "download_url");
                                     if (v && yyjson_get_str(v)) r.downloadUrl = yyjson_get_str(v);
-                                    v = yyjson_obj_get(item, "file_name");
+
+                                    v = yyjson_obj_get(item, "file_name_arm64");
+                                    if (!v || !yyjson_get_str(v)) v = yyjson_obj_get(item, "file_name");
                                     if (v && yyjson_get_str(v)) r.fileName = yyjson_get_str(v);
+#else
+                                    v = yyjson_obj_get(item, "download_url_amd64");
+                                    if (!v || !yyjson_get_str(v)) v = yyjson_obj_get(item, "download_url_x64");
+                                    if (!v || !yyjson_get_str(v)) v = yyjson_obj_get(item, "download_url");
+                                    if (v && yyjson_get_str(v)) r.downloadUrl = yyjson_get_str(v);
+
+                                    v = yyjson_obj_get(item, "file_name_amd64");
+                                    if (!v || !yyjson_get_str(v)) v = yyjson_obj_get(item, "file_name");
+                                    if (v && yyjson_get_str(v)) r.fileName = yyjson_get_str(v);
+#endif
                                     v = yyjson_obj_get(item, "file_size");
                                     if (v) r.fileSize = yyjson_get_uint(v);
                                     v = yyjson_obj_get(item, "min_app_version");
