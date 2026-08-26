@@ -23,6 +23,7 @@
 #include "RatingMetadata.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -63,6 +64,33 @@ public:
     // Drop everything and cancel in-flight work (folder changed).
     void Clear();
 
+    // Why a photo cannot be rated, so the UI can say so instead of doing
+    // nothing when a key is pressed.
+    enum class Writability {
+        Writable,
+        UnsupportedFormat, // no place to put a rating (HEIC, PNG, archive entry...)
+        ReadOnlyFile,
+    };
+    static Writability GetWritability(const std::wstring& renderedPath,
+                                      const std::wstring& rawPath);
+
+    // Apply a rating immediately in memory so the UI can repaint at once, and
+    // queue the disk write behind a short debounce. Returns the value now on
+    // display. `isResident` marks the photo currently held open for display:
+    // such a file is never rebuilt underneath itself, the write waits until
+    // it is no longer on screen.
+    QuickView::Rating::Resolved ApplyRatingOptimistic(ImageID id, int stars,
+                                                      const std::wstring& renderedPath,
+                                                      const std::wstring& rawPath,
+                                                      bool isResident);
+
+    // A photo left the screen, so a write that was postponed for it can go
+    // ahead. Pass the path now on display (empty when there is none).
+    void ReleaseResident(const std::wstring& nowResidentPath);
+
+    // Write everything still pending, blocking until done (shutdown).
+    void FlushPendingWrites();
+
     // The .xmp sidecar a RAW's rating lives in, i.e. the path with its
     // extension replaced. Empty when `path` has no extension.
     static std::wstring SidecarPathFor(const std::wstring& path);
@@ -80,7 +108,19 @@ private:
         uint64_t generation = 0;
     };
 
+    // One outstanding rating change per photo: a burst of keypresses replaces
+    // this entry rather than queuing several writes.
+    struct PendingWrite {
+        int stars = 0;
+        std::wstring renderedPath;
+        std::wstring rawPath;
+        std::chrono::steady_clock::time_point due;
+        bool resident = false;   // held open for display: do not rebuild it yet
+    };
+
     void WorkerLoop();
+    void WriteLoop();
+    void PerformWrite(const PendingWrite& write);
 
     HWND m_hwnd = nullptr;
 
@@ -95,4 +135,10 @@ private:
     std::thread m_worker;
     std::atomic<bool> m_running{ false };
     std::atomic<uint64_t> m_generation{ 0 };
+
+    // Writes live on their own thread so a slow disk cannot hold up reads.
+    std::thread m_writeWorker;
+    std::mutex m_writeMutex;
+    std::condition_variable m_writeCv;
+    std::unordered_map<ImageID, PendingWrite> m_pendingWrites;
 };

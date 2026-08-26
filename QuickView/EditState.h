@@ -189,6 +189,12 @@ enum class HotkeyAction : uint8_t {
     ToggleSpan,        // Toggle Span Displays
     ToggleSlideshow,   // Toggle Slideshow Mode
     RenderRaw,         // Toggle RAW decode / switch to the paired RAW
+    Rate0,             // Clear the star rating
+    Rate1,             // Rate the photo 1..5 stars
+    Rate2,
+    Rate3,
+    Rate4,
+    Rate5,
     OpenFile,          // Open File Dialog
     EditFile,          // Edit with External Editor
     RenameFile,        // Rename File Dialog
@@ -262,6 +268,12 @@ inline std::wstring_view HotkeyActionToString(HotkeyAction action) noexcept {
         case HotkeyAction::ShowInExplorer: return L"ShowInExplorer";
         case HotkeyAction::ToggleCompare: return L"ToggleCompare";
         case HotkeyAction::ComparePair: return L"ComparePair";
+        case HotkeyAction::Rate0: return L"Rate0";
+        case HotkeyAction::Rate1: return L"Rate1";
+        case HotkeyAction::Rate2: return L"Rate2";
+        case HotkeyAction::Rate3: return L"Rate3";
+        case HotkeyAction::Rate4: return L"Rate4";
+        case HotkeyAction::Rate5: return L"Rate5";
         case HotkeyAction::AlwaysOnTop: return L"AlwaysOnTop";
         case HotkeyAction::ToggleDebugHud: return L"ToggleDebugHud";
         case HotkeyAction::Print: return L"Print";
@@ -323,6 +335,12 @@ inline HotkeyAction StringToHotkeyAction(std::wstring_view sv) noexcept {
     if (sv == L"ShowInExplorer") return HotkeyAction::ShowInExplorer;
     if (sv == L"ToggleCompare") return HotkeyAction::ToggleCompare;
     if (sv == L"ComparePair") return HotkeyAction::ComparePair;
+    if (sv == L"Rate0") return HotkeyAction::Rate0;
+    if (sv == L"Rate1") return HotkeyAction::Rate1;
+    if (sv == L"Rate2") return HotkeyAction::Rate2;
+    if (sv == L"Rate3") return HotkeyAction::Rate3;
+    if (sv == L"Rate4") return HotkeyAction::Rate4;
+    if (sv == L"Rate5") return HotkeyAction::Rate5;
     if (sv == L"AlwaysOnTop") return HotkeyAction::AlwaysOnTop;
     if (sv == L"ToggleDebugHud") return HotkeyAction::ToggleDebugHud;
     if (sv == L"Print") return HotkeyAction::Print;

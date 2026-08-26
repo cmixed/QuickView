@@ -18,8 +18,10 @@
 
 #include "RatingStore.h"
 
+#include "RatingWriter.h"
 #include "SupportedExtensions.h"
 
+#include <algorithm>
 #include <vector>
 
 namespace {
@@ -28,6 +30,10 @@ namespace {
 // read -- the whole point is to stay off the decode pipeline.
 constexpr DWORD HEADER_READ_BYTES = 128 * 1024;
 constexpr DWORD SIDECAR_READ_BYTES = 16 * 1024;
+
+// Long enough that holding a digit or running 1-3-5 lands one write,
+// short enough that the file is up to date by the time the user looks.
+constexpr auto WRITE_DEBOUNCE = std::chrono::milliseconds(400);
 
 // Wide-char file API throughout: a path round-tripped through a narrow code
 // page fails to open on non-ASCII names.
@@ -69,6 +75,7 @@ void RatingStore::Initialize(HWND hwnd) {
     m_hwnd = hwnd;
     m_running = true;
     m_worker = std::thread(&RatingStore::WorkerLoop, this);
+    m_writeWorker = std::thread(&RatingStore::WriteLoop, this);
 }
 
 void RatingStore::Shutdown() {
@@ -80,6 +87,13 @@ void RatingStore::Shutdown() {
     }
     m_cv.notify_all();
     if (m_worker.joinable()) m_worker.join();
+
+    m_writeCv.notify_all();
+    if (m_writeWorker.joinable()) m_writeWorker.join();
+    // Ratings the user set moments before closing must still reach the disk,
+    // including any whose rebuild was waiting for the photo to leave the
+    // screen -- which it now has.
+    FlushPendingWrites();
 }
 
 std::wstring RatingStore::SidecarPathFor(const std::wstring& path) {
@@ -110,6 +124,163 @@ std::optional<int> RatingStore::ReadRatingFromFile(const std::wstring& path) {
 
     return isJpeg ? QuickView::Rating::ParseJpegRating(bytes)
                   : QuickView::Rating::ParseTiffRating(bytes);
+}
+
+RatingStore::Writability RatingStore::GetWritability(const std::wstring& renderedPath,
+                                                    const std::wstring& rawPath) {
+    // A RAW is rated through its sidecar, so the RAW itself never has to be
+    // writable -- only the folder does, which the write attempt will report.
+    if (!rawPath.empty()) return Writability::Writable;
+
+    if (renderedPath.find(L'|') != std::wstring::npos) {
+        return Writability::UnsupportedFormat; // entry inside an archive
+    }
+
+    const std::wstring_view ext = QuickView::ExtensionOf(renderedPath);
+    const bool inFileRatable = QuickView::ExtEqualsIgnoreCase(ext, L".jpg") ||
+                               QuickView::ExtEqualsIgnoreCase(ext, L".jpeg") ||
+                               QuickView::ExtEqualsIgnoreCase(ext, L".tif") ||
+                               QuickView::ExtEqualsIgnoreCase(ext, L".tiff");
+    // A standalone RAW still resolves through a sidecar of its own.
+    if (!inFileRatable && !QuickView::IsRawPath(renderedPath)) {
+        return Writability::UnsupportedFormat;
+    }
+
+    const DWORD attrs = GetFileAttributesW(renderedPath.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY)) {
+        return Writability::ReadOnlyFile;
+    }
+    return Writability::Writable;
+}
+
+QuickView::Rating::Resolved RatingStore::ApplyRatingOptimistic(
+    ImageID id, int stars, const std::wstring& renderedPath, const std::wstring& rawPath,
+    bool isResident) {
+    QuickView::Rating::Resolved resolved;
+    resolved.stars = stars;
+    // A rating set here is the user's, so it is authoritative on both carriers
+    // and there is no disagreement left to report.
+    resolved.source = rawPath.empty() ? QuickView::Rating::Source::InFile
+                                      : QuickView::Rating::Source::Sidecar;
+    if (stars == 0) resolved.source = QuickView::Rating::Source::None;
+
+    {
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        m_cache[id] = resolved;
+    }
+
+    {
+        // Replacing the entry is what makes a burst of keypresses collapse
+        // into one write: only the last value survives to reach the disk.
+        std::lock_guard<std::mutex> lock(m_writeMutex);
+        PendingWrite& pending = m_pendingWrites[id];
+        pending.stars = stars;
+        pending.renderedPath = renderedPath;
+        pending.rawPath = rawPath;
+        pending.resident = isResident;
+        pending.due = std::chrono::steady_clock::now() + WRITE_DEBOUNCE;
+    }
+    m_writeCv.notify_one();
+    return resolved;
+}
+
+void RatingStore::ReleaseResident(const std::wstring& nowResidentPath) {
+    bool woke = false;
+    {
+        std::lock_guard<std::mutex> lock(m_writeMutex);
+        for (auto& [id, pending] : m_pendingWrites) {
+            if (pending.resident && pending.renderedPath != nowResidentPath) {
+                pending.resident = false; // free to rebuild the file now
+                pending.due = std::chrono::steady_clock::now();
+                woke = true;
+            }
+        }
+    }
+    if (woke) m_writeCv.notify_one();
+}
+
+void RatingStore::FlushPendingWrites() {
+    std::vector<PendingWrite> due;
+    {
+        std::lock_guard<std::mutex> lock(m_writeMutex);
+        for (auto& [id, pending] : m_pendingWrites) {
+            pending.resident = false; // nothing is on screen any more
+            due.push_back(pending);
+        }
+        m_pendingWrites.clear();
+    }
+    for (const auto& write : due) PerformWrite(write);
+}
+
+void RatingStore::PerformWrite(const PendingWrite& write) {
+    if (write.renderedPath.empty()) return;
+
+    // A folded pair keeps its rating in the RAW's sidecar as well; that half
+    // arrives with the sidecar stage.
+    if (QuickView::IsRawPath(write.renderedPath)) return;
+
+    const auto status = QuickView::Rating::WriteRatingToImage(
+        write.renderedPath, write.stars, /*allowTranscode*/ !write.resident);
+
+    if (status == QuickView::Rating::WriteStatus::NeedsTranscode) {
+        // The file has no room for an in-place patch and is still on screen.
+        // Put it back with no deadline of its own: retrying on a timer would
+        // reopen the file every debounce for as long as the photo is shown,
+        // and the only thing that can actually unblock it is the photo
+        // leaving the screen, which ReleaseResident reports.
+        std::lock_guard<std::mutex> lock(m_writeMutex);
+        auto& pending = m_pendingWrites[FileNavigator::PathToImageID(write.renderedPath)];
+        pending = write;
+        pending.resident = true;
+        pending.due = std::chrono::steady_clock::time_point::max();
+    }
+}
+
+void RatingStore::WriteLoop() {
+    // WIC is COM, and this thread owns its own apartment: without this every
+    // write would fail at CoCreateInstance.
+    const HRESULT comInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool ownsCom = SUCCEEDED(comInit);
+
+    struct ComScope {
+        bool owns;
+        ~ComScope() { if (owns) CoUninitialize(); }
+    } comScope{ ownsCom };
+
+    while (true) {
+        std::vector<PendingWrite> due;
+        {
+            std::unique_lock<std::mutex> lock(m_writeMutex);
+            if (m_pendingWrites.empty()) {
+                m_writeCv.wait(lock, [this] { return !m_running.load() || !m_pendingWrites.empty(); });
+            } else {
+                // Sleep exactly until the next entry is due rather than on a
+                // fixed tick; an entry waiting for its photo to leave the
+                // screen has no deadline and must not cause a wakeup at all.
+                auto earliest = std::chrono::steady_clock::time_point::max();
+                for (const auto& [id, pending] : m_pendingWrites) {
+                    earliest = (std::min)(earliest, pending.due);
+                }
+                if (earliest == std::chrono::steady_clock::time_point::max()) {
+                    m_writeCv.wait(lock);
+                } else {
+                    m_writeCv.wait_until(lock, earliest);
+                }
+            }
+            if (!m_running.load()) return;
+
+            const auto now = std::chrono::steady_clock::now();
+            for (auto it = m_pendingWrites.begin(); it != m_pendingWrites.end();) {
+                if (it->second.due <= now) {
+                    due.push_back(it->second);
+                    it = m_pendingWrites.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        for (const auto& write : due) PerformWrite(write);
+    }
 }
 
 std::optional<QuickView::Rating::Resolved> RatingStore::TryGet(ImageID id) const {

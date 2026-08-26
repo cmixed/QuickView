@@ -342,6 +342,13 @@ std::array<HotkeyBinding, static_cast<size_t>(HotkeyAction::Count)> g_hotkeys = 
     HotkeyBinding{ HotkeyAction::ToggleSpan, KeyCombo{ VK_F11, 1 }, KeyCombo{ VK_F11, 1 } }, // Ctrl + F11
     HotkeyBinding{ HotkeyAction::ToggleSlideshow, KeyCombo{ VK_F10, 0 }, KeyCombo{ VK_F10, 0 } },
     HotkeyBinding{ HotkeyAction::RenderRaw, KeyCombo{ 'D', 0 }, KeyCombo{ 'D', 0 } }, // Decode RAW / switch to paired RAW
+    // Ratings: the numeric keypad, 0 clears
+    HotkeyBinding{ HotkeyAction::Rate0, KeyCombo{ VK_NUMPAD0, 0 }, KeyCombo{ VK_NUMPAD0, 0 } },
+    HotkeyBinding{ HotkeyAction::Rate1, KeyCombo{ VK_NUMPAD1, 0 }, KeyCombo{ VK_NUMPAD1, 0 } },
+    HotkeyBinding{ HotkeyAction::Rate2, KeyCombo{ VK_NUMPAD2, 0 }, KeyCombo{ VK_NUMPAD2, 0 } },
+    HotkeyBinding{ HotkeyAction::Rate3, KeyCombo{ VK_NUMPAD3, 0 }, KeyCombo{ VK_NUMPAD3, 0 } },
+    HotkeyBinding{ HotkeyAction::Rate4, KeyCombo{ VK_NUMPAD4, 0 }, KeyCombo{ VK_NUMPAD4, 0 } },
+    HotkeyBinding{ HotkeyAction::Rate5, KeyCombo{ VK_NUMPAD5, 0 }, KeyCombo{ VK_NUMPAD5, 0 } },
     HotkeyBinding{ HotkeyAction::OpenFile, KeyCombo{ 'O', 0 }, KeyCombo{ 'O', 0 } },
     HotkeyBinding{ HotkeyAction::EditFile, KeyCombo{ 'E', 0 }, KeyCombo{ 'E', 0 } },
     HotkeyBinding{ HotkeyAction::RenameFile, KeyCombo{ VK_F2, 0 }, KeyCombo{ VK_F2, 0 } },
@@ -521,6 +528,7 @@ static void ArmPairRawFullDecode(const std::wstring& renderedPath, const std::ws
 // [Ratings] Queue the background rating read for one photo, resolving a folded
 // pair so that both of its faces end up with the same answer.
 static void QueueRatingRead(const std::wstring& path);
+static void ApplyRatingToCurrentImage(HWND hwnd, int stars);
 // [RAW+JPEG Pairing] Delete handling for a folded pair (three-way choice) and
 // the shared refresh of the not-per-frame pair indicators (title + toolbar).
 static void HandlePairedDelete(HWND hwnd, const std::wstring& renderedPath, const std::wstring& rawPath, bool isCurrentViewing);
@@ -12127,13 +12135,6 @@ SKIP_EDGE_NAV:;
                     if (HandleHotkeyAction(hwnd, HotkeyAction::ZoomOut)) return 0;
                 }
             }
-            if (!ctrl && !shift && !alt) {
-                if (wParam == '1' || wParam == VK_NUMPAD1) {
-                    if (HandleHotkeyAction(hwnd, HotkeyAction::Zoom100)) return 0;
-                } else if (wParam == '0' || wParam == VK_NUMPAD0) {
-                    if (HandleHotkeyAction(hwnd, HotkeyAction::ZoomFit)) return 0;
-                }
-            }
         }
 
         if (message == WM_SYSKEYDOWN) {
@@ -13142,8 +13143,10 @@ SKIP_EDGE_NAV:;
              RequestRepaint(PaintLayer::Static);
              break;
 
-        case IDM_ZOOM_100: SendMessage(hwnd, WM_KEYDOWN, '1', 0); break;
-        case IDM_ZOOM_FIT: SendMessage(hwnd, WM_KEYDOWN, '0', 0); break;
+        // Invoke the actions directly: these used to be routed by faking a
+        // keypress, which only worked through the hardcoded 0/1 fallback.
+        case IDM_ZOOM_100: HandleHotkeyAction(hwnd, HotkeyAction::Zoom100); break;
+        case IDM_ZOOM_FIT: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFit); break;
         case IDM_ZOOM_FIT_WINDOW: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFitWindow); break;
         case IDM_ZOOM_FILL: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFill); break;
         case IDM_ZOOM_IN:  SendMessage(hwnd, WM_KEYDOWN, VK_ADD, 0); break;
@@ -15055,6 +15058,8 @@ void StartNavigation(HWND hwnd, std::wstring path, [[maybe_unused]] bool showOSD
                               g_runtime.ForceRawDecode, isPairedView);
 
         QueueRatingRead(path);
+        // Whatever left the screen can now be rewritten safely.
+        g_ratingStore.ReleaseResident(path);
     }
     if (IsCompareModeActive()) {
         RefreshCompareRawUI(hwnd);
@@ -16352,6 +16357,64 @@ static void ReturnToPairFaceAfterCompareExit(HWND hwnd) {
 // the current primary image. (The gallery badge, info panel and EXIF row are
 // per-frame and only need a repaint.) Compare mode routes through the existing
 // RefreshCompareRawUI instead.
+// [Ratings] Resolve which files carry the rating of the photo on screen: the
+// rendered file, plus the RAW of a folded pair (empty when there is none).
+static void ResolveRatingCarriers(const std::wstring& path, std::wstring& outRendered,
+                                  std::wstring& outRaw) {
+    const auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
+    outRendered = path;
+    outRaw.clear();
+    if (const auto* pairedRaw = nav.GetPairedRaw(FileNavigator::PathToImageID(path))) {
+        outRaw = pairedRaw->path;
+    } else if (!g_pairViewRawPath.empty() && path == g_pairViewRawPath &&
+               !g_pairViewRenderedPath.empty()) {
+        outRendered = g_pairViewRenderedPath; // showing the RAW face of a pair
+        outRaw = path;
+    }
+}
+
+// [Ratings] Rate the photo on screen. The cache and the UI are updated at
+// once -- the disk write is deferred to its own stage -- and a photo that
+// cannot carry a rating says so rather than swallowing the keystroke.
+static void ApplyRatingToCurrentImage(HWND hwnd, int stars) {
+    const std::wstring path = GetPaneContext(PaneSlot::Primary).path;
+    if (path.empty()) return;
+
+    std::wstring rendered, raw;
+    ResolveRatingCarriers(path, rendered, raw);
+
+    switch (RatingStore::GetWritability(rendered, raw)) {
+    case RatingStore::Writability::UnsupportedFormat:
+        g_osd.Show(hwnd, L"This format cannot store a rating", false);
+        return;
+    case RatingStore::Writability::ReadOnlyFile:
+        g_osd.Show(hwnd, L"File is read-only", false);
+        return;
+    case RatingStore::Writability::Writable:
+        break;
+    }
+
+    // The photo on screen is held open for display, so a rebuild of it waits
+    // until the user navigates away (see RatingStore::ReleaseResident).
+    g_ratingStore.ApplyRatingOptimistic(FileNavigator::PathToImageID(path), stars, rendered, raw,
+                                        /*isResident*/ true);
+
+    wchar_t osd[32];
+    if (stars > 0) {
+        std::wstring bar;
+        for (int i = 0; i < QuickView::Rating::MAX_STARS; ++i) {
+            bar += (i < stars) ? L"\u2605" : L"\u2606";
+        }
+        swprintf_s(osd, L"%s", bar.c_str());
+    } else {
+        swprintf_s(osd, L"%s", L"\u2606\u2606\u2606\u2606\u2606");
+    }
+    g_osd.Show(hwnd, osd, false);
+
+    RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
+    if (g_gallery.IsVisible()) RequestRepaint(PaintLayer::Gallery);
+}
+
 static void QueueRatingRead(const std::wstring& path) {
     if (path.empty()) return;
     const auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
@@ -17169,6 +17232,17 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
         if (!rawPath.empty()) {
             ComparePairSideBySide(hwnd, renderedPath, rawPath);
         }
+        return true;
+    }
+
+    case HotkeyAction::Rate0:
+    case HotkeyAction::Rate1:
+    case HotkeyAction::Rate2:
+    case HotkeyAction::Rate3:
+    case HotkeyAction::Rate4:
+    case HotkeyAction::Rate5: {
+        const int stars = (int)action - (int)HotkeyAction::Rate0;
+        ApplyRatingToCurrentImage(hwnd, stars);
         return true;
     }
 

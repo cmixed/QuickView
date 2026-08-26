@@ -80,6 +80,7 @@ set(QUICKVIEW_SOURCES
     QuickView/exif.cpp
     QuickView/RatingMetadata.cpp
     QuickView/RatingStore.cpp
+    QuickView/RatingWriter.cpp
     QuickView/RenderEngine.cpp
     QuickView/ImageLoader.cpp
     QuickView/MiniTiff.cpp

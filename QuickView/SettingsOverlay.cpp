@@ -2101,6 +2101,8 @@ void SettingsOverlay::BuildMenu() {
             tabKeys.items.push_back({ isChinese ? L"动画控制" : L"Animation Control", OptionType::Header });
         } else if (action == HotkeyAction::ToggleGallery) {
             tabKeys.items.push_back({ isChinese ? L"视图模式" : L"View Modes", OptionType::Header });
+        } else if (action == HotkeyAction::Rate0) {
+            tabKeys.items.push_back({ isChinese ? L"星级评分" : L"Rating", OptionType::Header });
         } else if (action == HotkeyAction::OpenFile) {
             tabKeys.items.push_back({ isChinese ? L"文件操作" : L"File Operations", OptionType::Header });
         } else if (action == HotkeyAction::ToggleOverlay) {
