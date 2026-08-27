@@ -190,6 +190,103 @@ std::optional<int> ParseJpegRating(std::span<const uint8_t> bytes) {
     return fromXmp;
 }
 
+namespace {
+
+// Locate an existing xmp:Rating and report the exact span to replace, which is
+// what makes the update surgical: everything outside [start, end) is copied
+// through untouched.
+struct PropertySpan {
+    size_t start = 0;   // first character of the whole property
+    size_t end = 0;     // one past its last character
+    bool attributeForm = false;
+};
+
+std::optional<PropertySpan> FindRatingProperty(std::string_view xmp) {
+    constexpr std::string_view NAME = "xmp:Rating";
+
+    for (size_t pos = xmp.find(NAME); pos != std::string_view::npos;
+         pos = xmp.find(NAME, pos + NAME.size())) {
+        size_t cursor = pos + NAME.size();
+        while (cursor < xmp.size() && (xmp[cursor] == ' ' || xmp[cursor] == '\t')) ++cursor;
+        if (cursor >= xmp.size()) break;
+
+        if (xmp[cursor] == '=') {
+            // xmp:Rating="3"
+            ++cursor;
+            while (cursor < xmp.size() && (xmp[cursor] == ' ' || xmp[cursor] == '\t')) ++cursor;
+            if (cursor >= xmp.size()) break;
+            const char quote = xmp[cursor];
+            if (quote != '"' && quote != '\'') continue;
+            const size_t close = xmp.find(quote, cursor + 1);
+            if (close == std::string_view::npos) continue;
+            return PropertySpan{ pos, close + 1, true };
+        }
+        if (xmp[cursor] == '>') {
+            // <xmp:Rating>3</xmp:Rating>: the span starts at the opening '<'
+            constexpr std::string_view CLOSE_TAG = "</xmp:Rating>";
+            const size_t close = xmp.find(CLOSE_TAG, cursor);
+            if (close == std::string_view::npos) continue;
+            const size_t openTag = xmp.rfind('<', pos);
+            if (openTag == std::string_view::npos) continue;
+            return PropertySpan{ openTag, close + CLOSE_TAG.size(), false };
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+std::optional<std::string> UpdateXmpRating(std::string_view xmp, int stars) {
+    if (xmp.empty()) return std::nullopt;
+
+    const std::string value = std::to_string(stars);
+
+    if (const auto span = FindRatingProperty(xmp)) {
+        std::string out;
+        out.reserve(xmp.size() + 16);
+        out.append(xmp.substr(0, span->start));
+        if (stars > MIN_STARS) {
+            out.append(span->attributeForm ? "xmp:Rating=\"" + value + "\""
+                                           : "<xmp:Rating>" + value + "</xmp:Rating>");
+        }
+        // stars == 0 drops the property entirely, which is what clearing means.
+        out.append(xmp.substr(span->end));
+        return out;
+    }
+
+    if (stars <= MIN_STARS) {
+        return std::string(xmp); // nothing to clear, leave the document as it is
+    }
+
+    // Absent: add it as an attribute of the first rdf:Description, which is
+    // where Lightroom and Capture One keep it too.
+    constexpr std::string_view DESCRIPTION = "<rdf:Description";
+    const size_t desc = xmp.find(DESCRIPTION);
+    if (desc == std::string_view::npos) return std::nullopt; // unfamiliar shape
+
+    const size_t insert = desc + DESCRIPTION.size();
+    std::string out;
+    out.reserve(xmp.size() + 32);
+    out.append(xmp.substr(0, insert));
+    out.append("\n    xmp:Rating=\"" + value + "\"");
+    out.append(xmp.substr(insert));
+    return out;
+}
+
+std::string BuildMinimalXmp(int stars) {
+    const std::string value = std::to_string(stars > MIN_STARS ? stars : MIN_STARS);
+    return
+        "<?xpacket begin=\"\xEF\xBB\xBF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n"
+        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
+        " <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+        "  <rdf:Description rdf:about=\"\"\n"
+        "    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n"
+        "    xmp:Rating=\"" + value + "\"/>\n"
+        " </rdf:RDF>\n"
+        "</x:xmpmeta>\n"
+        "<?xpacket end=\"w\"?>\n";
+}
+
 Resolved ResolvePairRating(std::optional<int> inFile, std::optional<int> sidecar) {
     // Rejected (-1) is a deliberate mark, so it takes part in the resolution;
     // it is only flattened to 0 stars for display.

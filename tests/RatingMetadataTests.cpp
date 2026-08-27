@@ -250,3 +250,103 @@ TEST(RatingMetadataTest, PairRejectedIsDisplayedAsZeroStarsButStillConflicts) {
     EXPECT_TRUE(r.conflict);
     EXPECT_EQ(r.otherStars, 4);
 }
+
+// --- UpdateXmpRating -------------------------------------------------------
+
+namespace {
+
+// Shaped like a real Lightroom sidecar: the rating sits among develop
+// settings that an update must not disturb.
+const char* const LIGHTROOM_SIDECAR =
+    "<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n"
+    "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
+    " <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+    "  <rdf:Description rdf:about=\"\"\n"
+    "    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n"
+    "    xmlns:crs=\"http://ns.adobe.com/camera-raw-settings/1.0/\"\n"
+    "    xmp:Rating=\"4\"\n"
+    "    crs:Exposure2012=\"+0.35\"\n"
+    "    crs:Contrast2012=\"+12\"/>\n"
+    " </rdf:RDF>\n"
+    "</x:xmpmeta>\n"
+    "<?xpacket end=\"w\"?>\n";
+
+} // namespace
+
+TEST(RatingMetadataTest, XmpUpdateKeepsDevelopSettings) {
+    const auto out = UpdateXmpRating(LIGHTROOM_SIDECAR, 2);
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(ParseXmpRating(*out), 2);
+    // Everything the photographer actually cares about must survive verbatim.
+    EXPECT_NE(out->find("crs:Exposure2012=\"+0.35\""), std::string::npos);
+    EXPECT_NE(out->find("crs:Contrast2012=\"+12\""), std::string::npos);
+    EXPECT_NE(out->find("xmlns:crs="), std::string::npos);
+    EXPECT_NE(out->find("<?xpacket end=\"w\"?>"), std::string::npos);
+}
+
+TEST(RatingMetadataTest, XmpUpdateRewritesOnlyTheRating) {
+    const auto out = UpdateXmpRating(LIGHTROOM_SIDECAR, 5);
+    ASSERT_TRUE(out.has_value());
+    const std::string before(LIGHTROOM_SIDECAR);
+    // The documents differ by one character: the rating digit.
+    EXPECT_EQ(out->size(), before.size());
+    size_t differing = 0;
+    for (size_t i = 0; i < before.size(); ++i) {
+        if ((*out)[i] != before[i]) ++differing;
+    }
+    EXPECT_EQ(differing, 1u);
+}
+
+TEST(RatingMetadataTest, XmpUpdateClearingRemovesTheProperty) {
+    const auto out = UpdateXmpRating(LIGHTROOM_SIDECAR, 0);
+    ASSERT_TRUE(out.has_value());
+    EXPECT_FALSE(ParseXmpRating(*out).has_value());
+    EXPECT_EQ(out->find("xmp:Rating"), std::string::npos);
+    EXPECT_NE(out->find("crs:Exposure2012=\"+0.35\""), std::string::npos);
+}
+
+TEST(RatingMetadataTest, XmpUpdateInsertsWhenAbsent) {
+    const std::string noRating =
+        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
+        " <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+        "  <rdf:Description rdf:about=\"\" crs:Contrast2012=\"+12\"/>\n"
+        " </rdf:RDF>\n"
+        "</x:xmpmeta>\n";
+    const auto out = UpdateXmpRating(noRating, 3);
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(ParseXmpRating(*out), 3);
+    EXPECT_NE(out->find("crs:Contrast2012=\"+12\""), std::string::npos);
+}
+
+TEST(RatingMetadataTest, XmpUpdateHandlesElementForm) {
+    const std::string elementForm =
+        "<rdf:Description rdf:about=\"\">\n"
+        "  <xmp:Rating>1</xmp:Rating>\n"
+        "  <dc:title>keep me</dc:title>\n"
+        "</rdf:Description>\n";
+    const auto out = UpdateXmpRating(elementForm, 4);
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(ParseXmpRating(*out), 4);
+    EXPECT_NE(out->find("<dc:title>keep me</dc:title>"), std::string::npos);
+}
+
+TEST(RatingMetadataTest, XmpUpdateRefusesUnfamiliarDocument) {
+    // No rdf:Description to attach to: refusing is the only safe answer, since
+    // the alternative is overwriting a file we do not understand.
+    EXPECT_FALSE(UpdateXmpRating("just some text", 3).has_value());
+    EXPECT_FALSE(UpdateXmpRating("", 3).has_value());
+}
+
+TEST(RatingMetadataTest, XmpUpdateClearingAnUnratedDocumentIsANoOp) {
+    const std::string doc = "<rdf:Description rdf:about=\"\" crs:Contrast2012=\"+12\"/>";
+    const auto out = UpdateXmpRating(doc, 0);
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(*out, doc);
+}
+
+TEST(RatingMetadataTest, MinimalSidecarRoundTrips) {
+    for (int stars = 1; stars <= MAX_STARS; ++stars) {
+        const std::string xmp = BuildMinimalXmp(stars);
+        EXPECT_EQ(ParseXmpRating(xmp), stars);
+    }
+}

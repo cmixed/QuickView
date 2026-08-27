@@ -1785,6 +1785,16 @@ void FileNavigator::WatcherThreadProc() {
         }
         if (cancelled) break;
 
+        // [Ratings] Writing a sidecar creates a file in this very folder, and
+        // rescanning because of our own write would be pure waste: an .xmp is
+        // not in the playlist, so neither the list nor the pairing can change.
+        // The notification carries no file name, so the only usable signal is
+        // that we wrote something a moment ago.
+        if (s_selfWriteProbe && s_selfWriteProbe()) {
+            if (!FindNextChangeNotification(hNotify)) break;
+            continue;
+        }
+
         // Materialized playlists rescan; Explorer cursor just refreshes ItemCount.
         if (m_playlistReady.load() || m_needInitialScan.load()) {
             publishScan();

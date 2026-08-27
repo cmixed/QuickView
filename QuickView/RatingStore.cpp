@@ -35,6 +35,26 @@ constexpr DWORD SIDECAR_READ_BYTES = 16 * 1024;
 // short enough that the file is up to date by the time the user looks.
 constexpr auto WRITE_DEBOUNCE = std::chrono::milliseconds(400);
 
+// An update has to preserve the whole sidecar, so writing reads all of it,
+// unlike the prefix that display needs. Anything larger than this is not a
+// rating sidecar and is left alone.
+constexpr DWORD MAX_SIDECAR_BYTES = 4 * 1024 * 1024;
+
+// How long after writing a file a directory-change notification is assumed to
+// be the echo of that write. Long enough to cover the watcher's own debounce.
+constexpr auto SELF_WRITE_ECHO = std::chrono::milliseconds(1500);
+std::atomic<int64_t> g_lastSelfWriteTick{ 0 };
+
+LARGE_INTEGER FileSizeOf(const std::wstring& path) {
+    LARGE_INTEGER size{};
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) {
+        size.HighPart = (LONG)data.nFileSizeHigh;
+        size.LowPart = data.nFileSizeLow;
+    }
+    return size;
+}
+
 // Wide-char file API throughout: a path round-tripped through a narrow code
 // page fails to open on non-ASCII names.
 std::vector<uint8_t> ReadFilePrefix(const std::wstring& path, DWORD maxBytes) {
@@ -212,11 +232,110 @@ void RatingStore::FlushPendingWrites() {
     for (const auto& write : due) PerformWrite(write);
 }
 
+void RatingStore::NotifySelfWrite() {
+    g_lastSelfWriteTick.store(
+        std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+}
+
+bool RatingStore::WasSelfWriteJustNow() {
+    const int64_t ticks = g_lastSelfWriteTick.load(std::memory_order_relaxed);
+    if (ticks == 0) return false;
+    const auto last = std::chrono::steady_clock::time_point(
+        std::chrono::steady_clock::duration(ticks));
+    return (std::chrono::steady_clock::now() - last) < SELF_WRITE_ECHO;
+}
+
+bool RatingStore::WriteSidecar(const std::wstring& ownerPath, int stars, bool allowCreate) {
+    const std::wstring sidecarPath = SidecarPathFor(ownerPath);
+    if (sidecarPath.empty()) return false;
+
+    // The whole document is read, not just the prefix used for display: an
+    // update has to copy through everything it is not changing. A file too
+    // large to read whole would come back truncated, and writing that back
+    // would destroy the rest of it, so the write is refused instead.
+    std::string existing;
+    {
+        const LARGE_INTEGER size = FileSizeOf(sidecarPath);
+        if (size.QuadPart > (LONGLONG)MAX_SIDECAR_BYTES) return false;
+        const std::vector<uint8_t> bytes = ReadFilePrefix(sidecarPath, MAX_SIDECAR_BYTES);
+        existing.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    }
+
+    std::string updated;
+    if (existing.empty()) {
+        if (!allowCreate) return true;                          // update-only owner
+        if (stars <= QuickView::Rating::MIN_STARS) return true; // nothing to write
+        updated = QuickView::Rating::BuildMinimalXmp(stars);
+    } else {
+        const auto edited = QuickView::Rating::UpdateXmpRating(existing, stars);
+        if (!edited) {
+            // The document is not shaped as expected. Someone else's develop
+            // settings are worth more than this rating, so leave it alone.
+            return false;
+        }
+        if (*edited == existing) return true; // already says what we want
+        updated = *edited;
+    }
+
+    // Write through a temp file so a failure cannot leave a half-written
+    // sidecar where the original was.
+    const std::wstring tempPath = sidecarPath + L".qvtmp";
+    {
+        HANDLE file = CreateFileW(tempPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return false;
+        DWORD written = 0;
+        const BOOL ok = WriteFile(file, updated.data(), (DWORD)updated.size(), &written, nullptr);
+        FlushFileBuffers(file);
+        CloseHandle(file);
+        if (!ok || written != updated.size()) {
+            DeleteFileW(tempPath.c_str());
+            return false;
+        }
+    }
+
+    NotifySelfWrite(); // our own change; the watcher should not rescan for it
+
+    if (existing.empty()) {
+        if (!MoveFileExW(tempPath.c_str(), sidecarPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+            DeleteFileW(tempPath.c_str());
+            return false;
+        }
+        return true;
+    }
+    if (!ReplaceFileW(sidecarPath.c_str(), tempPath.c_str(), nullptr,
+                      REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr)) {
+        DeleteFileW(tempPath.c_str());
+        return false;
+    }
+    return true;
+}
+
 void RatingStore::PerformWrite(const PendingWrite& write) {
     if (write.renderedPath.empty()) return;
 
-    // A folded pair keeps its rating in the RAW's sidecar as well; that half
-    // arrives with the sidecar stage.
+    // The sidecar goes first, because it is the side that wins when the two
+    // disagree: if the in-file write then fails, what the user sees is still
+    // the rating they set, rather than the old one coming back.
+    //
+    // Which file owns the sidecar mirrors how reading resolves it, and it has
+    // to: a sidecar that is read but not written would keep overruling the
+    // rating the user just set. A RAW may have one created for it, since that
+    // is the only place its rating can live; for anything else an existing
+    // sidecar is updated but never brought into being, because a rating
+    // belongs inside a JPEG or TIFF.
+    const std::wstring sidecarOwner =
+        write.rawPath.empty() ? write.renderedPath : write.rawPath;
+    const bool ownerIsRaw = QuickView::IsRawPath(sidecarOwner);
+    const bool sidecarExists =
+        GetFileAttributesW(SidecarPathFor(sidecarOwner).c_str()) != INVALID_FILE_ATTRIBUTES;
+    if (ownerIsRaw || sidecarExists) {
+        if (!WriteSidecar(sidecarOwner, write.stars, /*allowCreate*/ ownerIsRaw)) {
+            return; // refused: leave the in-file half alone as well
+        }
+    }
+
+    // A standalone RAW has no in-file half to write.
     if (QuickView::IsRawPath(write.renderedPath)) return;
 
     const auto status = QuickView::Rating::WriteRatingToImage(

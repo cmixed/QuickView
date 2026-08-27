@@ -7593,6 +7593,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     // Init Gallery
     g_thumbMgr.Initialize(hwnd, g_imageLoader.get());
     g_ratingStore.Initialize(hwnd);
+    // Let the directory watcher recognise the echo of our own sidecar writes.
+    FileNavigator::SetSelfWriteProbe(&RatingStore::WasSelfWriteJustNow);
     g_gallery.Initialize(&g_thumbMgr, &GetPaneContext(PaneSlot::Primary).navigator);
     g_settingsOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
     g_helpOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);

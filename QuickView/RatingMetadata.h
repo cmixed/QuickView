@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
 // Reading ratings must never touch the decode pipeline, so these parsers work
@@ -58,6 +59,20 @@ std::optional<int> ParseJpegRating(std::span<const uint8_t> bytes);
 // Scan the head of a bare TIFF for a rating. A TIFF stream carries its IFD
 // directly (no APP1 wrapper), so it needs its own entry point.
 std::optional<int> ParseTiffRating(std::span<const uint8_t> bytes);
+
+// Replace xmp:Rating inside an existing XMP document, touching nothing else.
+// A sidecar written by Lightroom or Capture One carries the develop settings
+// for that photo, so the update is a surgical edit of that one property and
+// never a regeneration of the document.
+//   - the property is rewritten in place when present, in either serialization
+//   - it is inserted into the first rdf:Description when absent
+//   - `stars` == 0 removes it, leaving the rest of the document intact
+// Returns nothing when the document is not shaped as expected, which the
+// caller must treat as "refuse to write" rather than overwriting the file.
+std::optional<std::string> UpdateXmpRating(std::string_view xmp, int stars);
+
+// A minimal sidecar for a photo that has none yet.
+std::string BuildMinimalXmp(int stars);
 
 // Which file of a pair a displayed rating came from.
 enum class Source { None, InFile, Sidecar };

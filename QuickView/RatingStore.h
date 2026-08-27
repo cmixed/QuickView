@@ -91,6 +91,12 @@ public:
     // Write everything still pending, blocking until done (shutdown).
     void FlushPendingWrites();
 
+    // Record that we just wrote a file ourselves, and ask whether that was
+    // recent enough that a directory-change notification is most likely our
+    // own doing. The watcher uses this to skip a rescan it does not need.
+    static void NotifySelfWrite();
+    static bool WasSelfWriteJustNow();
+
     // The .xmp sidecar a RAW's rating lives in, i.e. the path with its
     // extension replaced. Empty when `path` has no extension.
     static std::wstring SidecarPathFor(const std::wstring& path);
@@ -121,6 +127,10 @@ private:
     void WorkerLoop();
     void WriteLoop();
     void PerformWrite(const PendingWrite& write);
+    // Update (or create) the .xmp sidecar carrying `ownerPath`'s rating.
+    // False means the write was refused or failed, and the caller must not
+    // treat the rating as stored.
+    static bool WriteSidecar(const std::wstring& ownerPath, int stars, bool allowCreate);
 
     HWND m_hwnd = nullptr;
 
