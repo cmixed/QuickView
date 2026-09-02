@@ -82,3 +82,60 @@ TEST(JpegExifResetTest, ScanAndResetOrientation) {
     EXPECT_TRUE(resetSuccess);
     EXPECT_EQ(jpegData[30], 1); // Value reset to 1
 }
+
+TEST(OrientationMathTest, AllOrientationsDimensionSwap) {
+    auto IsDimensionSwapped = [](int orientation) -> bool {
+        return orientation >= 5 && orientation <= 8;
+    };
+
+    EXPECT_FALSE(IsDimensionSwapped(1));
+    EXPECT_FALSE(IsDimensionSwapped(2));
+    EXPECT_FALSE(IsDimensionSwapped(3));
+    EXPECT_FALSE(IsDimensionSwapped(4));
+    EXPECT_TRUE(IsDimensionSwapped(5));
+    EXPECT_TRUE(IsDimensionSwapped(6));
+    EXPECT_TRUE(IsDimensionSwapped(7));
+    EXPECT_TRUE(IsDimensionSwapped(8));
+}
+
+TEST(SuperResolutionDimensionTest, Exif8DimensionAndCropMapping) {
+    // Physical file 1800x1200 with EXIF 8 (270° CW)
+    int physicalW = 1800;
+    int physicalH = 1200;
+    int exif = 8;
+    bool isRot90 = (exif >= 5 && exif <= 8);
+
+    // 1. Visual Base Dimensions (Display Size on screen)
+    int visualW = isRot90 ? physicalH : physicalW; // 1200
+    int visualH = isRot90 ? physicalW : physicalH; // 1800
+    EXPECT_EQ(visualW, 1200);
+    EXPECT_EQ(visualH, 1800);
+
+    // 2. Super Resolution (2x)
+    float srScale = 2.0f;
+    int srPhysicalW = static_cast<int>(physicalW * srScale); // 3600
+    int srPhysicalH = static_cast<int>(physicalH * srScale); // 2400
+    EXPECT_EQ(srPhysicalW, 3600);
+    EXPECT_EQ(srPhysicalH, 2400);
+
+    // 3. Export Dialog Expected Visual Target Dimensions
+    int targetVisualW = static_cast<int>(visualW * srScale); // 2400
+    int targetVisualH = static_cast<int>(visualH * srScale); // 3600
+    EXPECT_EQ(targetVisualW, 2400);
+    EXPECT_EQ(targetVisualH, 3600);
+
+    // 4. Net Transform for Exif 8
+    Transform2D t = Transform2D::FromExif(exif);
+    EXPECT_EQ(t.Rotation, 270);
+    EXPECT_FALSE(t.FlipH);
+
+    // 5. Crop in visual space (e.g. 100x100 to 500x700 -> size 400x600)
+    int cropVisualW = 400;
+    int cropVisualH = 600;
+    int srCropW = static_cast<int>(std::round(cropVisualW * srScale)); // 800
+    int srCropH = static_cast<int>(std::round(cropVisualH * srScale)); // 1200
+    EXPECT_EQ(srCropW, 800);
+    EXPECT_EQ(srCropH, 1200);
+}
+
+

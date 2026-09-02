@@ -44,7 +44,6 @@ extern bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFirst);
 extern std::unique_ptr<ImageEngine> g_imageEngine;
 #include "CompositionEngine.h"
 extern CompositionEngine* g_compEngine;
-extern int g_renderExifOrientation;
 
 extern std::function<void(bool)> g_leftPaneReadyCallback;
 extern void MarkCompareDirty();
@@ -348,22 +347,11 @@ void CompareController::CaptureCurrentImageAsLeft() {
     GetPaneContext(PaneSlot::Left).view.Zoom = GetPaneContext(PaneSlot::Primary).view.Zoom;
     GetPaneContext(PaneSlot::Left).view.PanX = GetPaneContext(PaneSlot::Primary).view.PanX;
     GetPaneContext(PaneSlot::Left).view.PanY = GetPaneContext(PaneSlot::Primary).view.PanY;
-    // [Fix] Use g_renderExifOrientation instead of GetPaneContext(PaneSlot::Primary).view.ExifOrientation.
-    // After RenderImageToDComp, GetPaneContext(PaneSlot::Primary).view.ExifOrientation is neutralized to 1
-    // (since the DComp surface is physically rotated). But the bitmap in
-    // GetPaneContext(PaneSlot::Primary).resource is still un-rotated, so compare mode's DrawResourceIntoViewport
-    // needs the original orientation to apply the rotation correctly.
-    GetPaneContext(PaneSlot::Left).view.ExifOrientation = g_renderExifOrientation;
-    if (!g_config.AutoRotate) {
-        GetPaneContext(PaneSlot::Left).view.ExifOrientation = 1;
-    }
+    GetPaneContext(PaneSlot::Left).view.ExifOrientation = GetPaneContext(PaneSlot::Primary).view.ExifOrientation;
+    GetPaneContext(PaneSlot::Left).metadata.ExifOrientation = GetPaneContext(PaneSlot::Primary).metadata.ExifOrientation;
     GetPaneContext(PaneSlot::Left).CmsModeOverride = g_runtime.CmsModeOverride;
     GetPaneContext(PaneSlot::Left).EnableSoftProofing = g_runtime.EnableSoftProofing;
     GetPaneContext(PaneSlot::Left).SoftProofProfilePath = g_runtime.SoftProofProfilePath;
-    // [Fix] Also restore metadata ExifOrientation (was neutralized after RenderImageToDComp)
-    if (g_config.AutoRotate && g_renderExifOrientation > 1) {
-        GetPaneContext(PaneSlot::Left).metadata.ExifOrientation = g_renderExifOrientation;
-    }
 }
 
 
@@ -592,16 +580,9 @@ void CompareController::EnterMode(HWND hwnd) {
         g_osd.ShowCompare(hwnd, AppStrings::OSD_CompareBefore, AppStrings::OSD_CompareAfter, D2D1::ColorF(D2D1::ColorF::White), 2500);
     }
 
-    if (g_config.AutoRotate && g_imageLoader && !GetPaneContext(PaneSlot::Primary).path.empty()) {
-        CImageLoader::ImageMetadata rightMeta;
-        if (SUCCEEDED(g_imageLoader->ReadMetadata(GetPaneContext(PaneSlot::Primary).path.c_str(), &rightMeta, true)) &&
-            rightMeta.ExifOrientation >= 1 && rightMeta.ExifOrientation <= 8) {
-            GetPaneContext(PaneSlot::Primary).view.ExifOrientation = rightMeta.ExifOrientation;
-            GetPaneContext(PaneSlot::Primary).metadata.ExifOrientation = rightMeta.ExifOrientation;
-        }
-    } else {
-        GetPaneContext(PaneSlot::Primary).view.ExifOrientation = 1;
-    }
+    GetPaneContext(PaneSlot::Primary).view.ExifOrientation = g_config.AutoRotate 
+        ? (GetPaneContext(PaneSlot::Primary).metadata.ExifOrientation > 0 ? GetPaneContext(PaneSlot::Primary).metadata.ExifOrientation : 1)
+        : 1;
 
     m_context.Compare.syncZoom = true;
     m_context.Compare.syncPan = true;
@@ -737,9 +718,6 @@ void CompareController::ExitMode(HWND hwnd) {
 
     if (GetPaneContext(PaneSlot::Primary).resource) {
         RenderImageToDComp(hwnd, GetPaneContext(PaneSlot::Primary).resource, false);
-        if (GetPaneContext(PaneSlot::Primary).view.ExifOrientation > 1 && g_config.AutoRotate) {
-            GetPaneContext(PaneSlot::Primary).view.ExifOrientation = 1;
-        }
         AdjustWindowToImage(hwnd);
         RECT updatedRc{};
         GetClientRect(hwnd, &updatedRc);

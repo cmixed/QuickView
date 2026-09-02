@@ -56,7 +56,6 @@ extern ViewState& g_viewState;  // [v3.2] For Nav Indicators
 extern CImageLoader::ImageMetadata& g_currentMetadata;  // [v3.2] For Info Panel
 extern std::wstring& g_imagePath;  // [v3.2] For Info Panel
 extern AppConfig g_config;
-extern int g_renderExifOrientation;
 extern int GetCurrentZoomPercent(); // [v3.2.3] For Info Panel Zoom Display
 extern bool GetCompareIndicatorState(int& outPane, float& outSplitRatio, bool& outIsWipe);
 extern bool GetCompareInfoSnapshot(CImageLoader::ImageMetadata& left, CImageLoader::ImageMetadata& right);
@@ -1008,40 +1007,16 @@ void UIRenderer::DrawLoupe(ID2D1DeviceContext* dc, HWND hwnd) {
             m_compEngine->GetLayerSpecs(m_compEngine->GetActiveLayerIndex(), &w, &h);
             if (w > 0 && h > 0) {
                 const D2D1_SIZE_F rawT = pane.resource.GetSize();
-                // [Loupe Alignment Fix] Adjust for letterbox offsets and DComp surface scaling on large standard images
                 if (!pane.resource.isSvg && !isTitan && rawT.width > 0.0f && rawT.height > 0.0f &&
                     ((float)w != rawT.width || (float)h != rawT.height))
                 {
-                    int orientation = g_renderExifOrientation;
-                    if (!g_config.AutoRotate) orientation = 1;
-
                     float imgW = rawT.width;
                     float imgH = rawT.height;
+                    float drawScale = std::min((float)w / imgW, (float)h / imgH);
 
-                    float scaleCalcW = imgW;
-                    float scaleCalcH = imgH;
-                    if (orientation >= 5 && orientation <= 8) {
-                        std::swap(scaleCalcW, scaleCalcH);
-                    }
-
-                    float drawScaleX = (float)w / scaleCalcW;
-                    float drawScaleY = (float)h / scaleCalcH;
-                    float drawScale = std::min(drawScaleX, drawScaleY);
-
-                    // Reconstruct the exact GPU pre-rotation and centering transform applied in RenderImageToDComp
-                    D2D1::Matrix3x2F fitM = D2D1::Matrix3x2F::Translation(-imgW / 2.0f, -imgH / 2.0f);
-                    switch (orientation) {
-                        case 2: fitM = fitM * D2D1::Matrix3x2F::Scale(-1.0f, 1.0f); break;
-                        case 3: fitM = fitM * D2D1::Matrix3x2F::Rotation(180.0f); break;
-                        case 4: fitM = fitM * D2D1::Matrix3x2F::Scale(1.0f, -1.0f); break;
-                        case 5: fitM = fitM * D2D1::Matrix3x2F::Scale(-1.0f, 1.0f) * D2D1::Matrix3x2F::Rotation(270.0f); break;
-                        case 6: fitM = fitM * D2D1::Matrix3x2F::Rotation(90.0f); break;
-                        case 7: fitM = fitM * D2D1::Matrix3x2F::Scale(-1.0f, 1.0f) * D2D1::Matrix3x2F::Rotation(90.0f); break;
-                        case 8: fitM = fitM * D2D1::Matrix3x2F::Rotation(270.0f); break;
-                        default: break;
-                    }
-                    fitM = fitM * D2D1::Matrix3x2F::Scale(drawScale, drawScale);
-                    fitM = fitM * D2D1::Matrix3x2F::Translation((float)w / 2.0f, (float)h / 2.0f);
+                    D2D1::Matrix3x2F fitM = D2D1::Matrix3x2F::Translation(-imgW / 2.0f, -imgH / 2.0f) *
+                                           D2D1::Matrix3x2F::Scale(drawScale, drawScale) *
+                                           D2D1::Matrix3x2F::Translation((float)w / 2.0f, (float)h / 2.0f);
 
                     st = fitM * st;
                     outRaw = rawT;
@@ -1053,7 +1028,7 @@ void UIRenderer::DrawLoupe(ID2D1DeviceContext* dc, HWND hwnd) {
             }
         }
 
-        const int baseExif = (t.slot == PaneSlot::Primary) ? g_renderExifOrientation : pane.view.ExifOrientation;
+        const int baseExif = pane.view.ExifOrientation;
         const int effExif = GetEffectiveExifOrientation(baseExif, pane.editState);
         const D2D1_SIZE_F osz = orientedSize(outRaw, effExif);
         const float vpW = t.viewport.right - t.viewport.left;
@@ -1121,7 +1096,7 @@ void UIRenderer::DrawLoupe(ID2D1DeviceContext* dc, HWND hwnd) {
         const D2D1_RECT_F box = D2D1::RectF(cx - half, cy - half, cx + half, cy + half);
 
         // Loupe transform: native bitmap -> magnified, centered so tImgPt lands at box center.
-        const int baseExif = (targets[i].slot == PaneSlot::Primary) ? g_renderExifOrientation : pane.view.ExifOrientation;
+        const int baseExif = pane.view.ExifOrientation;
         const int effExif = GetEffectiveExifOrientation(baseExif, pane.editState);
         D2D1::Matrix3x2F L0 = buildForward(rawT, effExif, loupeZoom, cx, cy);
         const D2D1_POINT_2F p = L0.TransformPoint(tImgPt);
@@ -2598,6 +2573,12 @@ namespace {
                 float cropScale = (meta.HasSr && meta.SrScale > 1.0f) ? meta.SrScale : 1.0f;
                 displayW = (UINT)std::round((editState.CropRight - editState.CropLeft) * cropScale);
                 displayH = (UINT)std::round((editState.CropBottom - editState.CropTop) * cropScale);
+            } else {
+                int baseExif = GetPaneContext(PaneSlot::Primary).view.ExifOrientation;
+                int effExif = GetEffectiveExifOrientation(baseExif, editState);
+                if (effExif >= 5 && effExif <= 8) {
+                    std::swap(displayW, displayH);
+                }
             }
             if (displayW > 0 && displayH > 0) {
                 wchar_t sz[64];
@@ -3037,7 +3018,10 @@ std::vector<InfoRow> UIRenderer::BuildGridRows(const CImageLoader::ImageMetadata
     }
 
     // Row 2: Dimensions + Megapixels
-    const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
+    const auto& pane = (showAdvanced && imagePath == GetPaneContext(PaneSlot::Left).path)
+                       ? GetPaneContext(PaneSlot::Left)
+                       : GetPaneContext(PaneSlot::Primary);
+    const auto& editState = pane.editState;
     // [QVX-SR] Use super-resolution dimensions when available
     UINT displayW = (metadata.HasSr && metadata.SrWidth > 0) ? metadata.SrWidth : metadata.Width;
     UINT displayH = (metadata.HasSr && metadata.SrHeight > 0) ? metadata.SrHeight : metadata.Height;
@@ -3045,6 +3029,12 @@ std::vector<InfoRow> UIRenderer::BuildGridRows(const CImageLoader::ImageMetadata
         float cropScale = (metadata.HasSr && metadata.SrScale > 1.0f) ? metadata.SrScale : 1.0f;
         displayW = (UINT)std::round((editState.CropRight - editState.CropLeft) * cropScale);
         displayH = (UINT)std::round((editState.CropBottom - editState.CropTop) * cropScale);
+    } else {
+        int baseExif = pane.view.ExifOrientation;
+        int effExif = GetEffectiveExifOrientation(baseExif, editState);
+        if (effExif >= 5 && effExif <= 8) {
+            std::swap(displayW, displayH);
+        }
     }
     if (displayW > 0 && displayH > 0) {
         UINT64 totalPixels = (UINT64)displayW * displayH;
@@ -6101,7 +6091,7 @@ void UIRenderer::DrawNavigator(ID2D1DeviceContext* dc) {
         const float vpH = vpRect.bottom - vpRect.top;
         if (vpW <= 1.0f || vpH <= 1.0f) continue;
         
-        int baseExif = (slot == PaneSlot::Primary) ? g_renderExifOrientation : pane.view.ExifOrientation;
+        int baseExif = pane.view.ExifOrientation;
         int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
         const D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
         if (orientedSize.width <= 0.0f || orientedSize.height <= 0.0f) continue;
@@ -6335,7 +6325,7 @@ void UIRenderer::DrawCropOverlay(ID2D1DeviceContext* dc, HWND hwnd) {
     auto& pane = GetPaneContext(PaneSlot::Primary);
     if (!pane.resource) return;
 
-    int baseExif = g_renderExifOrientation;
+    int baseExif = pane.view.ExifOrientation;
     int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
     D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
     if (orientedSize.width <= 0.0f || orientedSize.height <= 0.0f) return;

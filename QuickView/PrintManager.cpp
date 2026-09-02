@@ -255,7 +255,7 @@ bool PrintManager::QueryPrintDeviceMetrics(
 
 D2D1::Matrix3x2F PrintManager::BuildExifOrientationMatrix(int orientation) {
     // Sensor pixels are assumed centered at origin before this matrix is applied.
-    // Matches main viewer GPU pre-rotation (g_renderExifOrientation).
+    // Matches CompositionEngine modelTransform.
     switch (orientation) {
     case 2: return D2D1::Matrix3x2F::Scale(-1.0f, 1.0f); // Mirror horizontal
     case 3: return D2D1::Matrix3x2F::Rotation(180.0f);

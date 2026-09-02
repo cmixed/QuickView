@@ -13,6 +13,8 @@
 #include <string>
 #include <thread>
 
+extern int GetEffectiveExifOrientation(int baseExif, const EditState& editState);
+
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wignored-attributes"
@@ -190,20 +192,20 @@ void PrintPreviewUI::Show(HWND hwnd, const std::wstring& imagePath, float imageW
     m_settings.imagePath = imagePath;
     m_settings.copies = 1;
     const auto& pane = GetPaneContext(PaneSlot::Primary);
-    m_settings.sourceWidthPx = imageWidth;
-    m_settings.sourceHeightPx = imageHeight;
+    m_settings.sourceWidthPx = (pane.metadata.HasSr && pane.metadata.SrWidth > 0) ? (float)pane.metadata.SrWidth : imageWidth;
+    m_settings.sourceHeightPx = (pane.metadata.HasSr && pane.metadata.SrHeight > 0) ? (float)pane.metadata.SrHeight : imageHeight;
     m_settings.imageDpiX = pane.metadata.DpiX > 0 ? pane.metadata.DpiX : 96.0;
     m_settings.imageDpiY = pane.metadata.DpiY > 0 ? pane.metadata.DpiY : 96.0;
-    int exif = pane.metadata.ExifOrientation;
+    int exif = GetEffectiveExifOrientation(pane.view.ExifOrientation, pane.editState);
     m_settings.exifOrientation = (exif >= 1 && exif <= 8) ? exif : 1;
 
-    float orientedW = imageWidth;
-    float orientedH = imageHeight;
+    float orientedW = m_settings.sourceWidthPx;
+    float orientedH = m_settings.sourceHeightPx;
     if (m_settings.exifOrientation >= 5 && m_settings.exifOrientation <= 8) {
         std::swap(orientedW, orientedH);
     }
-    m_imageWidth = imageWidth;
-    m_imageHeight = imageHeight;
+    m_imageWidth = m_settings.sourceWidthPx;
+    m_imageHeight = m_settings.sourceHeightPx;
 
     m_settings.isLandscape = (orientedW > orientedH);
     m_settings.layoutMode = PrintLayoutMode::Fit;

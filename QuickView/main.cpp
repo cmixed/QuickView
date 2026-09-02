@@ -552,7 +552,6 @@ static void ToggleSlideshowPlayback(HWND hwnd) {
     RequestRepaint(QuickView::PaintLayer::Static);
 }
 ViewState g_preservedViewState;
-int g_renderExifOrientation = 1; // Exif orientation baked into the bitmap surface
 static ThumbnailManager g_thumbMgr;
 GalleryOverlay g_gallery;  // Non-static for extern access from UIRenderer
 Toolbar g_toolbar;  // Non-static for extern access from UIRenderer
@@ -1815,7 +1814,9 @@ void DrawResourceIntoViewport(ID2D1DeviceContext* ctx,
             D2D1_RECT_F dest = D2D1::RectF(x, y, x + drawW, y + drawH);
             ctx->DrawBitmap(res.bitmap.Get(), &dest, 1.0f, interpMode, &srcRect);
         } else {
-            D2D1::Matrix3x2F m = D2D1::Matrix3x2F::Translation(-imgW * 0.5f, -imgH * 0.5f);
+            const float rawCenterX = (srcRect.left + srcRect.right) * 0.5f;
+            const float rawCenterY = (srcRect.top + srcRect.bottom) * 0.5f;
+            D2D1::Matrix3x2F m = D2D1::Matrix3x2F::Translation(-rawCenterX, -rawCenterY);
             switch (exifOrientation) {
                 case 2: m = m * D2D1::Matrix3x2F::Scale(-1.0f, 1.0f); break;
                 case 3: m = m * D2D1::Matrix3x2F::Rotation(180.0f); break;
@@ -1872,39 +1873,6 @@ int GetEffectiveExifOrientation(int baseExif, const EditState& editState) {
         if (rot == 270) return 5;
     }
     return 1;
-}
-
-static D2D1_POINT_2F MapOrientedPointToRawPoint(float x_o, float y_o, float imgW, float imgH, int orientation) {
-    switch (orientation) {
-        case 1: return { x_o, y_o };
-        case 2: return { imgW - x_o, y_o };             // Flip H
-        case 3: return { imgW - x_o, imgH - y_o };       // Rotate 180
-        case 4: return { x_o, imgH - y_o };             // Flip V
-        case 5: return { y_o, x_o };                    // Transpose
-        case 6: return { y_o, imgH - x_o };             // Rotate 90 CW
-        case 7: return { imgW - y_o, imgH - x_o };       // Transverse
-        case 8: return { imgW - y_o, x_o };             // Rotate 270 CW (90 CCW)
-        default: return { x_o, y_o };
-    }
-}
-
-static D2D1_RECT_F MapOrientedRectToRawRect(const D2D1_RECT_F& oRect, float imgW, float imgH, int orientation) {
-    D2D1_POINT_2F p1 = MapOrientedPointToRawPoint(oRect.left,  oRect.top,    imgW, imgH, orientation);
-    D2D1_POINT_2F p2 = MapOrientedPointToRawPoint(oRect.right, oRect.top,    imgW, imgH, orientation);
-    D2D1_POINT_2F p3 = MapOrientedPointToRawPoint(oRect.left,  oRect.bottom, imgW, imgH, orientation);
-    D2D1_POINT_2F p4 = MapOrientedPointToRawPoint(oRect.right, oRect.bottom, imgW, imgH, orientation);
-
-    float minX = (std::min)({p1.x, p2.x, p3.x, p4.x});
-    float maxX = (std::max)({p1.x, p2.x, p3.x, p4.x});
-    float minY = (std::min)({p1.y, p2.y, p3.y, p4.y});
-    float maxY = (std::max)({p1.y, p2.y, p3.y, p4.y});
-
-    minX = (std::clamp)(minX, 0.0f, imgW);
-    maxX = (std::clamp)(maxX, 0.0f, imgW);
-    minY = (std::clamp)(minY, 0.0f, imgH);
-    maxY = (std::clamp)(maxY, 0.0f, imgH);
-
-    return D2D1::RectF(minX, minY, maxX, maxY);
 }
 
 
@@ -1971,10 +1939,8 @@ void SnapWindowToCompareImages(HWND hwnd) {
     GetPaneContext(PaneSlot::Left).view.PanX = 0;
     GetPaneContext(PaneSlot::Left).view.PanY = 0;
     GetPaneContext(PaneSlot::Primary).view.CompareActive = true;
-    if (g_config.AutoRotate) {
-         GetPaneContext(PaneSlot::Left).view.ExifOrientation = GetPaneContext(PaneSlot::Left).metadata.ExifOrientation;
-         GetPaneContext(PaneSlot::Primary).view.ExifOrientation = GetPaneContext(PaneSlot::Primary).metadata.ExifOrientation;
-    }
+    GetPaneContext(PaneSlot::Left).view.ExifOrientation = g_config.AutoRotate ? GetPaneContext(PaneSlot::Left).metadata.ExifOrientation : 1;
+    GetPaneContext(PaneSlot::Primary).view.ExifOrientation = g_config.AutoRotate ? GetPaneContext(PaneSlot::Primary).metadata.ExifOrientation : 1;
 }
 
 
@@ -2484,29 +2450,17 @@ static D2D1_SIZE_U ComputeDesiredBitmapSurfaceSize(UINT winW, UINT winH, const I
     }
     if (originalW <= 0.0f || originalH <= 0.0f) return D2D1::SizeU(0, 0);
 
-    int baseRot = 0;
-    switch (g_renderExifOrientation) {
-        case 3: baseRot = 180; break;
-        case 5: baseRot = 270; break;
-        case 6: baseRot = 90;  break;
-        case 7: baseRot = 90;  break;
-        case 8: baseRot = 270; break;
-        default: baseRot = 0;  break;
-    }
-    // The backing bitmap surface only bakes EXIF rotation. User rotation stays in
-    // the DComp transform layer, so including it here would make upgraded
-    // surfaces look pre-rotated to later layout code.
-    if (!editState.HasCrop && (baseRot == 90 || baseRot == 270)) {
-        std::swap(originalW, originalH);
-    }
+    VisualState vs = GetVisualState();
+    float visualW = vs.IsRotated90 ? originalH : originalW;
+    float visualH = vs.IsRotated90 ? originalW : originalH;
 
-    float fitScale = std::min((float)winW / originalW, (float)winH / originalH);
+    float fitScale = std::min((float)winW / visualW, (float)winH / visualH);
     if (g_runtime.LockWindowSize) {
         if (!g_config.UpscaleSmallImagesWhenLocked && fitScale > 1.0f) {
             fitScale = 1.0f;
         }
     } else {
-        if (originalW < 200.0f && originalH < 200.0f) {
+        if (visualW < 200.0f && visualH < 200.0f) {
             if (fitScale > 1.0f) fitScale = 1.0f;
         }
     }
@@ -2564,78 +2518,27 @@ static void TryUpgradeBitmapSurface(HWND hwnd) {
 // [DComp] Render content (Bitmap or SVG) to DComp Pending Surface
 // For SVG: Uses Direct2D Native path with real-time transform (Lossless Zoom)
 // For Bitmap: Uses existing logic
-bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade) {
+bool RenderImageToDComp(HWND hwnd, ImageResource& res, [[maybe_unused]] bool isFastUpgrade) {
     if (!g_compEngine || !g_compEngine->IsInitialized()) return false;
     
     RECT rc; GetClientRect(hwnd, &rc);
     UINT winW = rc.right; UINT winH = rc.bottom;
     
-    // [Fix] Calculate Ideal/Target Window Size for Surface creation
-    // But keep winW/winH as ACTUAL sizes for DComp transforms to avoid glitches before resize
-    UINT targetWinW = winW;
-    UINT targetWinH = winH;
-    
     // Handle Empty Resource (Clear Surface)
     if (!res) {
         // Just use current window size for clear
-        ID2D1DeviceContext* ctx = g_compEngine->BeginPendingUpdate(targetWinW, targetWinH, false, 0, 0, false, DXGI_FORMAT_B8G8R8A8_UNORM, GetPaneContext(PaneSlot::Primary).metadata.hasAlpha);
+        ID2D1DeviceContext* ctx = g_compEngine->BeginPendingUpdate(winW > 0 ? winW : 1, winH > 0 ? winH : 1, false, 0, 0, false, DXGI_FORMAT_B8G8R8A8_UNORM, GetPaneContext(PaneSlot::Primary).metadata.hasAlpha);
         if (!ctx) return false;
         ctx->Clear(D2D1::ColorF(0, 0, 0, 0)); // Transparent
         g_compEngine->EndPendingUpdate();
         g_compEngine->SwapLayers(); // Instant
         return true;
     }
-    
-    if (!isFastUpgrade && !IsZoomed(hwnd) && (!g_runtime.LockWindowSize || !g_config.KeepWindowSizeOnNav)) {
-        HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO mi{};
-        mi.cbSize = sizeof(mi);
-        if (GetMonitorInfoW(hMon, &mi)) {
-            float screenW = (float)(mi.rcWork.right - mi.rcWork.left);
-            float screenH = (float)(mi.rcWork.bottom - mi.rcWork.top);
-            
-            float maxSizePercent = g_config.WindowMaxSizePercent / 100.0f;
-            float maxW = screenW * maxSizePercent;
-            float maxH = screenH * maxSizePercent;
-            
-            D2D1_SIZE_F resSize = res.GetSize();
-            float contentW = resSize.width > 0.0f ? resSize.width : 800.0f;
-            float contentH = resSize.height > 0.0f ? resSize.height : 600.0f;
-            const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
-            if (!res.isSvg && !res.isWebView && editState.HasCrop) {
-                contentW = (float)(editState.CropRight - editState.CropLeft);
-                contentH = (float)(editState.CropBottom - editState.CropTop);
-            }
-
-            // [v9.9 Fix] Must Swap Dimensions for Portrait Orientation when calculating target surface size!
-            // Otherwise we create a Landscape surface for a Portrait window -> Huge Margins.
-            if (!res.isSvg && !res.isWebView && !editState.HasCrop && g_config.AutoRotate) {
-                 int orient = g_renderExifOrientation;
-                 if (orient >= 5 && orient <= 8) {
-                     std::swap(contentW, contentH);
-                 }
-            }
-            
-            if (contentW > 0 && contentH > 0) {
-                 float scale = std::min(maxW / contentW, maxH / contentH);
-                 // Bitmaps and SVGs: cap at 1.0 to preserve 100% initial zoom for small images
-                 if (scale > 1.0f) scale = 1.0f;
-                 
-                 targetWinW = (UINT)(contentW * scale);
-                 targetWinH = (UINT)(contentH * scale);
-            }
-        }
-    }
 
     if (winW == 0 || winH == 0) return false;
 
-    // Calculate Surface Size based on TARGET window size (so it looks good after resize)
-    UINT surfW = targetWinW;
-    UINT surfH = targetWinH;
-    if (UseSvgViewportRendering(res)) {
-        surfW = winW;
-        surfH = winH;
-    }
+    UINT surfW = winW;
+    UINT surfH = winH;
 
     if (res.isWebView) {
         const UINT logicalW = (UINT)std::lround(res.svgW > 0.0f ? res.svgW : 512.0f);
@@ -2702,18 +2605,15 @@ bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade) {
          fullHeight = GetPaneContext(PaneSlot::Primary).metadata.Height;
          
          // [BugFix] Titan Base Image Aspect Ratio Fix
-         // If the window is maximized, targetWinW/targetWinH are set to the full window dimensions.
-         // DComp will stretch the surface non-uniformly to match fullWidth/fullHeight, causing distortion.
-         // We must force the target surface to exactly match the image's aspect ratio.
          if (fullWidth > 0 && fullHeight > 0) {
              float fullAspect = (float)fullWidth / (float)fullHeight;
-             float winAspect = (float)targetWinW / (float)targetWinH;
+             float winAspect = (float)winW / (float)winH;
              if (fullAspect > winAspect) {
-                 surfW = targetWinW;
-                 surfH = (UINT)(targetWinW / fullAspect);
+                 surfW = winW;
+                 surfH = (UINT)(winW / fullAspect);
              } else {
-                 surfW = (UINT)(targetWinH * fullAspect);
-                 surfH = targetWinH;
+                 surfW = (UINT)(winH * fullAspect);
+                 surfH = winH;
              }
              if (surfW == 0) surfW = 1;
              if (surfH == 0) surfH = 1;
@@ -2721,7 +2621,7 @@ bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade) {
     }
 
     if (!res.isSvg && !isTitan) {
-        D2D1_SIZE_U desired = ComputeDesiredBitmapSurfaceSize(targetWinW, targetWinH, res);
+        D2D1_SIZE_U desired = ComputeDesiredBitmapSurfaceSize(winW, winH, res);
         if (desired.width > 0 && desired.height > 0) {
             surfW = desired.width;
             surfH = desired.height;
@@ -2769,42 +2669,28 @@ bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade) {
         const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
         
         // Handle EXIF Orientation (GPU Pre-Rotation)
-        int orientation = g_renderExifOrientation;
-        if (!g_config.AutoRotate) orientation = 1;
-
-        int effOrientation = GetEffectiveExifOrientation(g_renderExifOrientation, editState);
-        if (!g_config.AutoRotate) effOrientation = 1;
-
         float srScale = (res.srScale > 0.001f) ? res.srScale : 1.0f;
         float imgW = bmpSize.width / srScale;
         float imgH = bmpSize.height / srScale;
         
-        // Swap dimensions for portrait orientations (5-8) to ensure Surface matches Window shape
-        bool isSwapped = (orientation >= 5 && orientation <= 8);
-        
-        // [Titan Fix] Define effective dimensions (swapped if needed)
-        float effectiveW = isSwapped ? imgH : imgW;
-        float effectiveH = isSwapped ? imgW : imgH;
+        float effectiveW = imgW;
+        float effectiveH = imgH;
 
         if (editState.HasCrop) {
             float cw = (float)(editState.CropRight - editState.CropLeft);
             float ch = (float)(editState.CropBottom - editState.CropTop);
             if (cw > 0.0f && ch > 0.0f) {
-                bool userRotated90 = (editState.TotalRotation == 90 || editState.TotalRotation == 270);
-                effectiveW = userRotated90 ? ch : cw;
-                effectiveH = userRotated90 ? cw : ch;
+                effectiveW = cw;
+                effectiveH = ch;
             }
         }
 
         float scaleCalcW = effectiveW;
         float scaleCalcH = effectiveH;
         
-        // Check if we are in Titan mode (detected above) AND if the bitmap is unexpectedly small 
-        // (implying a dummy or preview placeholder).
-        // Titan Threshold: >8192. If bitmap is small (e.g. <4096 or 1x1), we use Metadata.
         if (isTitan && (imgW < 4096 || imgH < 4096) && !editState.HasCrop) {
-             scaleCalcW = isSwapped ? (float)fullHeight : (float)fullWidth;
-             scaleCalcH = isSwapped ? (float)fullWidth : (float)fullHeight;
+             scaleCalcW = (float)fullWidth;
+             scaleCalcH = (float)fullHeight;
         }
 
         float scale = std::min((float)surfW / scaleCalcW, (float)surfH / scaleCalcH);
@@ -2820,169 +2706,73 @@ bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade) {
         
         D2D1_RECT_F rawRect = D2D1::RectF(0, 0, imgW, imgH);
         if (editState.HasCrop) {
-            D2D1_RECT_F orientedCropRect = D2D1::RectF((float)editState.CropLeft, (float)editState.CropTop, (float)editState.CropRight, (float)editState.CropBottom);
-            rawRect = MapOrientedRectToRawRect(orientedCropRect, imgW, imgH, effOrientation);
+            rawRect = D2D1::RectF((float)editState.CropLeft, (float)editState.CropTop, (float)editState.CropRight, (float)editState.CropBottom);
         }
 
         // Physical sampling rectangle inside res.bitmap (scaled by srScale)
-        D2D1_RECT_F physSrcRect = D2D1::RectF(rawRect.left * srScale, rawRect.top * srScale, rawRect.right * srScale, rawRect.bottom * srScale);
+        D2D1_RECT_F srcRect = D2D1::RectF(rawRect.left * srScale, rawRect.top * srScale, rawRect.right * srScale, rawRect.bottom * srScale);
+        float cropW = rawRect.right - rawRect.left;
+        float cropH = rawRect.bottom - rawRect.top;
 
-        // GPU Rotation Matrix Calculation
-        // Goal: Map the source bitmap to the destination surface center, rotated and scaled.
-        if (orientation > 1) {
-             float rawCenterX = (rawRect.left + rawRect.right) * 0.5f;
-             float rawCenterY = (rawRect.top + rawRect.bottom) * 0.5f;
-
-             D2D1::Matrix3x2F m = D2D1::Matrix3x2F::Identity();
-             // 1. Move Center of Bitmap/Crop Region to (0,0)
-             m = m * D2D1::Matrix3x2F::Translation(-rawCenterX, -rawCenterY);
-             
-             // 2. Apply Rotation / Flip
-             switch (orientation) {
-                case 1: break;
-                case 2: m = m * D2D1::Matrix3x2F::Scale(-1, 1); break; // Flip X
-                case 3: m = m * D2D1::Matrix3x2F::Rotation(180); break;
-                case 4: m = m * D2D1::Matrix3x2F::Scale(1, -1); break; // Flip Y
-                case 5: m = m * D2D1::Matrix3x2F::Scale(-1, 1) * D2D1::Matrix3x2F::Rotation(270); break; // Transpose
-                case 6: m = m * D2D1::Matrix3x2F::Rotation(90); break;
-                case 7: m = m * D2D1::Matrix3x2F::Scale(-1, 1) * D2D1::Matrix3x2F::Rotation(90); break; // Transverse
-                case 8: m = m * D2D1::Matrix3x2F::Rotation(270); break;
-             }
-             
-             // 3. Scale to Fit Surface
-             float drawScaleX = (float)surfW / effectiveW;
-             float drawScaleY = (float)surfH / effectiveH;
-             float drawScale = std::min(drawScaleX, drawScaleY);
-             
-             m = m * D2D1::Matrix3x2F::Scale(drawScale, drawScale);
-             
-             // 4. Move to Center of Surface
-             m = m * D2D1::Matrix3x2F::Translation(surfW / 2.0f, surfH / 2.0f);
-             
-             ctx->SetTransform(CombineWithCurrentTransform(ctx, m));
-             
-             D2D1_RECT_F srcRect = physSrcRect;
-             D2D1_RECT_F destRect = rawRect;
-
-             const auto& meta = GetPaneContext(PaneSlot::Primary).metadata;
-             bool hasMetrics = meta.HasSharpness && meta.HasEntropy;
-             float effectiveSharpness = g_config.FsrSharpness;
-             float adaptiveFsrSharpness = ColorMath::GetAdaptiveFsrSharpness(effectiveSharpness, meta.Sharpness, meta.Entropy, hasMetrics);
-
-             // Use Smart Interpolation
-             float absoluteScale = GetPaneContext(PaneSlot::Primary).view.Zoom * scale;
-             D2D1_INTERPOLATION_MODE interpMode = GetOptimalD2DInterpolationMode(absoluteScale, rawRect.right - rawRect.left, rawRect.bottom - rawRect.top, meta.Entropy, meta.HasEntropy);
-
-             auto DrawBitmapWithFsr = [&](const D2D1_RECT_F& dst, const D2D1_RECT_F& src, D2D1_INTERPOLATION_MODE mode, float imgW, float imgH) {
-                 bool isSrPromoted = (res.srScale > 1.01f);
-                 bool canEngageSharpen = !isSrPromoted || (absoluteScale > res.srScale * 1.05f);
-
-                 bool isPixelArt = IsEffectivelyPixelArtMode(absoluteScale, imgW, imgH, meta.Entropy, meta.HasEntropy);
-                 bool enableFsr = canEngageSharpen && (g_config.ZoomModeIn == 4 || (g_config.ZoomModeIn == 0 && absoluteScale >= 1.05f && absoluteScale < 3.0f && !isPixelArt));
-                 if (enableFsr && absoluteScale > 1.0f && adaptiveFsrSharpness > 0.005f) {
-                     ComPtr<ID2D1Effect> sharpenEffect;
-                     if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Sharpen, &sharpenEffect))) {
-                         sharpenEffect->SetInput(0, res.bitmap.Get());
-                         sharpenEffect->SetValue(D2D1_SHARPEN_PROP_SHARPNESS, std::clamp(adaptiveFsrSharpness * 2.0f, 0.0f, 2.0f));
-                         sharpenEffect->SetValue(D2D1_SHARPEN_PROP_THRESHOLD, 0.0f);
-
-                         ComPtr<ID2D1Effect> cropEffect;
-                         if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Crop, &cropEffect))) {
-                             cropEffect->SetInputEffect(0, sharpenEffect.Get());
-                             cropEffect->SetValue(D2D1_CROP_PROP_RECT, src);
-
-                             ComPtr<ID2D1Effect> scaleEffect;
-                             if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Scale, &scaleEffect))) {
-                                 float sx = (dst.right - dst.left) / (src.right - src.left);
-                                 float sy = (dst.bottom - dst.top) / (src.bottom - src.top);
-                                 scaleEffect->SetInputEffect(0, cropEffect.Get());
-                                 scaleEffect->SetValue(D2D1_SCALE_PROP_SCALE, D2D1::Vector2F(sx, sy));
-                                 scaleEffect->SetValue(D2D1_SCALE_PROP_INTERPOLATION_MODE, D2D1_SCALE_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
-
-                                 D2D1_POINT_2F targetOffset = D2D1::Point2F(dst.left - src.left * sx, dst.top - src.top * sy);
-                                 ctx->DrawImage(scaleEffect.Get(), &targetOffset);
-                                 return;
-                             }
-                         }
-                     }
-                 }
-                 ctx->DrawBitmap(res.bitmap.Get(), &dst, 1.0f, mode, &src);
-             };
-
-             DrawBitmapWithFsr(destRect, srcRect, interpMode, rawRect.right - rawRect.left, rawRect.bottom - rawRect.top);
-             
-             // Reset Transform
-             ctx->SetTransform(D2D1::Matrix3x2F::Identity());
-        } else {
-             // Standard Path (Optimization: No Matrix overhead)
-             D2D1_RECT_F srcRect = physSrcRect;
-             float cropW = rawRect.right - rawRect.left;
-             float cropH = rawRect.bottom - rawRect.top;
-
-             float drawScaleX = (float)surfW / effectiveW;
-             float drawScaleY = (float)surfH / effectiveH;
-             float drawScale = std::min(drawScaleX, drawScaleY);
-             
-             float drawW = cropW * drawScale;
-             float drawH = cropH * drawScale;
-             
-             float x = (surfW - drawW) / 2.0f;
-             float y = (surfH - drawH) / 2.0f;
-             
-             D2D1_RECT_F destRect = D2D1::RectF(x, y, x + drawW, y + drawH);
-
-             const auto& meta = GetPaneContext(PaneSlot::Primary).metadata;
-             bool hasMetrics = meta.HasSharpness && meta.HasEntropy;
-             float effectiveSharpness = g_config.FsrSharpness;
-             float adaptiveFsrSharpness = ColorMath::GetAdaptiveFsrSharpness(effectiveSharpness, meta.Sharpness, meta.Entropy, hasMetrics);
-
-             // Use Smart Interpolation
-             float absoluteScale = GetPaneContext(PaneSlot::Primary).view.Zoom * scale;
-             D2D1_INTERPOLATION_MODE interpMode = GetOptimalD2DInterpolationMode(absoluteScale, cropW, cropH, meta.Entropy, meta.HasEntropy);
-
-             auto DrawBitmapWithFsr = [&](const D2D1_RECT_F& dst, const D2D1_RECT_F& src, D2D1_INTERPOLATION_MODE mode, float imgW, float imgH) {
-                 bool isSrPromoted = (res.srScale > 1.01f);
-                 bool canEngageSharpen = !isSrPromoted || (absoluteScale > res.srScale * 1.05f);
-
-                 bool isPixelArt = IsEffectivelyPixelArtMode(absoluteScale, imgW, imgH, meta.Entropy, meta.HasEntropy);
-                 bool enableFsr = canEngageSharpen && (g_config.ZoomModeIn == 4 || (g_config.ZoomModeIn == 0 && absoluteScale >= 1.05f && absoluteScale < 3.0f && !isPixelArt));
-                 if (enableFsr && absoluteScale > 1.0f && adaptiveFsrSharpness > 0.005f) {
-                     ComPtr<ID2D1Effect> sharpenEffect;
-                     if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Sharpen, &sharpenEffect))) {
-                         sharpenEffect->SetInput(0, res.bitmap.Get());
-                         sharpenEffect->SetValue(D2D1_SHARPEN_PROP_SHARPNESS, std::clamp(adaptiveFsrSharpness * 2.0f, 0.0f, 2.0f));
-                         sharpenEffect->SetValue(D2D1_SHARPEN_PROP_THRESHOLD, 0.0f);
-
-                         ComPtr<ID2D1Effect> cropEffect;
-                         if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Crop, &cropEffect))) {
-                             cropEffect->SetInputEffect(0, sharpenEffect.Get());
-                             cropEffect->SetValue(D2D1_CROP_PROP_RECT, src);
-
-                             ComPtr<ID2D1Effect> scaleEffect;
-                             if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Scale, &scaleEffect))) {
-                                 float sx = (dst.right - dst.left) / (src.right - src.left);
-                                 float sy = (dst.bottom - dst.top) / (src.bottom - src.top);
-                                 scaleEffect->SetInputEffect(0, cropEffect.Get());
-                                 scaleEffect->SetValue(D2D1_SCALE_PROP_SCALE, D2D1::Vector2F(sx, sy));
-                                 scaleEffect->SetValue(D2D1_SCALE_PROP_INTERPOLATION_MODE, D2D1_SCALE_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
-
-                                 D2D1_POINT_2F targetOffset = D2D1::Point2F(dst.left - src.left * sx, dst.top - src.top * sy);
-                                 ctx->DrawImage(scaleEffect.Get(), &targetOffset);
-                                 return;
-                             }
-                         }
-                     }
-                 }
-                 ctx->DrawBitmap(res.bitmap.Get(), &dst, 1.0f, mode, &src);
-             };
-
-             DrawBitmapWithFsr(destRect, srcRect, interpMode, cropW, cropH);
-        }
+        float drawScaleX = (float)surfW / effectiveW;
+        float drawScaleY = (float)surfH / effectiveH;
+        float drawScale = std::min(drawScaleX, drawScaleY);
         
-        // [Optimization] We used the GPU to bake rotation. 
-        // Logic path (AdjustWindow) still thinks Exif=6 etc.
-        // We will reset global Exif to 1 in ProcessEngineEvents.
+        float drawW = cropW * drawScale;
+        float drawH = cropH * drawScale;
         
+        float x = (surfW - drawW) / 2.0f;
+        float y = (surfH - drawH) / 2.0f;
+        
+        D2D1_RECT_F destRect = D2D1::RectF(x, y, x + drawW, y + drawH);
+
+        const auto& meta = GetPaneContext(PaneSlot::Primary).metadata;
+        bool hasMetrics = meta.HasSharpness && meta.HasEntropy;
+        float effectiveSharpness = g_config.FsrSharpness;
+        float adaptiveFsrSharpness = ColorMath::GetAdaptiveFsrSharpness(effectiveSharpness, meta.Sharpness, meta.Entropy, hasMetrics);
+
+        // Use Smart Interpolation
+        float absoluteScale = GetPaneContext(PaneSlot::Primary).view.Zoom * scale;
+        D2D1_INTERPOLATION_MODE interpMode = GetOptimalD2DInterpolationMode(absoluteScale, cropW, cropH, meta.Entropy, meta.HasEntropy);
+
+        auto DrawBitmapWithFsr = [&](const D2D1_RECT_F& dst, const D2D1_RECT_F& src, D2D1_INTERPOLATION_MODE mode, float imgW, float imgH) {
+            bool isSrPromoted = (res.srScale > 1.01f);
+            bool canEngageSharpen = !isSrPromoted || (absoluteScale > res.srScale * 1.05f);
+
+            bool isPixelArt = IsEffectivelyPixelArtMode(absoluteScale, imgW, imgH, meta.Entropy, meta.HasEntropy);
+            bool enableFsr = canEngageSharpen && (g_config.ZoomModeIn == 4 || (g_config.ZoomModeIn == 0 && absoluteScale >= 1.05f && absoluteScale < 3.0f && !isPixelArt));
+            if (enableFsr && absoluteScale > 1.0f && adaptiveFsrSharpness > 0.005f) {
+                ComPtr<ID2D1Effect> sharpenEffect;
+                if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Sharpen, &sharpenEffect))) {
+                    sharpenEffect->SetInput(0, res.bitmap.Get());
+                    sharpenEffect->SetValue(D2D1_SHARPEN_PROP_SHARPNESS, std::clamp(adaptiveFsrSharpness * 2.0f, 0.0f, 2.0f));
+                    sharpenEffect->SetValue(D2D1_SHARPEN_PROP_THRESHOLD, 0.0f);
+
+                    ComPtr<ID2D1Effect> cropEffect;
+                    if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Crop, &cropEffect))) {
+                        cropEffect->SetInputEffect(0, sharpenEffect.Get());
+                        cropEffect->SetValue(D2D1_CROP_PROP_RECT, src);
+
+                        ComPtr<ID2D1Effect> scaleEffect;
+                        if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Scale, &scaleEffect))) {
+                            float sx = (dst.right - dst.left) / (src.right - src.left);
+                            float sy = (dst.bottom - dst.top) / (src.bottom - src.top);
+                            scaleEffect->SetInputEffect(0, cropEffect.Get());
+                            scaleEffect->SetValue(D2D1_SCALE_PROP_SCALE, D2D1::Vector2F(sx, sy));
+                            scaleEffect->SetValue(D2D1_SCALE_PROP_INTERPOLATION_MODE, D2D1_SCALE_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
+
+                            D2D1_POINT_2F targetOffset = D2D1::Point2F(dst.left - src.left * sx, dst.top - src.top * sy);
+                            ctx->DrawImage(scaleEffect.Get(), &targetOffset);
+                            return;
+                        }
+                    }
+                }
+            }
+            ctx->DrawBitmap(res.bitmap.Get(), &dst, 1.0f, mode, &src);
+        };
+
+        DrawBitmapWithFsr(destRect, srcRect, interpMode, cropW, cropH);
+
         g_lastFitOffset = D2D1::Point2F((surfW - effectiveW * scale)/2.0f, (surfH - effectiveH * scale)/2.0f);
         
     }
@@ -3027,7 +2817,6 @@ bool FileExists(LPCWSTR path) {
 
 void ReleaseImageResources() {
     GetPaneContext(PaneSlot::Primary).resource.Reset();
-    g_renderExifOrientation = 1;
     Sleep(50);
 }
 namespace {
@@ -3867,21 +3656,10 @@ static D2D1_SIZE_F GetLogicalImageSize() {
     return GetPaneContext(PaneSlot::Primary).resource ? GetPaneContext(PaneSlot::Primary).resource.GetSize() : D2D1::SizeF(0, 0);
 }
 
-// [Fix] Robust Size Calculation using Renderer Metrics
-// Recovers the VISUAL (Rotated) dimensions from the DComp surface.
-// Bypasses complex/fragile Exif parsing.
+// [Fix] Robust Visual Size Calculation
+// Returns the true visual (rotated/flipped/cropped) dimensions from GetVisualState.
 D2D1_SIZE_F GetVisualImageSize() {
-    // Primary: Reconstruction Logic
-    D2D1_SIZE_F result = GetLogicalImageSize();
-    
-    // [Fix Regression] Manual Rotation is applied ON TOP of the surface
-    // So we must swap dimensions if the user manually rotated 90/270 degrees.
-    bool manualSwap = (GetPaneContext(PaneSlot::Primary).editState.TotalRotation % 180 != 0);
-    if (manualSwap) {
-        return D2D1::SizeF(result.height, result.width);
-    }
-    
-    return result;
+    return GetVisualState().VisualSize;
 }
 
 static float ComputeBaseFitScaleForVisual(const VisualState& vs, float winW, float winH) {
@@ -4006,18 +3784,15 @@ static RECT s_restoredWindowRect{};
 
 static float GetCurrentRealScale(HWND hwnd) {
     if (!GetPaneContext(PaneSlot::Primary).resource) return 1.0f;
-    D2D1_SIZE_F effSize = GetVisualImageSize();
-    float imgW = effSize.width;
-    float imgH = effSize.height;
-    if (imgW <= 0 || imgH <= 0) return 1.0f;
+    VisualState vs = GetVisualState();
+    D2D1_SIZE_F visualSize = vs.VisualSize;
+    if (visualSize.width <= 0.0f || visualSize.height <= 0.0f) return 1.0f;
 
-    float originalW = imgW;
-    float originalH = imgH;
+    float originalW = visualSize.width;
     if (GetPaneContext(PaneSlot::Primary).metadata.Width > 0 && GetPaneContext(PaneSlot::Primary).metadata.Height > 0) {
-        originalW = (float)GetPaneContext(PaneSlot::Primary).metadata.Width;
-        originalH = (float)GetPaneContext(PaneSlot::Primary).metadata.Height;
-        bool manualSwap = (GetPaneContext(PaneSlot::Primary).editState.TotalRotation % 180 != 0);
-        if (manualSwap) std::swap(originalW, originalH);
+        float rawW = (float)GetPaneContext(PaneSlot::Primary).metadata.Width;
+        float rawH = (float)GetPaneContext(PaneSlot::Primary).metadata.Height;
+        originalW = vs.IsRotated90 ? rawH : rawW;
     }
 
     RECT rcClient; GetClientRect(hwnd, &rcClient);
@@ -4026,10 +3801,9 @@ static float GetCurrentRealScale(HWND hwnd) {
 
     float galleryH = (g_gallery.IsPinned() && g_gallery.IsVisible()) ? g_gallery.GetVisualHeight(winH) : 0.0f;
     float effWinH = std::max(1.0f, winH - galleryH);
-    VisualState vs = GetVisualState();
     float fitScale = ComputeBaseFitScaleForVisual(vs, winW, effWinH);
     float totalScale = fitScale * GetPaneContext(PaneSlot::Primary).view.Zoom;
-    return totalScale * (imgW / originalW); // Real pixel scale
+    return totalScale * (visualSize.width / originalW); // Real pixel scale
 }
 
 static void PerformRestoreWindow(HWND hwnd) {
@@ -4141,34 +3915,20 @@ static float ComputeFitZoom(HWND hwnd) {
 static void PerformZoom100(HWND hwnd, bool allowResizeWindow = true) {
     AppContext::GetInstance().ZoomAnimCtrl->Reset();
     if (GetPaneContext(PaneSlot::Primary).resource) {
-        // [Fix] Use Robust Visual Size (This refers to current Surface Size, potentially downscaled)
-        D2D1_SIZE_F effSize = GetVisualImageSize();
-        float imgW = effSize.width;
-        float imgH = effSize.height;
-        
-        if (imgW <= 0 || imgH <= 0) return;
-
-        // [Fix] Use True Metadata Dimensions for "100%" Calculation
-        // Because imgW/imgH might be from a downscaled DComp surface (max 8192px),
-        // we must use the Actual Metadata dimensions to ensure proper 100% scale for huge images.
-        float originalW = imgW;
-        float originalH = imgH;
+        VisualState vs = GetVisualState();
+        float originalW = vs.VisualSize.width;
+        float originalH = vs.VisualSize.height;
 
         if (GetPaneContext(PaneSlot::Primary).metadata.Width > 0 && GetPaneContext(PaneSlot::Primary).metadata.Height > 0) {
-            originalW = (float)GetPaneContext(PaneSlot::Primary).metadata.Width;
-            originalH = (float)GetPaneContext(PaneSlot::Primary).metadata.Height;
-            
-            // Apply Manual Rotation Swap (same logic as GetVisualImageSize)
-            bool manualSwap = (GetPaneContext(PaneSlot::Primary).editState.TotalRotation % 180 != 0);
-            if (manualSwap) {
-                std::swap(originalW, originalH);
-            }
+            float rawW = (float)GetPaneContext(PaneSlot::Primary).metadata.Width;
+            float rawH = (float)GetPaneContext(PaneSlot::Primary).metadata.Height;
+            originalW = vs.IsRotated90 ? rawH : rawW;
+            originalH = vs.IsRotated90 ? rawW : rawH;
         }
         
-        // [Bugfix] Compute target zoom against the TRUE dimensions that the surface will upgrade to,
-        // rather than the current temporary DComp surface size. This eliminates cross-axis rounding errors
-        // that cause `targetZoom` to deviate slightly from 1.0, triggering DComp LINEAR interpolation blur.
-        VisualState targetVs = {};
+        if (originalW <= 0.0f || originalH <= 0.0f) return;
+
+        VisualState targetVs = vs;
         targetVs.VisualSize = D2D1::SizeF(originalW, originalH);
             
         // Logic to resize window to wrap image at 100% if allowed
@@ -4353,13 +4113,10 @@ static float CalculateTargetZoom(HWND hwnd, float delta, bool isFineInterval = f
             }
         }
         
+        VisualState vs = GetVisualState();
         float originalW = imageWidth;
         if (GetPaneContext(PaneSlot::Primary).metadata.Width > 0 && GetPaneContext(PaneSlot::Primary).metadata.Height > 0) {
-            originalW = (float)GetPaneContext(PaneSlot::Primary).metadata.Width;
-            bool manualSwap = (GetPaneContext(PaneSlot::Primary).editState.TotalRotation % 180 != 0);
-            if (manualSwap) {
-                originalW = (float)GetPaneContext(PaneSlot::Primary).metadata.Height;
-            }
+            originalW = (float)(vs.IsRotated90 ? GetPaneContext(PaneSlot::Primary).metadata.Height : GetPaneContext(PaneSlot::Primary).metadata.Width);
         }
         
         float newTotalScale = newRealScale * (originalW / imageWidth);
@@ -5666,6 +5423,38 @@ bool IsImageModified() {
     return false;
 }
 
+static void GetExportBaseVisualDimensions(const PaneContext& pane, int& outW, int& outH) {
+    if (g_cropState.IsActive) {
+        outW = (int)std::round(g_cropState.CropRight - g_cropState.CropLeft);
+        outH = (int)std::round(g_cropState.CropBottom - g_cropState.CropTop);
+    } else if (pane.editState.HasCrop) {
+        outW = (int)std::round(pane.editState.CropRight - pane.editState.CropLeft);
+        outH = (int)std::round(pane.editState.CropBottom - pane.editState.CropTop);
+    } else {
+        VisualState vs = GetVisualState();
+        outW = (int)std::round(vs.VisualSize.width);
+        outH = (int)std::round(vs.VisualSize.height);
+        if (outW <= 0 || outH <= 0) {
+            float pw = (float)pane.metadata.Width;
+            float ph = (float)pane.metadata.Height;
+            if (pw <= 0 || ph <= 0) {
+                auto rsize = pane.resource.GetSize();
+                pw = rsize.width;
+                ph = rsize.height;
+            }
+            if (vs.IsRotated90) {
+                outW = (int)std::round(ph);
+                outH = (int)std::round(pw);
+            } else {
+                outW = (int)std::round(pw);
+                outH = (int)std::round(ph);
+            }
+        }
+    }
+    if (outW <= 0) outW = 1;
+    if (outH <= 0) outH = 1;
+}
+
 bool CheckUnsavedChanges(HWND hwnd, QuickView::PendingAction pending = QuickView::PendingAction::None) {
     if (!IsImageModified()) return true;
     
@@ -5674,13 +5463,9 @@ bool CheckUnsavedChanges(HWND hwnd, QuickView::PendingAction pending = QuickView
 
     // 1. Direct routing to ExportPanel for active Crop Mode or applied Crop modifications
     if (g_cropState.IsActive || primaryPane.editState.HasCrop) {
-        int targetW = primaryPane.metadata.Width;
-        int targetH = primaryPane.metadata.Height;
-        if (targetW <= 0 || targetH <= 0) {
-            auto rsize = primaryPane.resource.GetSize();
-            targetW = (int)rsize.width;
-            targetH = (int)rsize.height;
-        }
+        int targetW = 0;
+        int targetH = 0;
+        GetExportBaseVisualDimensions(primaryPane, targetW, targetH);
         std::wstring targetPath = !primaryPane.path.empty() ? primaryPane.path : g_imagePath;
 
         if (pending == QuickView::PendingAction::None) {
@@ -6068,7 +5853,7 @@ void AdjustCropModeWindowAndZoom(HWND hwnd) {
     auto& pane = GetPaneContext(PaneSlot::Primary);
     if (!pane.resource) return;
 
-    int baseExif = g_renderExifOrientation;
+    int baseExif = pane.view.ExifOrientation;
     int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
     D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
     if (orientedSize.width <= 0.0f || orientedSize.height <= 0.0f) return;
@@ -7322,7 +7107,7 @@ void PerformTransform(HWND hwnd, TransformType type) {
     if (g_cropState.IsActive || state.HasCrop) {
         const auto& pane = GetPaneContext(PaneSlot::Primary);
         if (pane.resource) {
-            int baseExif = g_renderExifOrientation;
+            int baseExif = pane.view.ExifOrientation;
             int exifOrientation = GetEffectiveExifOrientation(baseExif, state);
             D2D1_SIZE_F currSize = GetOrientedSize(pane.resource, exifOrientation);
             float origW = currSize.width;
@@ -8364,7 +8149,7 @@ static void UpdatePanFromMinimapClick(int idx, POINT pt, HWND hwnd) {
         vpW = winW * 0.5f;
     }
     
-    int baseExif = (slot == PaneSlot::Primary) ? g_renderExifOrientation : pane.view.ExifOrientation;
+    int baseExif = pane.view.ExifOrientation;
     int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
     D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
     if (orientedSize.width <= 0.0f || orientedSize.height <= 0.0f) return;
@@ -8417,7 +8202,7 @@ bool ScreenToImageSpace(HWND hwnd, int screenX, int screenY, float& imgX, float&
     const auto& pane = GetPaneContext(slot);
     if (!pane.resource) return false;
     
-    int baseExif = (slot == PaneSlot::Primary) ? g_renderExifOrientation : pane.view.ExifOrientation;
+    int baseExif = pane.view.ExifOrientation;
     int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
     D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
     if (orientedSize.width <= 0.0f || orientedSize.height <= 0.0f) return false;
@@ -10455,7 +10240,7 @@ SKIP_EDGE_NAV:;
              float imgX, imgY;
              if (ScreenToImageSpace(hwnd, pt.x, pt.y, imgX, imgY, PaneSlot::Primary)) {
                  const auto& pane = GetPaneContext(PaneSlot::Primary);
-                 int baseExif = g_renderExifOrientation;
+                 int baseExif = pane.view.ExifOrientation;
                  int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
                  D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
                  
@@ -10528,7 +10313,7 @@ SKIP_EDGE_NAV:;
              // Hover cursor logic
              const auto& pane = GetPaneContext(PaneSlot::Primary);
              if (pane.resource) {
-                 int baseExif = g_renderExifOrientation;
+                 int baseExif = pane.view.ExifOrientation;
                  int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
                  D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
                  if (orientedSize.width > 0 && orientedSize.height > 0) {
@@ -11403,7 +11188,7 @@ SKIP_EDGE_NAV:;
         if (g_cropState.IsActive) {
             const auto& pane = GetPaneContext(PaneSlot::Primary);
             if (pane.resource) {
-                int baseExif = g_renderExifOrientation;
+                int baseExif = pane.view.ExifOrientation;
                 int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
                 D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
                 if (orientedSize.width > 0 && orientedSize.height > 0) {
@@ -11534,7 +11319,8 @@ SKIP_EDGE_NAV:;
             if (GetKeyState(VK_CONTROL) < 0 && !g_cropState.IsActive) {
                 float imgX, imgY;
                 if (ScreenToImageSpace(hwnd, pt.x, pt.y, imgX, imgY, PaneSlot::Primary)) {
-                    const auto& meta = GetPaneContext(PaneSlot::Primary).metadata;
+                    const auto& pane = GetPaneContext(PaneSlot::Primary);
+                    const auto& meta = pane.metadata;
                     if (meta.Width > 0 && meta.Height > 0) {
                         SetCapture(hwnd);
                         g_cropState.Reset();
@@ -11545,9 +11331,9 @@ SKIP_EDGE_NAV:;
                         
                         // map to un-oriented original dimensions if needed, but for now we clamp to metadata size
                         // actually, we should clamp to Oriented size
-                        int baseExif = g_renderExifOrientation;
-                        int exifOrientation = GetEffectiveExifOrientation(baseExif, GetPaneContext(PaneSlot::Primary).editState);
-                        D2D1_SIZE_F orientedSize = GetOrientedSize(GetPaneContext(PaneSlot::Primary).resource, exifOrientation);
+                        int baseExif = pane.view.ExifOrientation;
+                        int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
+                        D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
                         
                         imgX = (std::max)(0.0f, (std::min)(imgX, orientedSize.width));
                         imgY = (std::max)(0.0f, (std::min)(imgY, orientedSize.height));
@@ -11788,8 +11574,9 @@ SKIP_EDGE_NAV:;
                     break;
                 }
                 case ToolbarButtonID::CropSave: {
-                    int targetWidth = (int)(g_cropState.CropRight - g_cropState.CropLeft);
-                    int targetHeight = (int)(g_cropState.CropBottom - g_cropState.CropTop);
+                    int targetWidth = 0;
+                    int targetHeight = 0;
+                    GetExportBaseVisualDimensions(GetPaneContext(PaneSlot::Primary), targetWidth, targetHeight);
                     QuickView::ExportPanel::GetInstance().Show(hwnd, targetWidth, targetHeight, g_imagePath);
                     RequestRepaint(PaintLayer::All);
                     break;
@@ -12517,8 +12304,8 @@ SKIP_EDGE_NAV:;
             return 0;
         }
         if (g_cropState.IsActive && g_cropState.FocusedField != CropState::InputField::None) {
-            int baseExif = g_renderExifOrientation;
             const auto& pane = GetPaneContext(PaneSlot::Primary);
+            int baseExif = pane.view.ExifOrientation;
             int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
             D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
 
@@ -12572,8 +12359,8 @@ SKIP_EDGE_NAV:;
             }
         }
         if (g_cropState.IsActive && g_cropState.FocusedField != CropState::InputField::None) {
-            int baseExif = g_renderExifOrientation;
             const auto& pane = GetPaneContext(PaneSlot::Primary);
+            int baseExif = pane.view.ExifOrientation;
             int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
             D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
 
@@ -12789,7 +12576,7 @@ SKIP_EDGE_NAV:;
             if (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_UP || wParam == VK_DOWN) {
                 const auto& pane = GetPaneContext(PaneSlot::Primary);
                 if (pane.resource) {
-                    int baseExif = g_renderExifOrientation;
+                    int baseExif = pane.view.ExifOrientation;
                     int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
                     D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
                     if (orientedSize.width > 0 && orientedSize.height > 0) {
@@ -13255,47 +13042,55 @@ SKIP_EDGE_NAV:;
 
             QuickView::ExportOptions opts;
             opts.InputPath = targetPath;
-            int baseExif = (g_renderExifOrientation >= 1 && g_renderExifOrientation <= 8)
-                           ? g_renderExifOrientation
-                           : (pane.metadata.ExifOrientation >= 1 && pane.metadata.ExifOrientation <= 8
-                              ? pane.metadata.ExifOrientation
-                              : pane.view.ExifOrientation);
+            int baseExif = pane.view.ExifOrientation;
             int effExif = GetEffectiveExifOrientation(baseExif, pane.editState);
-            int rot = 0;
-            bool flipH = false;
-            bool flipV = false;
-            switch (effExif) {
-                case 1: rot = 0;   flipH = false; flipV = false; break;
-                case 2: rot = 0;   flipH = true;  flipV = false; break;
-                case 3: rot = 180; flipH = false; flipV = false; break;
-                case 4: rot = 180; flipH = true;  flipV = false; break;
-                case 5: rot = 270; flipH = true;  flipV = false; break;
-                case 6: rot = 90;  flipH = false; flipV = false; break;
-                case 7: rot = 90;  flipH = true;  flipV = false; break;
-                case 8: rot = 270; flipH = false; flipV = false; break;
-                default: rot = 0;  break;
-            }
+            Transform2D t = Transform2D::FromExif(effExif);
 
-            opts.Rotation = rot;
-            opts.FlipH = flipH;
-            opts.FlipV = flipV;
+            opts.Rotation = t.Rotation;
+            opts.FlipH = t.FlipH;
+            opts.FlipV = false;
             opts.RawForceFullDecode = g_runtime.ForceRawDecode;
 
+            std::shared_ptr<QuickView::RawImageFrame> capturedSrFrame;
+            float srScale = 1.0f;
+            if (pane.resource.promotedSrTexture || pane.resource.promotedSrBitmap) {
+                capturedSrFrame = std::make_shared<QuickView::RawImageFrame>();
+                HRESULT hrExtract = E_FAIL;
+                if (g_pRenderEngine) {
+                    if (pane.resource.promotedSrTexture) {
+                        hrExtract = g_pRenderEngine->ExtractTexturePixels(pane.resource.promotedSrTexture.Get(), capturedSrFrame.get());
+                    } else if (pane.resource.promotedSrBitmap) {
+                        hrExtract = g_pRenderEngine->ExtractBitmapPixels(pane.resource.promotedSrBitmap.Get(), capturedSrFrame.get());
+                    }
+                }
+                if (SUCCEEDED(hrExtract) && capturedSrFrame->pixels && capturedSrFrame->width > 0) {
+                    srScale = (pane.resource.srScale > 1.0f) ? pane.resource.srScale : ((pane.resource.promotedSrScale > 1.0f) ? pane.resource.promotedSrScale : 2.0f);
+                    opts.SourceFrame = capturedSrFrame;
+                } else {
+                    capturedSrFrame.reset();
+                }
+            }
+
             if (g_cropState.IsActive) {
-                opts.CropX = (int)g_cropState.CropLeft;
-                opts.CropY = (int)g_cropState.CropTop;
-                opts.CropWidth = (int)(g_cropState.CropRight - g_cropState.CropLeft);
-                opts.CropHeight = (int)(g_cropState.CropBottom - g_cropState.CropTop);
+                opts.CropX = (int)std::round(g_cropState.CropLeft * srScale);
+                opts.CropY = (int)std::round(g_cropState.CropTop * srScale);
+                opts.CropWidth = (int)std::round((g_cropState.CropRight - g_cropState.CropLeft) * srScale);
+                opts.CropHeight = (int)std::round((g_cropState.CropBottom - g_cropState.CropTop) * srScale);
             } else if (pane.editState.HasCrop) {
-                opts.CropX = pane.editState.CropLeft;
-                opts.CropY = pane.editState.CropTop;
-                opts.CropWidth = pane.editState.CropRight - pane.editState.CropLeft;
-                opts.CropHeight = pane.editState.CropBottom - pane.editState.CropTop;
+                opts.CropX = (int)std::round(pane.editState.CropLeft * srScale);
+                opts.CropY = (int)std::round(pane.editState.CropTop * srScale);
+                opts.CropWidth = (int)std::round((pane.editState.CropRight - pane.editState.CropLeft) * srScale);
+                opts.CropHeight = (int)std::round((pane.editState.CropBottom - pane.editState.CropTop) * srScale);
+            } else {
+                opts.CropX = 0;
+                opts.CropY = 0;
+                opts.CropWidth = 0;
+                opts.CropHeight = 0;
             }
 
             opts.DisplayZoom = (std::max)(1.0f, pane.view.Zoom);
 
-            if (pane.resource.animator) {
+            if (!opts.SourceFrame && pane.resource.animator) {
                 extern std::mutex g_animatorMutex;
                 std::lock_guard<std::mutex> lock(g_animatorMutex);
                 opts.SourceFrame = pane.resource.animator->SeekToFrame(pane.resource.frameMeta.index);
@@ -13354,22 +13149,7 @@ SKIP_EDGE_NAV:;
                 const auto& pane = GetPaneContext(PaneSlot::Primary);
                 int targetW = 0;
                 int targetH = 0;
-                if (g_cropState.IsActive) {
-                    targetW = (int)std::round(g_cropState.CropRight - g_cropState.CropLeft);
-                    targetH = (int)std::round(g_cropState.CropBottom - g_cropState.CropTop);
-                } else if (pane.editState.HasCrop) {
-                    targetW = (int)std::round(pane.editState.CropRight - pane.editState.CropLeft);
-                    targetH = (int)std::round(pane.editState.CropBottom - pane.editState.CropTop);
-                }
-                if (targetW <= 0 || targetH <= 0) {
-                    targetW = pane.metadata.Width;
-                    targetH = pane.metadata.Height;
-                    if (targetW <= 0 || targetH <= 0) {
-                        auto rsize = pane.resource.GetSize();
-                        targetW = (int)rsize.width;
-                        targetH = (int)rsize.height;
-                    }
-                }
+                GetExportBaseVisualDimensions(pane, targetW, targetH);
                 QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath);
                 RequestRepaint(PaintLayer::All);
             }
@@ -14898,7 +14678,6 @@ void ProcessEngineEvents(HWND hwnd) {
                 
                 // [Detect Pre-Rotation]
                 HandleExifPreRotation(evt);
-                g_renderExifOrientation = GetPaneContext(PaneSlot::Primary).view.ExifOrientation;
 
                 // UI Text Logic
                 wchar_t titleBuf[2048];
@@ -14940,12 +14719,6 @@ void ProcessEngineEvents(HWND hwnd) {
                 } else {
                     // Update DComp Visual (Base Preview for Titan, or full image for standard)
                     RenderImageToDComp(hwnd, GetPaneContext(PaneSlot::Primary).resource, false);
-                    
-                    // [Optimization] GPU-Assistant Surface Rotation Complete
-                    // The Surface is now physically rotated. Neutralize view Exif while preserving true file metadata.ExifOrientation.
-                    if (GetPaneContext(PaneSlot::Primary).view.ExifOrientation > 1 && g_config.AutoRotate) {
-                        GetPaneContext(PaneSlot::Primary).view.ExifOrientation = 1;
-                    }
                     
                     // [Strategy] Visual Continuity for Soft-Refresh (e.g. Color Space/RAW Switch)
                     // When the user toggles a rendering parameter, we want the image to appear to 
@@ -17799,7 +17572,7 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
                         if (IsCompareModeActive() && AppContext::GetInstance().Compare.mode == ViewMode::CompareSideBySide) {
                             winW *= 0.5f;
                         }
-                        int baseExif = (slot == PaneSlot::Primary) ? g_renderExifOrientation : pane.view.ExifOrientation;
+                        int baseExif = pane.view.ExifOrientation;
                         int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
                         const D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
                         if (orientedSize.width > 0.0f && orientedSize.height > 0.0f) {
@@ -17942,7 +17715,7 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
                 g_cropState.IsActive = true;
                 g_cropState.IsQuickActionVisible = true; // Always show quick action toolbar
                 
-                int baseExif = g_renderExifOrientation;
+                int baseExif = pane.view.ExifOrientation;
                 int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
                 D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
 
@@ -18354,13 +18127,9 @@ void TryExitCropMode(HWND hwnd, bool forceQuit) {
     if (!g_cropState.IsActive && !GetPaneContext(PaneSlot::Primary).editState.IsDirty) return;
 
     if (!forceQuit && IsImageModified()) {
-        int targetWidth = (int)std::round(g_cropState.CropRight - g_cropState.CropLeft);
-        int targetHeight = (int)std::round(g_cropState.CropBottom - g_cropState.CropTop);
-        if (targetWidth <= 0 || targetHeight <= 0) {
-            const auto& pane = GetPaneContext(PaneSlot::Primary);
-            targetWidth = pane.metadata.Width;
-            targetHeight = pane.metadata.Height;
-        }
+        int targetWidth = 0;
+        int targetHeight = 0;
+        GetExportBaseVisualDimensions(GetPaneContext(PaneSlot::Primary), targetWidth, targetHeight);
         QuickView::ExportPanel::GetInstance().Show(hwnd, targetWidth, targetHeight, g_imagePath, QuickView::PendingAction::ExitCropMode);
         return;
     }

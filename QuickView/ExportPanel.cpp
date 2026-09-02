@@ -43,6 +43,7 @@ extern void ReleaseImageResources();
 extern HCURSOR g_currentCursor;
 extern void AdjustWindowForOverlay(HWND hwnd, bool isClosed);
 extern CRenderEngine* g_pRenderEngine;
+extern int GetEffectiveExifOrientation(int baseExif, const EditState& editState);
 
 namespace {
 inline float MeasureStringWidth(const wchar_t* text, float fontSize) {
@@ -257,12 +258,27 @@ void ExportPanel::Show(HWND hwnd, int initialWidth, int initialHeight, const std
 
     // Check if current viewport has active super-resolution bitmap
     auto& primaryPane = GetPaneContext(PaneSlot::Primary);
-    m_hasSrBitmap = (primaryPane.resource.promotedSrBitmap != nullptr || primaryPane.resource.currentSrLevel > 1.0f);
+    m_hasSrBitmap = (primaryPane.resource.promotedSrBitmap != nullptr || 
+                     primaryPane.resource.promotedSrTexture != nullptr || 
+                     primaryPane.resource.currentSrLevel > 1.0f ||
+                     primaryPane.metadata.HasSr);
     if (m_hasSrBitmap) {
         m_exportSr = true;
         m_isModified = true; // [QVX-SR] Super-resolution content can overwrite original or be saved as new
-        m_srScale = (primaryPane.resource.srScale > 1.0f) ? primaryPane.resource.srScale : primaryPane.resource.currentSrLevel;
-        if (m_srScale < 2.0f) m_srScale = 2.0f;
+        
+        float actualScale = 1.0f;
+        if (primaryPane.resource.promotedSrScale > 1.0f) {
+            actualScale = primaryPane.resource.promotedSrScale;
+        } else if (primaryPane.metadata.SrScale > 1.0f) {
+            actualScale = primaryPane.metadata.SrScale;
+        } else if (primaryPane.resource.srScale > 1.0f) {
+            actualScale = primaryPane.resource.srScale;
+        } else if (primaryPane.resource.currentSrLevel > 1.0f) {
+            actualScale = primaryPane.resource.currentSrLevel;
+        }
+        if (actualScale <= 1.0f) actualScale = 2.0f;
+        m_srScale = actualScale;
+
         m_targetWidth = (int)std::round(m_cropWidth * m_srScale);
         m_targetHeight = (int)std::round(m_cropHeight * m_srScale);
     } else {
@@ -524,20 +540,11 @@ bool ExportPanel::CanOverwriteOriginal() const {
 
 void ExportPanel::CalculateNetTransform(int& outRotation, bool& outFlipH, bool& outFlipV) const {
     const auto& primaryPane = GetPaneContext(PaneSlot::Primary);
-    int baseExif = primaryPane.metadata.ExifOrientation;
-    if (baseExif < 1 || baseExif > 8) baseExif = 1;
-
-    Transform2D exifT = Transform2D::FromExif(baseExif);
-
-    Transform2D editT;
-    editT.Rotation = (primaryPane.editState.TotalRotation % 360 + 360) % 360;
-    editT.FlipH = primaryPane.editState.FlippedH;
-
-    Transform2D netT = Transform2D::Combine(exifT, editT);
-
-    outRotation = netT.Rotation;
-    outFlipH = netT.FlipH;
-    outFlipV = primaryPane.editState.FlippedV;
+    int effExif = GetEffectiveExifOrientation(primaryPane.view.ExifOrientation, primaryPane.editState);
+    Transform2D t = Transform2D::FromExif(effExif);
+    outRotation = t.Rotation;
+    outFlipH = t.FlipH;
+    outFlipV = false;
 }
 
 void ExportPanel::TriggerAsyncEstimate() {
@@ -548,23 +555,33 @@ void ExportPanel::TriggerAsyncEstimate() {
     
     ExportOptions opts;
     opts.InputPath = m_originalPath;
-    opts.CropX = (int)g_cropState.CropLeft;
-    opts.CropY = (int)g_cropState.CropTop;
-    opts.CropWidth = (int)std::round(g_cropState.CropRight - g_cropState.CropLeft);
-    opts.CropHeight = (int)std::round(g_cropState.CropBottom - g_cropState.CropTop);
-    opts.TargetWidth = m_targetWidth;
-    opts.TargetHeight = m_targetHeight;
-    opts.JpegQuality = m_jpegQuality;
-    opts.Lossless = m_isLossless;
-    opts.PreserveMetadata = m_preserveMetadata;
     CalculateNetTransform(opts.Rotation, opts.FlipH, opts.FlipV);
 
-    if (m_exportSr && m_hasSrBitmap) {
+    const auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+    float srScale = (m_exportSr && m_hasSrBitmap) ? m_srScale : 1.0f;
+
+    if (g_cropState.IsActive) {
+        opts.CropX = (int)std::round(g_cropState.CropLeft * srScale);
+        opts.CropY = (int)std::round(g_cropState.CropTop * srScale);
+        opts.CropWidth = (int)std::round((g_cropState.CropRight - g_cropState.CropLeft) * srScale);
+        opts.CropHeight = (int)std::round((g_cropState.CropBottom - g_cropState.CropTop) * srScale);
+    } else if (primaryPane.editState.HasCrop) {
+        opts.CropX = (int)std::round(primaryPane.editState.CropLeft * srScale);
+        opts.CropY = (int)std::round(primaryPane.editState.CropTop * srScale);
+        opts.CropWidth = (int)std::round((primaryPane.editState.CropRight - primaryPane.editState.CropLeft) * srScale);
+        opts.CropHeight = (int)std::round((primaryPane.editState.CropBottom - primaryPane.editState.CropTop) * srScale);
+    } else {
         opts.CropX = 0;
         opts.CropY = 0;
         opts.CropWidth = 0;
         opts.CropHeight = 0;
     }
+
+    opts.TargetWidth = m_targetWidth;
+    opts.TargetHeight = m_targetHeight;
+    opts.JpegQuality = m_jpegQuality;
+    opts.Lossless = m_isLossless;
+    opts.PreserveMetadata = m_preserveMetadata;
 
     if (m_embedIcc && m_selectedIccIndex >= 0 && m_selectedIccIndex < (int)m_iccProfiles.size()) {
         const auto& item = m_iccProfiles[m_selectedIccIndex];
@@ -1081,51 +1098,55 @@ void ExportPanel::CommitSave(bool overwrite) {
 
   ExportOptions opts;
   opts.InputPath = m_originalPath;
+  CalculateNetTransform(opts.Rotation, opts.FlipH, opts.FlipV);
 
   auto &primaryPane = GetPaneContext(PaneSlot::Primary);
-  if (g_cropState.IsActive) {
-    opts.CropX = (int)g_cropState.CropLeft;
-    opts.CropY = (int)g_cropState.CropTop;
-    opts.CropWidth =
-        (int)std::round(g_cropState.CropRight - g_cropState.CropLeft);
-    opts.CropHeight =
-        (int)std::round(g_cropState.CropBottom - g_cropState.CropTop);
-  } else if (primaryPane.editState.HasCrop) {
-    opts.CropX = (int)primaryPane.editState.CropLeft;
-    opts.CropY = (int)primaryPane.editState.CropTop;
-    opts.CropWidth = (int)std::round(primaryPane.editState.CropRight -
-                                     primaryPane.editState.CropLeft);
-    opts.CropHeight = (int)std::round(primaryPane.editState.CropBottom -
-                                      primaryPane.editState.CropTop);
-  }
-    
-    opts.TargetWidth = m_targetWidth;
-    opts.TargetHeight = m_targetHeight;
-    opts.JpegQuality = m_jpegQuality;
-    opts.Lossless = m_isLossless;
-    opts.PreserveMetadata = m_preserveMetadata;
-    CalculateNetTransform(opts.Rotation, opts.FlipH, opts.FlipV);
+  float srScale = (capturedSrFrame && capturedSrFrame->pixels && capturedSrFrame->width > 0) ? m_srScale : 1.0f;
 
-    // Apply captured SR frame (extracted before resource release)
-    if (capturedSrFrame && capturedSrFrame->pixels && capturedSrFrame->width > 0) {
-        opts.SourceFrame = capturedSrFrame;
-        // SR SourceFrame already contains full-resolution upscaled pixels.
-        // Neutralize crop and target to SourceFrame dimensions so the WIC
-        // pipeline uses the pixels as-is without re-cropping or re-scaling.
-        opts.CropX = 0;
-        opts.CropY = 0;
-        opts.CropWidth = capturedSrFrame->width;
-        opts.CropHeight = capturedSrFrame->height;
-        int expectedSrW = (int)std::round(m_cropWidth * m_srScale);
-        int expectedSrH = (int)std::round(m_cropHeight * m_srScale);
-        if (m_targetWidth == expectedSrW && m_targetHeight == expectedSrH) {
-            opts.TargetWidth = capturedSrFrame->width;
-            opts.TargetHeight = capturedSrFrame->height;
-        } else {
-            opts.TargetWidth = m_targetWidth;
-            opts.TargetHeight = m_targetHeight;
-        }
-    }
+  if (g_cropState.IsActive) {
+    opts.CropX = (int)std::round(g_cropState.CropLeft * srScale);
+    opts.CropY = (int)std::round(g_cropState.CropTop * srScale);
+    opts.CropWidth = (int)std::round((g_cropState.CropRight - g_cropState.CropLeft) * srScale);
+    opts.CropHeight = (int)std::round((g_cropState.CropBottom - g_cropState.CropTop) * srScale);
+  } else if (primaryPane.editState.HasCrop) {
+    opts.CropX = (int)std::round(primaryPane.editState.CropLeft * srScale);
+    opts.CropY = (int)std::round(primaryPane.editState.CropTop * srScale);
+    opts.CropWidth = (int)std::round((primaryPane.editState.CropRight - primaryPane.editState.CropLeft) * srScale);
+    opts.CropHeight = (int)std::round((primaryPane.editState.CropBottom - primaryPane.editState.CropTop) * srScale);
+  } else {
+    opts.CropX = 0;
+    opts.CropY = 0;
+    opts.CropWidth = 0;
+    opts.CropHeight = 0;
+  }
+
+  // Apply captured SR frame (extracted before resource release)
+  if (capturedSrFrame && capturedSrFrame->pixels && capturedSrFrame->width > 0) {
+      opts.SourceFrame = capturedSrFrame;
+      
+      // Calculate true visual dimensions of the captured SR frame after rotation
+      bool isRot90 = (opts.Rotation == 90 || opts.Rotation == 270);
+      int srFrameVisualW = isRot90 ? (int)capturedSrFrame->height : (int)capturedSrFrame->width;
+      int srFrameVisualH = isRot90 ? (int)capturedSrFrame->width : (int)capturedSrFrame->height;
+
+      int expectedVisualW = (opts.CropWidth > 0) ? opts.CropWidth : srFrameVisualW;
+      int expectedVisualH = (opts.CropHeight > 0) ? opts.CropHeight : srFrameVisualH;
+
+      if (m_targetWidth == expectedVisualW && m_targetHeight == expectedVisualH) {
+          opts.TargetWidth = 0;
+          opts.TargetHeight = 0;
+      } else {
+          opts.TargetWidth = m_targetWidth;
+          opts.TargetHeight = m_targetHeight;
+      }
+  } else {
+      opts.TargetWidth = m_targetWidth;
+      opts.TargetHeight = m_targetHeight;
+  }
+
+  opts.JpegQuality = m_jpegQuality;
+  opts.Lossless = m_isLossless;
+  opts.PreserveMetadata = m_preserveMetadata;
 
     if (m_embedIcc && m_selectedIccIndex >= 0 && m_selectedIccIndex < (int)m_iccProfiles.size()) {
         const auto& item = m_iccProfiles[m_selectedIccIndex];
