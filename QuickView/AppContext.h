@@ -107,6 +107,7 @@ struct SmoothWindowZoomState {
     float startPanY = 0.0f;
     float targetPanX = 0.0f;
     float targetPanY = 0.0f;
+    float maintainTotalScale = 0.0f; // >0: window-adapt mode, keep this visual scale constant
 };
 
 // --- Compare Mode Definitions ---

@@ -177,6 +177,8 @@ private:
         POINT drawOffset = {};
         UINT width = 0;
         UINT height = 0;
+        UINT allocatedWidth = 0;
+        UINT allocatedHeight = 0;
     };
     
     // Image Layer data (Ping-Pong) -> Supports Smart Dispatch (Standard vs Titan)

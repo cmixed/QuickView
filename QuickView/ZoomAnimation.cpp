@@ -194,7 +194,6 @@ bool SmoothZoomController::Tick(HWND hwnd) {
     m_context.SmoothZoom.CurrentZoom += (m_context.SmoothZoom.TargetZoom - m_context.SmoothZoom.CurrentZoom) * zoomAlpha;
 
     bool windowDone = true;
-    extern bool g_programmaticResize;
     if (m_context.SmoothZoom.AnimateWindow) {
         RECT currentWindowRect{};
         GetWindowRect(hwnd, &currentWindowRect);
@@ -203,7 +202,7 @@ bool SmoothZoomController::Tick(HWND hwnd) {
         windowDone = !moved && memcmp(&currentWindowRect, &m_context.SmoothZoom.TargetWindowRect, sizeof(RECT)) == 0;
 
         if (moved) {
-            g_programmaticResize = true;
+            ProgrammaticResizeScope resizeScope;
             SetWindowPos(hwnd, nullptr,
                          nextWindowRect.left, nextWindowRect.top,
                          nextWindowRect.right - nextWindowRect.left,
@@ -232,12 +231,14 @@ bool SmoothZoomController::Tick(HWND hwnd) {
 
     if (done) {
         if (m_context.SmoothZoom.AnimateWindow) {
-            g_programmaticResize = true;
+        {
+            ProgrammaticResizeScope resizeScope;
             SetWindowPos(hwnd, nullptr,
                          m_context.SmoothZoom.TargetWindowRect.left, m_context.SmoothZoom.TargetWindowRect.top,
                          m_context.SmoothZoom.TargetWindowRect.right - m_context.SmoothZoom.TargetWindowRect.left,
                          m_context.SmoothZoom.TargetWindowRect.bottom - m_context.SmoothZoom.TargetWindowRect.top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+        }
             GetClientRect(hwnd, &rc);
             winW = (float)rc.right;
             winH = (float)rc.bottom;
@@ -252,7 +253,6 @@ bool SmoothZoomController::Tick(HWND hwnd) {
         m_context.SmoothZoom.LastWinH = effWinH;
         GetPaneContext(PaneSlot::Primary).view.PanX = m_context.SmoothZoom.CurrentPanX;
         GetPaneContext(PaneSlot::Primary).view.PanY = m_context.SmoothZoom.CurrentPanY;
-        g_programmaticResize = false;
         m_context.SmoothZoom.Active = false;
     }
 

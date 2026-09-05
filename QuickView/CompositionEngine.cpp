@@ -859,18 +859,32 @@ HRESULT CompositionEngine::CreateLayerSurface(UILayer layer, UINT width, UINT he
     if (!m_device || width == 0 || height == 0) return E_FAIL;
     
     LayerData& data = GetLayer(layer);
+    data.width = width;
+    data.height = height;
+
+    // Zero-Flicker: Reuse existing allocated surface if capacity is sufficient
+    if (data.surface && data.allocatedWidth >= width && data.allocatedHeight >= height) {
+        return S_OK;
+    }
+
+    // Step allocation with 25% headroom and 256-pixel alignment
+    UINT allocW = std::max(width, (data.allocatedWidth * 5) / 4);
+    allocW = (allocW + 255) & ~255;
+    UINT allocH = std::max(height, (data.allocatedHeight * 5) / 4);
+    allocH = (allocH + 255) & ~255;
+
     data.surface.Reset();
     
     HRESULT hr = m_device->CreateSurface(
-        width, height,
+        allocW, allocH,
         kUiSurfaceFormat,
         DXGI_ALPHA_MODE_PREMULTIPLIED,
         &data.surface
     );
     if (FAILED(hr)) return hr;
     
-    data.width = width;
-    data.height = height;
+    data.allocatedWidth = allocW;
+    data.allocatedHeight = allocH;
     return data.visual->SetContent(data.surface.Get());
 }
 
@@ -879,18 +893,27 @@ HRESULT CompositionEngine::CreateAllSurfaces(UINT width, UINT height) {
     CreateLayerSurface(UILayer::Gallery, width, height);
     CreateLayerSurface(UILayer::Dynamic, width, height);
     
-    // Ensure background surface
-    m_backgroundLayer.surface.Reset();
-    HRESULT hr = m_device->CreateSurface(width, height, kUiSurfaceFormat, DXGI_ALPHA_MODE_PREMULTIPLIED, &m_backgroundLayer.surface);
-    if (SUCCEEDED(hr)) {
-        m_backgroundLayer.width = width;
-        m_backgroundLayer.height = height;
-        m_backgroundLayer.visual->SetContent(m_backgroundLayer.surface.Get());
-        
-        // [Fix] Force background redraw since the surface was just created blank
-        m_lastBgW = 0;
+    m_backgroundLayer.width = width;
+    m_backgroundLayer.height = height;
+
+    // Zero-Flicker: Reuse background surface if allocated capacity is sufficient
+    if (!m_backgroundLayer.surface || m_backgroundLayer.allocatedWidth < width || m_backgroundLayer.allocatedHeight < height) {
+        UINT allocW = std::max(width, (m_backgroundLayer.allocatedWidth * 5) / 4);
+        allocW = (allocW + 255) & ~255;
+        UINT allocH = std::max(height, (m_backgroundLayer.allocatedHeight * 5) / 4);
+        allocH = (allocH + 255) & ~255;
+
+        m_backgroundLayer.surface.Reset();
+        HRESULT hr = m_device->CreateSurface(allocW, allocH, kUiSurfaceFormat, DXGI_ALPHA_MODE_PREMULTIPLIED, &m_backgroundLayer.surface);
+        if (SUCCEEDED(hr)) {
+            m_backgroundLayer.allocatedWidth = allocW;
+            m_backgroundLayer.allocatedHeight = allocH;
+            m_backgroundLayer.visual->SetContent(m_backgroundLayer.surface.Get());
+            m_lastBgW = 0; // Force background redraw on newly created surface
+        }
+        return hr;
     }
-    return hr;
+    return S_OK;
 }
 
 ID2D1DeviceContext* CompositionEngine::BeginLayerUpdate(UILayer layer, const RECT* dirtyRect) {
@@ -1303,14 +1326,21 @@ HRESULT CompositionEngine::UpdateBackground(float width, float height, const D2D
 
     if (!needsRedraw) return S_OK;
 
-    if (!m_backgroundLayer.surface || m_backgroundLayer.width != w || m_backgroundLayer.height != h) {
+    if (!m_backgroundLayer.surface || m_backgroundLayer.allocatedWidth < w || m_backgroundLayer.allocatedHeight < h) {
+        UINT allocW = std::max(w, (m_backgroundLayer.allocatedWidth * 5) / 4);
+        allocW = (allocW + 255) & ~255;
+        UINT allocH = std::max(h, (m_backgroundLayer.allocatedHeight * 5) / 4);
+        allocH = (allocH + 255) & ~255;
+
         m_backgroundLayer.surface.Reset();
-        HRESULT hr = m_device->CreateSurface(w, h, kUiSurfaceFormat, DXGI_ALPHA_MODE_PREMULTIPLIED, &m_backgroundLayer.surface);
+        HRESULT hr = m_device->CreateSurface(allocW, allocH, kUiSurfaceFormat, DXGI_ALPHA_MODE_PREMULTIPLIED, &m_backgroundLayer.surface);
         if (FAILED(hr)) return hr;
+        m_backgroundLayer.allocatedWidth = allocW;
+        m_backgroundLayer.allocatedHeight = allocH;
         m_backgroundLayer.visual->SetContent(m_backgroundLayer.surface.Get());
-        m_backgroundLayer.width = w;
-        m_backgroundLayer.height = h;
     }
+    m_backgroundLayer.width = w;
+    m_backgroundLayer.height = h;
 
     // 2. Clear and Render
     ComPtr<IDXGISurface> dxgiSurface;
