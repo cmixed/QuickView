@@ -1699,8 +1699,9 @@ void SettingsOverlay::BuildMenu() {
     SettingsItem itemLockWindow = { AppStrings::Settings_Label_LockWindow, OptionType::Toggle, &g_config.LockWindowSize };
     itemLockWindow.tooltipText = AppStrings::Settings_Tooltip_LockWindow;
     itemLockWindow.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
-        g_runtime.LockWindowSize = g_config.LockWindowSize;
-        g_toolbar.SetLockState(g_runtime.LockWindowSize);
+        extern void SetLockWindowSize(HWND hwnd, bool locked);
+        extern HWND g_mainHwnd;
+        SetLockWindowSize(g_mainHwnd, g_config.LockWindowSize);
         if (!g_config.LockWindowSize) {
             g_config.RememberLastWindowSizeAndPosition = false;
             if (g_config.GalleryKeepVisibleOnThumbnailClick) {
@@ -1727,8 +1728,9 @@ void SettingsOverlay::BuildMenu() {
     itemRememberWindow.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
         if (g_config.RememberLastWindowSizeAndPosition) {
             g_config.LockWindowSize = true;
-            g_runtime.LockWindowSize = true;
-            g_toolbar.SetLockState(true);
+            extern void SetLockWindowSize(HWND hwnd, bool locked);
+            extern HWND g_mainHwnd;
+            SetLockWindowSize(g_mainHwnd, true);
         }
         SaveConfig();
     };
@@ -2018,8 +2020,9 @@ void SettingsOverlay::BuildMenu() {
         itemKeepVisible.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
             if (g_config.GalleryKeepVisibleOnThumbnailClick) {
                 g_config.LockWindowSize = true;
-                g_runtime.LockWindowSize = true;
-                g_toolbar.SetLockState(true);
+                extern void SetLockWindowSize(HWND hwnd, bool locked);
+                extern HWND g_mainHwnd;
+                SetLockWindowSize(g_mainHwnd, true);
                 g_config.KeepWindowSizeOnNav = true;
                 if (overlay) {
                     overlay->BuildMenu();

@@ -867,11 +867,16 @@ HRESULT CompositionEngine::CreateLayerSurface(UILayer layer, UINT width, UINT he
         return S_OK;
     }
 
-    // Step allocation with 25% headroom and 256-pixel alignment
-    UINT allocW = std::max(width, (data.allocatedWidth * 5) / 4);
-    allocW = (allocW + 255) & ~255;
-    UINT allocH = std::max(height, (data.allocatedHeight * 5) / 4);
-    allocH = (allocH + 255) & ~255;
+    // Cold start / initial allocation: allocate exact dimensions to minimize memory footprint.
+    // Dynamic resize: step allocation with 25% headroom and 256-pixel alignment to prevent frequent reallocations.
+    UINT allocW = width;
+    UINT allocH = height;
+    if (data.allocatedWidth > 0) {
+        allocW = std::max(width, (data.allocatedWidth * 5) / 4);
+        allocW = (allocW + 255) & ~255;
+        allocH = std::max(height, (data.allocatedHeight * 5) / 4);
+        allocH = (allocH + 255) & ~255;
+    }
 
     data.surface.Reset();
     
@@ -898,10 +903,14 @@ HRESULT CompositionEngine::CreateAllSurfaces(UINT width, UINT height) {
 
     // Zero-Flicker: Reuse background surface if allocated capacity is sufficient
     if (!m_backgroundLayer.surface || m_backgroundLayer.allocatedWidth < width || m_backgroundLayer.allocatedHeight < height) {
-        UINT allocW = std::max(width, (m_backgroundLayer.allocatedWidth * 5) / 4);
-        allocW = (allocW + 255) & ~255;
-        UINT allocH = std::max(height, (m_backgroundLayer.allocatedHeight * 5) / 4);
-        allocH = (allocH + 255) & ~255;
+        UINT allocW = width;
+        UINT allocH = height;
+        if (m_backgroundLayer.allocatedWidth > 0) {
+            allocW = std::max(width, (m_backgroundLayer.allocatedWidth * 5) / 4);
+            allocW = (allocW + 255) & ~255;
+            allocH = std::max(height, (m_backgroundLayer.allocatedHeight * 5) / 4);
+            allocH = (allocH + 255) & ~255;
+        }
 
         m_backgroundLayer.surface.Reset();
         HRESULT hr = m_device->CreateSurface(allocW, allocH, kUiSurfaceFormat, DXGI_ALPHA_MODE_PREMULTIPLIED, &m_backgroundLayer.surface);
@@ -1327,10 +1336,14 @@ HRESULT CompositionEngine::UpdateBackground(float width, float height, const D2D
     if (!needsRedraw) return S_OK;
 
     if (!m_backgroundLayer.surface || m_backgroundLayer.allocatedWidth < w || m_backgroundLayer.allocatedHeight < h) {
-        UINT allocW = std::max(w, (m_backgroundLayer.allocatedWidth * 5) / 4);
-        allocW = (allocW + 255) & ~255;
-        UINT allocH = std::max(h, (m_backgroundLayer.allocatedHeight * 5) / 4);
-        allocH = (allocH + 255) & ~255;
+        UINT allocW = (UINT)w;
+        UINT allocH = (UINT)h;
+        if (m_backgroundLayer.allocatedWidth > 0) {
+            allocW = std::max((UINT)w, (m_backgroundLayer.allocatedWidth * 5) / 4);
+            allocW = (allocW + 255) & ~255;
+            allocH = std::max((UINT)h, (m_backgroundLayer.allocatedHeight * 5) / 4);
+            allocH = (allocH + 255) & ~255;
+        }
 
         m_backgroundLayer.surface.Reset();
         HRESULT hr = m_device->CreateSurface(allocW, allocH, kUiSurfaceFormat, DXGI_ALPHA_MODE_PREMULTIPLIED, &m_backgroundLayer.surface);

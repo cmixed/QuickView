@@ -866,6 +866,7 @@ D2D1_SIZE_F GetVisualImageSize();
 VisualState GetVisualState();
 static float ComputeBaseFitScaleForVisual(const VisualState& vs, float winW, float winH);
 static size_t CountWebContentFilesInNavigator();
+void SetLockWindowSize(HWND hwnd, bool locked);
 
 
 void ApplyFullScreenZoomMode(HWND hwnd) {
@@ -5631,12 +5632,6 @@ static void ClampPanForViewport(const VisualState& vs, float winW, float winH, f
     if (vs.VisualSize.width <= 0.0f || vs.VisualSize.height <= 0.0f) return;
     if (winW <= 0.0f || winH <= 0.0f) return;
 
-    // In adaptive window resize mode, the window fits the image and Pan is precisely
-    // managed by PerformSmartZoom anchor tracking. Do not clamp or zero it out prematurely.
-    if (!g_runtime.LockWindowSize && !IsZoomed(g_mainHwnd) && !g_isFullScreen) {
-        return;
-    }
-
     const float scaledW = vs.VisualSize.width * targetZoom;
     const float scaledH = vs.VisualSize.height * targetZoom;
 
@@ -8287,6 +8282,41 @@ __declspec(noinline) static bool IsMouseOverUI(HWND hwnd, int x, int y) {
     if (HitTestEdgeNavZone(hwnd, pt, winW, winH) != 0) return true;
 
     return false;
+}
+
+void SetLockWindowSize(HWND hwnd, bool locked) {
+    if (g_runtime.LockWindowSize == locked) return;
+
+    if (!GetPaneContext(PaneSlot::Primary).resource) {
+        g_runtime.LockWindowSize = locked;
+        g_toolbar.SetLockState(locked);
+        g_osd.Show(hwnd, locked ? AppStrings::OSD_WindowLocked : AppStrings::OSD_WindowUnlocked, false);
+        RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
+        return;
+    }
+
+    RECT rcClient{};
+    GetClientRect(hwnd, &rcClient);
+    const float winW = (float)rcClient.right;
+    const float winH = (float)rcClient.bottom;
+    const float galleryH = (g_gallery.IsPinned() && g_gallery.IsVisible()) ? g_gallery.GetVisualHeight(winH) : 0.0f;
+    float effWinH = winH - galleryH;
+    if (effWinH < 1.0f) effWinH = 1.0f;
+
+    const VisualState vs = GetVisualState();
+    const float currentTotalScale = GetCurrentTotalScale(hwnd);
+
+    g_runtime.LockWindowSize = locked;
+    g_toolbar.SetLockState(locked);
+    g_osd.Show(hwnd, locked ? AppStrings::OSD_WindowLocked : AppStrings::OSD_WindowUnlocked, false);
+
+    const float newBaseFit = ComputeBaseFitScaleForVisual(vs, winW, effWinH);
+    if (newBaseFit > 0.0001f) {
+        GetPaneContext(PaneSlot::Primary).view.Zoom = currentTotalScale / newBaseFit;
+    }
+
+    SyncDCompState(hwnd, winW, winH, false);
+    RequestRepaint(PaintLayer::All);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -13573,10 +13603,7 @@ SKIP_EDGE_NAV:;
             break;
         }
         case IDM_LOCK_WINDOW_SIZE: {
-            g_runtime.LockWindowSize = !g_runtime.LockWindowSize;
-            g_toolbar.SetLockState(g_runtime.LockWindowSize);
-            g_osd.Show(hwnd, g_runtime.LockWindowSize ? AppStrings::OSD_WindowLocked : AppStrings::OSD_WindowUnlocked, false);
-            RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
+            SetLockWindowSize(hwnd, !g_runtime.LockWindowSize);
             break;
         }
         case IDM_SHOW_INFO_PANEL: {
@@ -16450,7 +16477,6 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
     const float sourceDisplayPanX = AppContext::GetInstance().SmoothZoom.Active ? AppContext::GetInstance().SmoothZoom.CurrentPanX : GetPaneContext(PaneSlot::Primary).view.PanX;
     const float sourceDisplayPanY = AppContext::GetInstance().SmoothZoom.Active ? AppContext::GetInstance().SmoothZoom.CurrentPanY : GetPaneContext(PaneSlot::Primary).view.PanY;
     const bool useSmoothZoomAnimation = animateDisplay && !UseSvgViewportRendering(GetPaneContext(PaneSlot::Primary).resource);
-    const POINT* effectiveAnchorPt = (centerPt && g_config.MouseAnchoredWindowZoom) ? centerPt : nullptr;
 
     // [Fix] Do not trigger auto-lock resize if we're just looking at the skeleton
     if (g_isLoading && imgW <= 16 && imgH <= 16) {
@@ -16466,8 +16492,6 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          GetWindowRect(hwnd, &rcWin);
          POINT ptOldClientOrigin = { rcCurrentClient.left, rcCurrentClient.top };
          ClientToScreen(hwnd, &ptOldClientOrigin);
-         const float oldCenterScreenX = (float)ptOldClientOrigin.x + currentWinW * 0.5f;
-         const float oldCenterScreenY = (float)ptOldClientOrigin.y + currentWinH * 0.5f;
 
          // [Asymmetric Screen Growth Expansion]
          // Allow window to grow to the full dimensions of the monitor workspace,
@@ -16488,10 +16512,12 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          // Cap proportionally when the target window fits the full workspace rectangle.
          float maxTargetW = (float)maxW;
          float maxTargetH = (float)maxH;
+         bool isWindowCapped = false;
          if ((float)targetW > maxTargetW || (float)targetH > maxTargetH) {
              float scaleCap = (std::min)(maxTargetW / (float)targetW, maxTargetH / (float)targetH);
              targetW = (int)std::lround((float)targetW * scaleCap);
              targetH = (int)std::lround((float)targetH * scaleCap);
+             isWindowCapped = true;
          }
 
          if (targetW < (int)std::lround(GetMinWindowWidth())) targetW = (int)std::lround(GetMinWindowWidth());
@@ -16509,11 +16535,9 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          const POINT* windowAnchor = (g_config.MouseAnchoredWindowZoom ? centerPt : nullptr);
          RECT targetRect = ExpandWindowRectToTargetWithinBounds(rcWin, targetW, targetH, bounds, windowAnchor);
 
-         // 3. Compute exact new client center in screen coordinates (accounting for borders)
+         // 3. Compute client border offsets
          const int borderLeft = ptOldClientOrigin.x - rcWin.left;
          const int borderTop = ptOldClientOrigin.y - rcWin.top;
-         const float newCenterScreenX = (float)targetRect.left + (float)borderLeft + (float)targetW * 0.5f;
-         const float newCenterScreenY = (float)targetRect.top + (float)borderTop + (float)targetH * 0.5f;
 
          float oldZoom = (AppContext::GetInstance().SmoothWindowZoom.active) ? AppContext::GetInstance().SmoothWindowZoom.targetZoom : GetPaneContext(PaneSlot::Primary).view.Zoom;
          if (oldZoom < 0.0001f) oldZoom = 0.0001f;
@@ -16521,20 +16545,19 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
 
          float startPanX = GetPaneContext(PaneSlot::Primary).view.PanX;
          float startPanY = GetPaneContext(PaneSlot::Primary).view.PanY;
-         float targetPanX = startPanX;
-         float targetPanY = startPanY;
+         float targetPanX = 0.0f;
+         float targetPanY = 0.0f;
 
-         if (windowAnchor) {
-             // Exact mouse anchored zoom formula across window translation:
-             const float dx_old = (float)windowAnchor->x - oldCenterScreenX;
-             const float dy_old = (float)windowAnchor->y - (oldCenterScreenY + galleryH * 0.5f);
-             const float dx_new = (float)windowAnchor->x - newCenterScreenX;
-             const float dy_new = (float)windowAnchor->y - (newCenterScreenY + galleryH * 0.5f);
-
-             targetPanX = startPanX * zoomRatio + (dx_new - dx_old * zoomRatio);
-             targetPanY = startPanY * zoomRatio + (dy_new - dy_old * zoomRatio);
+         if (isWindowCapped && windowAnchor) {
+             // Window is capped at screen bounds; hardware zoom takes over internally around mouse anchor
+             const float clientMouseX = (float)windowAnchor->x - ((float)targetRect.left + (float)borderLeft);
+             const float clientMouseY = (float)windowAnchor->y - ((float)targetRect.top + (float)borderTop);
+             const float mouseRelX = clientMouseX - (float)targetW * 0.5f;
+             const float mouseRelY = clientMouseY - (float)effFinalWinH * 0.5f;
+             targetPanX = startPanX * zoomRatio + mouseRelX * (1.0f - zoomRatio);
+             targetPanY = startPanY * zoomRatio + mouseRelY * (1.0f - zoomRatio);
          } else {
-             // Center zoom: in adaptive window mode, image fits the window client area symmetrically
+             // Window adapts smoothly to image dimensions; image fills the client area symmetrically
              targetPanX = 0.0f;
              targetPanY = 0.0f;
          }
@@ -16589,19 +16612,18 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          float galleryH = currentGalleryH;
          float effWinH = effCurrentWinH;
          
-         float fitScale = std::min(winW / imgW, effWinH / imgH);
-         if (!g_config.UpscaleSmallImagesWhenLocked && fitScale > 1.0f) {
-             fitScale = 1.0f;
-         }
+         const float baseFit = ComputeBaseFitScaleForVisual(vs, winW, effWinH);
+         if (baseFit <= 0.0001f) return;
          
          float oldZoom = (AppContext::GetInstance().SmoothWindowZoom.active) ? AppContext::GetInstance().SmoothWindowZoom.targetZoom : GetPaneContext(PaneSlot::Primary).view.Zoom;
          if (oldZoom < 0.0001f) oldZoom = 0.0001f;
-         float newZoom = newTotalScale / fitScale;
+         float newZoom = newTotalScale / baseFit;
          
          // Apply Zoom Ratio to Pan if Center Point Provided
-         if (effectiveAnchorPt) {
+         const POINT* viewportAnchor = centerPt;
+         if (viewportAnchor) {
              float zoomRatio = newZoom / oldZoom;
-             POINT pt = *effectiveAnchorPt;
+             POINT pt = *viewportAnchor;
              ScreenToClient(hwnd, &pt);
              
              float mouseX = (float)pt.x;
@@ -16632,7 +16654,7 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
                                       newTotalScale,
                                       GetPaneContext(PaneSlot::Primary).view.PanX,
                                       GetPaneContext(PaneSlot::Primary).view.PanY,
-                                      effectiveAnchorPt,
+                                      viewportAnchor,
                                       false,
                                       nullptr);
                   if (AppContext::GetInstance().ZoomAnimCtrl->Tick(hwnd)) {
@@ -17299,6 +17321,11 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
         return true;
 
     case HotkeyAction::ZoomIn:
+        if (IsCompareModeActive()) {
+            float mult = ctrl ? 1.05f : 1.10f;
+            ApplyCompareZoomWithMultiplier(hwnd, AppContext::GetInstance().Compare.activePane, mult, nullptr, AppContext::GetInstance().Compare.syncZoom);
+            return true;
+        }
         if (GetPaneContext(PaneSlot::Primary).resource) {
             float newTotalScale = CalculateTargetZoom(hwnd, 1.0f, ctrl);
             PerformSmartZoom(hwnd, newTotalScale, nullptr, false, false);
@@ -17309,6 +17336,10 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
         return true;
 
     case HotkeyAction::ZoomInFine:
+        if (IsCompareModeActive()) {
+            ApplyCompareZoomWithMultiplier(hwnd, AppContext::GetInstance().Compare.activePane, 1.01f, nullptr, AppContext::GetInstance().Compare.syncZoom);
+            return true;
+        }
         if (GetPaneContext(PaneSlot::Primary).resource) {
             float newTotalScale = CalculateTargetZoom(hwnd, 1.0f, true);
             PerformSmartZoom(hwnd, newTotalScale, nullptr, false, false);
@@ -17319,6 +17350,11 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
         return true;
 
     case HotkeyAction::ZoomOut:
+        if (IsCompareModeActive()) {
+            float mult = ctrl ? (1.0f / 1.05f) : (1.0f / 1.10f);
+            ApplyCompareZoomWithMultiplier(hwnd, AppContext::GetInstance().Compare.activePane, mult, nullptr, AppContext::GetInstance().Compare.syncZoom);
+            return true;
+        }
         if (GetPaneContext(PaneSlot::Primary).resource) {
             float newTotalScale = CalculateTargetZoom(hwnd, -1.0f, ctrl);
             PerformSmartZoom(hwnd, newTotalScale, nullptr, false, false);
@@ -17329,6 +17365,10 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
         return true;
 
     case HotkeyAction::ZoomOutFine:
+        if (IsCompareModeActive()) {
+            ApplyCompareZoomWithMultiplier(hwnd, AppContext::GetInstance().Compare.activePane, 1.0f / 1.01f, nullptr, AppContext::GetInstance().Compare.syncZoom);
+            return true;
+        }
         if (GetPaneContext(PaneSlot::Primary).resource) {
             float newTotalScale = CalculateTargetZoom(hwnd, -1.0f, true);
             PerformSmartZoom(hwnd, newTotalScale, nullptr, false, false);
