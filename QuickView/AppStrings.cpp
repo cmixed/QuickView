@@ -351,7 +351,6 @@ const wchar_t *Settings_Label_OpenFullScreenMode = nullptr;
 const wchar_t *Settings_Label_FullScreenZoomMode = nullptr;
 const wchar_t *Settings_Option_FitScreen = nullptr;
 const wchar_t *Settings_Label_InvertWheel = nullptr;
-const wchar_t *Settings_Label_ZoomSnapDamping = nullptr;
 const wchar_t *Settings_Label_MouseAnchorZoom = nullptr;
 const wchar_t *Settings_Label_RightButtonDragZoom = nullptr;
 const wchar_t *Settings_Label_WheelZoomSpeed = nullptr;
@@ -981,7 +980,6 @@ struct LanguageTable {
     const wchar_t *Settings_Label_FullScreenZoomMode;
     const wchar_t *Settings_Option_FitScreen;
     const wchar_t *Settings_Label_InvertWheel;
-    const wchar_t *Settings_Label_ZoomSnapDamping;
     const wchar_t *Settings_Label_MouseAnchorZoom;
     const wchar_t *Settings_Label_RightButtonDragZoom;
     const wchar_t *Settings_Label_WheelZoomSpeed;
@@ -1611,7 +1609,6 @@ static const LanguageTable Table_EN = {
     L"Fullscreen Zoom Mode", // Settings_Label_FullScreenZoomMode
     L"Fit to Screen", // Settings_Option_FitScreen
     L"Invert Wheel", // Settings_Label_InvertWheel
-    L"Zoom 100% Snap Damping", // Settings_Label_ZoomSnapDamping
     L"Mouse-Anchored Window Zoom", // Settings_Label_MouseAnchorZoom
     L"Right Button Drag Zoom", // Settings_Label_RightButtonDragZoom
     L"Wheel Zoom Speed", // Settings_Label_WheelZoomSpeed
@@ -2241,7 +2238,6 @@ static const LanguageTable Table_CN = {
     L"全屏时缩放模式", // Settings_Label_FullScreenZoomMode
     L"适应屏幕", // Settings_Option_FitScreen
     L"反转滚轮", // Settings_Label_InvertWheel
-    L"缩放 100% 吸附阻尼", // Settings_Label_ZoomSnapDamping
     L"窗口缩放以鼠标为中线", // Settings_Label_MouseAnchorZoom
     L"右键拖动缩放", // Settings_Label_RightButtonDragZoom
     L"滚轮缩放速度", // Settings_Label_WheelZoomSpeed
@@ -2871,7 +2867,6 @@ static const LanguageTable Table_TW = {
     L"全螢幕縮放模式", // Settings_Label_FullScreenZoomMode
     L"適應螢幕", // Settings_Option_FitScreen
     L"反轉滾輪", // Settings_Label_InvertWheel
-    L"縮放 100% 吸附阻尼", // Settings_Label_ZoomSnapDamping
     L"視窗縮放以滑鼠為中線", // Settings_Label_MouseAnchorZoom
     L"右鍵拖曳縮放", // Settings_Label_RightButtonDragZoom
     L"滾輪縮放速度", // Settings_Label_WheelZoomSpeed
@@ -3501,7 +3496,6 @@ static const LanguageTable Table_JA = {
     L"全画面ズームモード", // Settings_Label_FullScreenZoomMode
     L"画面に合わせる", // Settings_Option_FitScreen
     L"ホイールの回転を反転", // Settings_Label_InvertWheel
-    L"100% ズーム吸着ダンピング", // Settings_Label_ZoomSnapDamping
     L"マウス位置基準のウィンドウズーム", // Settings_Label_MouseAnchorZoom
     L"右ボタンドラッグでズーム", // Settings_Label_RightButtonDragZoom
     L"ホイールズーム速度", // Settings_Label_WheelZoomSpeed
@@ -4131,7 +4125,6 @@ static const LanguageTable Table_RU = {
     L"Масштаб в полноэкранном режиме", // Settings_Label_FullScreenZoomMode
     L"Вписывать", // Settings_Option_FitScreen
     L"Инвертировать действие колёсика", // Settings_Label_InvertWheel
-    L"Задержка привязки зума (100%)", // Settings_Label_ZoomSnapDamping
     L"Масштабировать окно от позиции мыши", // Settings_Label_MouseAnchorZoom
     L"Масштаб правой кнопкой мыши", // Settings_Label_RightButtonDragZoom
     L"Скорость зума колёсиком", // Settings_Label_WheelZoomSpeed
@@ -4761,7 +4754,6 @@ static const LanguageTable Table_DE = {
     L"Vollbild-Zoom-Modus", // Settings_Label_FullScreenZoomMode
     L"An Bildschirm anpassen", // Settings_Option_FitScreen
     L"Mausrad invertieren", // Settings_Label_InvertWheel
-    L"Zoom 100% Einrast-Dämpfung", // Settings_Label_ZoomSnapDamping
     L"Fensterzoom am Mauszeiger ausrichten", // Settings_Label_MouseAnchorZoom
     L"Zoom mit Rechtsziehen", // Settings_Label_RightButtonDragZoom
     L"Mausrad-Zoomgeschwindigkeit", // Settings_Label_WheelZoomSpeed
@@ -5391,7 +5383,6 @@ static const LanguageTable Table_ES = {
     L"Modo de zoom a pantalla completa", // Settings_Label_FullScreenZoomMode
     L"Ajustar a pantalla", // Settings_Option_FitScreen
     L"Invertir rueda", // Settings_Label_InvertWheel
-    L"Amortiguación de ajuste 100%", // Settings_Label_ZoomSnapDamping
     L"Zoom de ventana anclado al raton", // Settings_Label_MouseAnchorZoom
     L"Zoom con arrastre derecho", // Settings_Label_RightButtonDragZoom
     L"Velocidad de zoom con rueda", // Settings_Label_WheelZoomSpeed
@@ -6021,7 +6012,6 @@ static const LanguageTable Table_FR = {
     L"Fullscreen Zoom Mode", // Settings_Label_FullScreenZoomMode
     L"Fit to Screen", // Settings_Option_FitScreen
     L"Invert Wheel", // Settings_Label_InvertWheel
-    L"Zoom 100% Snap Damping", // Settings_Label_ZoomSnapDamping
     L"Mouse-Anchored Window Zoom", // Settings_Label_MouseAnchorZoom
     L"Right Button Drag Zoom", // Settings_Label_RightButtonDragZoom
     L"Wheel Zoom Speed", // Settings_Label_WheelZoomSpeed
@@ -6656,7 +6646,6 @@ void Apply(const LanguageTable& t) {
   Settings_Label_FullScreenZoomMode = t.Settings_Label_FullScreenZoomMode;
   Settings_Option_FitScreen = t.Settings_Option_FitScreen;
   Settings_Label_InvertWheel = t.Settings_Label_InvertWheel;
-  Settings_Label_ZoomSnapDamping = t.Settings_Label_ZoomSnapDamping;
   Settings_Label_MouseAnchorZoom = t.Settings_Label_MouseAnchorZoom;
   Settings_Label_RightButtonDragZoom = t.Settings_Label_RightButtonDragZoom;
   Settings_Label_WheelZoomSpeed = t.Settings_Label_WheelZoomSpeed;

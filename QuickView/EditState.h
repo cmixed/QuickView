@@ -670,8 +670,6 @@ struct AppConfig {
     int ThumbWheelMode = 0;             // 0=Navigate, 1=Zoom
     int DoubleClickMode = 0;            // 0=Smart, 1=WheelMode1, 2=WheelMode2, 3=None
     bool InvertXButton = false;          // Invert mouse forward/back buttons for navigation
-    // [v3.2.2] Zoom Snap Damping (Time Lock)
-    bool EnableZoomSnapDamping = true;
     bool MouseAnchoredWindowZoom = false; // Expand window toward the mouse position during zoom
     bool RightButtonDragZoom = true;      // Hold right button and drag vertically to zoom
     float WheelZoomSpeed = 10.0f;         // 5.0f to 50.0f (percentage)

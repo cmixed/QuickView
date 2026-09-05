@@ -2467,10 +2467,12 @@ static D2D1_SIZE_U ComputeDesiredBitmapSurfaceSize(UINT winW, UINT winH, const I
         }
     }
 
-    // [Zero-Allocation Architecture]
-    // For standard images (<= 8192px), allocate 1:1 native pixel resolution immediately on load.
-    // DComp handles GPU downscaling and upscaling with zero overhead. This eliminates the mid-zoom
+    // [Screen-Max Surface Pool Architecture]
+    // For standard images (<= 4096px, e.g. 1080p/2K/4K photos), allocate 1:1 native resolution
+    // immediately on load. DComp handles GPU scaling with zero overhead. This eliminates all
     // dynamic surface recreation and SwapLayers flicker when zooming across 100%.
+    // For extreme oversized images (e.g. 48MP/100MP photos > 4096px), cap the initial surface to 4K
+    // virtual screen resolution (3840x2160) so VRAM consumption is strictly bounded (<32MB instead of 200MB+).
     float desiredScale = 1.0f;
     if (res.srScale > 1.01f) {
         desiredScale = res.srScale;
@@ -2481,14 +2483,21 @@ static D2D1_SIZE_U ComputeDesiredBitmapSurfaceSize(UINT winW, UINT winH, const I
     float desiredW = originalW * desiredScale;
     float desiredH = originalH * desiredScale;
 
-    // [Fix] REMOVED padding to winW/H to avoid "baking" background borders in maximized/fullscreen mode.
-    // The surface dimensions now strictly follow the image's aspect ratio.
+    // 4K virtual screen bounding box for giant images
+    constexpr float kMaxInitialSurfaceDimension = 4096.0f;
+    if (desiredW > kMaxInitialSurfaceDimension || desiredH > kMaxInitialSurfaceDimension) {
+        UINT screenW = static_cast<UINT>(GetSystemMetrics(SM_CXVIRTUALSCREEN));
+        UINT screenH = static_cast<UINT>(GetSystemMetrics(SM_CYVIRTUALSCREEN));
+        float maxBoundW = (screenW > 0) ? (float)screenW : 3840.0f;
+        float maxBoundH = (screenH > 0) ? (float)screenH : 2160.0f;
+        maxBoundW = (std::min)(maxBoundW, (float)g_maxBitmapSurfaceSize);
+        maxBoundH = (std::min)(maxBoundH, (float)g_maxBitmapSurfaceSize);
 
-    if (desiredW > (float)g_maxBitmapSurfaceSize || desiredH > (float)g_maxBitmapSurfaceSize) {
-        float ratio = std::min((float)g_maxBitmapSurfaceSize / desiredW,
-                               (float)g_maxBitmapSurfaceSize / desiredH);
-        desiredW *= ratio;
-        desiredH *= ratio;
+        if (desiredW > maxBoundW || desiredH > maxBoundH) {
+            float ratio = (std::min)(maxBoundW / desiredW, maxBoundH / desiredH);
+            desiredW *= ratio;
+            desiredH *= ratio;
+        }
     }
 
     UINT outW = (UINT)std::max(1.0f, std::round(desiredW));
@@ -4134,23 +4143,25 @@ static float CalculateTargetZoom(HWND hwnd, float delta, bool isFineInterval = f
     
     float newTotalScale = currentTotalScale * multiplier;
 
-    // 6. [Logic] Magnetic Snap to 100%
+    // 6. [Logic] Magnetic Snap to 100% with Zero-Flicker Hysteresis Resistance
     float snapTarget = 1.0f;
     // Calculate true 100% scale relative to current surface
     if (GetPaneContext(PaneSlot::Primary).metadata.Width > 0 && imageWidth > 0) {
-            VisualState vsSnap = GetVisualState();
-            float origW = (float)(vsSnap.IsRotated90 ? GetPaneContext(PaneSlot::Primary).metadata.Height : GetPaneContext(PaneSlot::Primary).metadata.Width);
-            if (origW > 0) snapTarget = origW / imageWidth;
+        VisualState vsSnap = GetVisualState();
+        float origW = (float)(vsSnap.IsRotated90 ? GetPaneContext(PaneSlot::Primary).metadata.Height : GetPaneContext(PaneSlot::Primary).metadata.Width);
+        if (origW > 0) snapTarget = origW / imageWidth;
     }
 
-    bool isAlreadyAt100 = (abs(currentTotalScale - snapTarget) < 0.001f);
-
     // [Refinement] Disable Snap if Fine Interval is requested (allows precise 1% control)
-    if (!isAlreadyAt100 && !isFineInterval) {
-        // Check for crossing snapTarget
-        if ((currentTotalScale < snapTarget && newTotalScale > snapTarget) || 
-            (currentTotalScale > snapTarget && newTotalScale < snapTarget)) {
-            newTotalScale = snapTarget;
+    if (!isFineInterval) {
+        bool isAlreadyAt100 = (std::abs(currentTotalScale - snapTarget) < 0.001f);
+        if (!isAlreadyAt100) {
+            // Check for crossing or approaching snapTarget -> Snap cleanly into the 100% well
+            if ((currentTotalScale < snapTarget && newTotalScale > snapTarget) || 
+                (currentTotalScale > snapTarget && newTotalScale < snapTarget) ||
+                (std::abs(newTotalScale - snapTarget) < 0.025f * snapTarget)) {
+                newTotalScale = snapTarget;
+            }
         }
     }
     
@@ -4873,7 +4884,6 @@ void SaveConfig() {
     WriteConfigInt(L"Controls", L"ThumbWheelMode", g_config.ThumbWheelMode, iniPath.c_str());
     WriteConfigInt(L"Controls", L"DoubleClickMode", g_config.DoubleClickMode, iniPath.c_str());
     WriteConfigBool(L"Controls", L"InvertXButton", g_config.InvertXButton, iniPath.c_str());
-    WriteConfigBool(L"Controls", L"EnableZoomSnapDamping", g_config.EnableZoomSnapDamping, iniPath.c_str());
     WriteConfigBool(L"Controls", L"MouseAnchoredWindowZoom", g_config.MouseAnchoredWindowZoom, iniPath.c_str());
     WriteConfigBool(L"Controls", L"RightButtonDragZoom", g_config.RightButtonDragZoom, iniPath.c_str());
     WriteConfigFloat(L"Controls", L"WheelZoomSpeed", g_config.WheelZoomSpeed, iniPath.c_str());
@@ -5206,7 +5216,6 @@ void LoadConfig() {
     g_config.DoubleClickMode = GetPrivateProfileIntW(L"Controls", L"DoubleClickMode", 0, iniPath.c_str());
     if (g_config.DoubleClickMode < 0 || g_config.DoubleClickMode > 3) g_config.DoubleClickMode = 0;
     g_config.InvertXButton = GetPrivateProfileIntW(L"Controls", L"InvertXButton", 0, iniPath.c_str()) != 0;
-    g_config.EnableZoomSnapDamping = GetPrivateProfileIntW(L"Controls", L"EnableZoomSnapDamping", 1, iniPath.c_str()) != 0;
     g_config.MouseAnchoredWindowZoom = GetPrivateProfileIntW(L"Controls", L"MouseAnchoredWindowZoom", 0, iniPath.c_str()) != 0;
     g_config.RightButtonDragZoom = GetPrivateProfileIntW(L"Controls", L"RightButtonDragZoom", 1, iniPath.c_str()) != 0;
     wchar_t buf[64];
@@ -5621,6 +5630,12 @@ void ClampPanForSlot(PaneSlot slot, float vpW, float vpH) {
 static void ClampPanForViewport(const VisualState& vs, float winW, float winH, float targetZoom) {
     if (vs.VisualSize.width <= 0.0f || vs.VisualSize.height <= 0.0f) return;
     if (winW <= 0.0f || winH <= 0.0f) return;
+
+    // In adaptive window resize mode, the window fits the image and Pan is precisely
+    // managed by PerformSmartZoom anchor tracking. Do not clamp or zero it out prematurely.
+    if (!g_runtime.LockWindowSize && !IsZoomed(g_mainHwnd) && !g_isFullScreen) {
+        return;
+    }
 
     const float scaledW = vs.VisualSize.width * targetZoom;
     const float scaledH = vs.VisualSize.height * targetZoom;
@@ -9288,7 +9303,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_SIZING: {
         // [Border Snap] Snap window rect to 100% image scale during edge drag
-        if (!g_config.EnableZoomSnapDamping) break;
         if (!GetPaneContext(PaneSlot::Primary).resource) break;
         if (s_maintainAbsoluteScale) break; // Don't interfere with manual zoom
 
@@ -16455,19 +16469,11 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          const float oldCenterScreenX = (float)ptOldClientOrigin.x + currentWinW * 0.5f;
          const float oldCenterScreenY = (float)ptOldClientOrigin.y + currentWinH * 0.5f;
 
-         // [Center-Radiated Symmetric Bounds]
-         // Bound window expansion strictly symmetrically around the current anchor/center to ensure
-         // the window touches the nearest monitor boundary and stops cleanly without any asymmetric
-         // single-side growth or center translation jitter.
-         float availNegX = (std::max)(0.0f, oldCenterScreenX - (float)bounds.left);
-         float availPosX = (std::max)(0.0f, (float)bounds.right - oldCenterScreenX);
-         float availNegY = (std::max)(0.0f, oldCenterScreenY - (float)bounds.top);
-         float availPosY = (std::max)(0.0f, (float)bounds.bottom - oldCenterScreenY);
-
-         int maxW = (int)std::lround(2.0f * (std::min)(availNegX, availPosX));
-         int maxH = (int)std::lround(2.0f * (std::min)(availNegY, availPosY));
-         if (maxW < (int)std::lround(GetMinWindowWidth())) maxW = (int)std::lround(GetMinWindowWidth());
-         if (maxH < (int)std::lround(GetMinWindowHeight())) maxH = (int)std::lround(GetMinWindowHeight());
+         // [Asymmetric Screen Growth Expansion]
+         // Allow window to grow to the full dimensions of the monitor workspace,
+         // naturally utilizing all remaining screen space (top, bottom, left, right).
+         int maxW = (bounds.right - bounds.left);
+         int maxH = (bounds.bottom - bounds.top);
          
          float galleryH = (g_gallery.IsPinned() && g_gallery.IsVisible()) ? g_gallery.GetVisualHeight(currentWinH) : 0.0f;
          int targetW = (int)std::lround(vs.VisualSize.width * newTotalScale);
@@ -16479,8 +16485,7 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          }
 
          // [Aspect-Preserving Screen Cap]
-         // If target window reaches the symmetric monitor bounds, cap proportionally to preserve aspect ratio.
-         // The window stops expanding, deltaCenter remains strictly 0, and DComp hardware zoom takes over seamlessly.
+         // Cap proportionally when the target window fits the full workspace rectangle.
          float maxTargetW = (float)maxW;
          float maxTargetH = (float)maxH;
          if ((float)targetW > maxTargetW || (float)targetH > maxTargetH) {
@@ -16510,10 +16515,6 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          const float newCenterScreenX = (float)targetRect.left + (float)borderLeft + (float)targetW * 0.5f;
          const float newCenterScreenY = (float)targetRect.top + (float)borderTop + (float)targetH * 0.5f;
 
-         // 4. Window client center translation delta in screen coordinates
-         const float deltaCenterX = newCenterScreenX - oldCenterScreenX;
-         const float deltaCenterY = newCenterScreenY - oldCenterScreenY;
-
          float oldZoom = (AppContext::GetInstance().SmoothWindowZoom.active) ? AppContext::GetInstance().SmoothWindowZoom.targetZoom : GetPaneContext(PaneSlot::Primary).view.Zoom;
          if (oldZoom < 0.0001f) oldZoom = 0.0001f;
          float zoomRatio = targetZoomState / oldZoom;
@@ -16533,9 +16534,9 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
              targetPanX = startPanX * zoomRatio + (dx_new - dx_old * zoomRatio);
              targetPanY = startPanY * zoomRatio + (dy_new - dy_old * zoomRatio);
          } else {
-             // Center zoom: compensate for window center movement so image center is rock-solid on screen
-             targetPanX = startPanX * zoomRatio - deltaCenterX;
-             targetPanY = startPanY * zoomRatio - deltaCenterY;
+             // Center zoom: in adaptive window mode, image fits the window client area symmetrically
+             targetPanX = 0.0f;
+             targetPanY = 0.0f;
          }
 
          if (useSmoothZoomAnimation && g_config.EnableSmoothScaling) {
