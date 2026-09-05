@@ -2467,10 +2467,14 @@ static D2D1_SIZE_U ComputeDesiredBitmapSurfaceSize(UINT winW, UINT winH, const I
         }
     }
 
-    float desiredScale = fitScale * GetPaneContext(PaneSlot::Primary).view.Zoom;
-    // [Quality Optimization] Allow surface expansion up to srScale for super-resolution textures
-    float qualityCap = std::max(1.0f, fitScale) * (res.srScale > 1.01f ? res.srScale : 1.0f);
-    if (desiredScale > qualityCap) desiredScale = qualityCap;
+    // [Zero-Allocation Architecture]
+    // For standard images (<= 8192px), allocate 1:1 native pixel resolution immediately on load.
+    // DComp handles GPU downscaling and upscaling with zero overhead. This eliminates the mid-zoom
+    // dynamic surface recreation and SwapLayers flicker when zooming across 100%.
+    float desiredScale = 1.0f;
+    if (res.srScale > 1.01f) {
+        desiredScale = res.srScale;
+    }
 
     if (!(desiredScale > 0.0f)) return D2D1::SizeU(0, 0);
 
@@ -16442,8 +16446,28 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
     if (canResizeConfig) {
          // --- Precise Geometric Window-Resize Zoom Path ---
          RECT bounds = GetWindowExpansionBounds(hwnd);
-         int maxW = (bounds.right - bounds.left);
-         int maxH = (bounds.bottom - bounds.top);
+
+         // 1. Get exact old client center in screen coordinates
+         RECT rcWin{};
+         GetWindowRect(hwnd, &rcWin);
+         POINT ptOldClientOrigin = { rcCurrentClient.left, rcCurrentClient.top };
+         ClientToScreen(hwnd, &ptOldClientOrigin);
+         const float oldCenterScreenX = (float)ptOldClientOrigin.x + currentWinW * 0.5f;
+         const float oldCenterScreenY = (float)ptOldClientOrigin.y + currentWinH * 0.5f;
+
+         // [Center-Radiated Symmetric Bounds]
+         // Bound window expansion strictly symmetrically around the current anchor/center to ensure
+         // the window touches the nearest monitor boundary and stops cleanly without any asymmetric
+         // single-side growth or center translation jitter.
+         float availNegX = (std::max)(0.0f, oldCenterScreenX - (float)bounds.left);
+         float availPosX = (std::max)(0.0f, (float)bounds.right - oldCenterScreenX);
+         float availNegY = (std::max)(0.0f, oldCenterScreenY - (float)bounds.top);
+         float availPosY = (std::max)(0.0f, (float)bounds.bottom - oldCenterScreenY);
+
+         int maxW = (int)std::lround(2.0f * (std::min)(availNegX, availPosX));
+         int maxH = (int)std::lround(2.0f * (std::min)(availNegY, availPosY));
+         if (maxW < (int)std::lround(GetMinWindowWidth())) maxW = (int)std::lround(GetMinWindowWidth());
+         if (maxH < (int)std::lround(GetMinWindowHeight())) maxH = (int)std::lround(GetMinWindowHeight());
          
          float galleryH = (g_gallery.IsPinned() && g_gallery.IsVisible()) ? g_gallery.GetVisualHeight(currentWinH) : 0.0f;
          int targetW = (int)std::lround(vs.VisualSize.width * newTotalScale);
@@ -16455,8 +16479,8 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          }
 
          // [Aspect-Preserving Screen Cap]
-         // If target window exceeds monitor workspace, cap proportionally to prevent aspect ratio distortion
-         // and avoid window border collision jitter. The window stops expanding, and DComp hardware zoom takes over seamlessly.
+         // If target window reaches the symmetric monitor bounds, cap proportionally to preserve aspect ratio.
+         // The window stops expanding, deltaCenter remains strictly 0, and DComp hardware zoom takes over seamlessly.
          float maxTargetW = (float)maxW;
          float maxTargetH = (float)maxH;
          if ((float)targetW > maxTargetW || (float)targetH > maxTargetH) {
@@ -16475,14 +16499,6 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
              baseFit_next = 1.0f;
          }
          float targetZoomState = (baseFit_next > 0.0001f) ? (newTotalScale / baseFit_next) : 1.0f;
-
-         // 1. Get exact old client center in screen coordinates
-         RECT rcWin{};
-         GetWindowRect(hwnd, &rcWin);
-         POINT ptOldClientOrigin = { rcCurrentClient.left, rcCurrentClient.top };
-         ClientToScreen(hwnd, &ptOldClientOrigin);
-         const float oldCenterScreenX = (float)ptOldClientOrigin.x + currentWinW * 0.5f;
-         const float oldCenterScreenY = (float)ptOldClientOrigin.y + currentWinH * 0.5f;
 
          // 2. Compute target window outer rect
          const POINT* windowAnchor = (g_config.MouseAnchoredWindowZoom ? centerPt : nullptr);
@@ -16509,8 +16525,6 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
 
          if (windowAnchor) {
              // Exact mouse anchored zoom formula across window translation:
-             // D_old = M - C_old, D_new = M - C_new
-             // targetPan = startPan * ratio + (D_new - ratio * D_old)
              const float dx_old = (float)windowAnchor->x - oldCenterScreenX;
              const float dy_old = (float)windowAnchor->y - (oldCenterScreenY + galleryH * 0.5f);
              const float dx_new = (float)windowAnchor->x - newCenterScreenX;
@@ -16536,6 +16550,7 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
                                    targetPanY,
                                    0.0f,
                                    50.0f);
+             RequestRepaint(PaintLayer::Dynamic | PaintLayer::Image | PaintLayer::Static);
          } else {
              // Direct Mode - Snap to target immediately with atomic DComp barrier
              GetPaneContext(PaneSlot::Primary).view.Zoom = targetZoomState;
@@ -16566,7 +16581,6 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
 
              if (g_compEngine) g_compEngine->Commit();
          }
-         RequestRepaint(PaintLayer::Dynamic | PaintLayer::Image | PaintLayer::Static);
     } else {
          // --- Standard Zoom Path (Locked Window) ---
          float winW = currentWinW;
@@ -16625,6 +16639,7 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
                   } else {
                       KillTimer(hwnd, IDT_SMOOTH_ZOOM);
                   }
+                  RequestRepaint(PaintLayer::Dynamic | PaintLayer::Image | PaintLayer::Static);
               } else {
                   KillTimer(hwnd, IDT_SMOOTH_ZOOM);
                   AppContext::GetInstance().ZoomAnimCtrl->SyncToLogical(winW, effWinH, false);
@@ -16634,7 +16649,6 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
                   if (g_compEngine) g_compEngine->Commit();
               }
          }
-         RequestRepaint(PaintLayer::Dynamic | PaintLayer::Image | PaintLayer::Static);
     }
 
     RefreshSvgSurfaceAfterZoom(hwnd);
