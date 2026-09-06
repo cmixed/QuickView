@@ -811,8 +811,11 @@ void GalleryOverlay::Render(ID2D1DeviceContext *pDC, const D2D1_SIZE_F &size,
                 g_ratingStore.QueueRead(imgId, path, ratingRaw ? ratingRaw->path : std::wstring());
             }
             if (rating && rating->stars > 0) {
-                std::wstring stars;
-                for (int sIdx = 0; sIdx < rating->stars; ++sIdx) stars += L"\u2605";
+                static constexpr std::wstring_view SOLID_STARS[] = {
+                    L"", L"\u2605", L"\u2605\u2605", L"\u2605\u2605\u2605", L"\u2605\u2605\u2605\u2605", L"\u2605\u2605\u2605\u2605\u2605"
+                };
+                const int starCount = std::clamp(rating->stars, 1, 5);
+                const std::wstring_view stars = SOLID_STARS[starCount];
 
                 const float bw = (8.0f + 7.5f * (float)stars.length()) * g_uiScale;
                 const float bh = 15.0f * g_uiScale;
@@ -830,7 +833,7 @@ void GalleryOverlay::Render(ID2D1DeviceContext *pDC, const D2D1_SIZE_F &size,
                 // shout across a wall of thumbnails.
                 m_brushText->SetColor(D2D1::ColorF(D2D1::ColorF::White));
                 m_brushText->SetOpacity(m_transitionProgress * 0.95f);
-                pDC->DrawText(stars.c_str(), (UINT32)stars.length(), m_textFormatBadge.Get(), badge, m_brushText.Get());
+                pDC->DrawText(stars.data(), (UINT32)stars.length(), m_textFormatBadge.Get(), badge, m_brushText.Get());
                 m_brushText->SetColor(prevStarTxt);
                 m_brushText->SetOpacity(1.0f);
             }

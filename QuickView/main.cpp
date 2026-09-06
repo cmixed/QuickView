@@ -12137,6 +12137,13 @@ SKIP_EDGE_NAV:;
                     if (HandleHotkeyAction(hwnd, HotkeyAction::ZoomOut)) return 0;
                 }
             }
+            if (!ctrl && !shift && !alt) {
+                if (wParam >= '0' && wParam <= '5') {
+                    const auto rateAction = static_cast<HotkeyAction>(
+                        static_cast<size_t>(HotkeyAction::Rate0) + (wParam - '0'));
+                    if (HandleHotkeyAction(hwnd, rateAction)) return 0;
+                }
+            }
         }
 
         if (message == WM_SYSKEYDOWN) {
@@ -16401,17 +16408,16 @@ static void ApplyRatingToCurrentImage(HWND hwnd, int stars) {
     g_ratingStore.ApplyRatingOptimistic(FileNavigator::PathToImageID(path), stars, rendered, raw,
                                         /*isResident*/ true);
 
-    wchar_t osd[32];
-    if (stars > 0) {
-        std::wstring bar;
-        for (int i = 0; i < QuickView::Rating::MAX_STARS; ++i) {
-            bar += (i < stars) ? L"\u2605" : L"\u2606";
-        }
-        swprintf_s(osd, L"%s", bar.c_str());
-    } else {
-        swprintf_s(osd, L"%s", L"\u2606\u2606\u2606\u2606\u2606");
-    }
-    g_osd.Show(hwnd, osd, false);
+    static constexpr const wchar_t* OSD_STAR_BARS[] = {
+        L"\u2606\u2606\u2606\u2606\u2606",
+        L"\u2605\u2606\u2606\u2606\u2606",
+        L"\u2605\u2605\u2606\u2606\u2606",
+        L"\u2605\u2605\u2605\u2606\u2606",
+        L"\u2605\u2605\u2605\u2605\u2606",
+        L"\u2605\u2605\u2605\u2605\u2605"
+    };
+    const int clampedStars = std::clamp(stars, 0, 5);
+    g_osd.Show(hwnd, OSD_STAR_BARS[clampedStars], false);
 
     RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
     if (g_gallery.IsVisible()) RequestRepaint(PaintLayer::Gallery);

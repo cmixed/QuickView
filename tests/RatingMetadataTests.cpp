@@ -350,3 +350,14 @@ TEST(RatingMetadataTest, MinimalSidecarRoundTrips) {
         EXPECT_EQ(ParseXmpRating(xmp), stars);
     }
 }
+
+TEST(RatingMetadataTest, JpegShortApp1PayloadDoesNotUnderflow) {
+    // SOI + APP1 marker + segLength=5 (payloadLen=3 < 6) + "Exif\0" prefix match
+    const uint8_t shortPayload[] = {
+        0xFF, 0xD8,             // SOI
+        0xFF, 0xE1,             // APP1
+        0x00, 0x05,             // length = 5 (payloadLen = 3)
+        'E', 'x', 'i', 'f', 0, 0 // bytes matching "Exif\0\0" partially across boundaries
+    };
+    EXPECT_FALSE(ParseJpegRating(shortPayload).has_value());
+}

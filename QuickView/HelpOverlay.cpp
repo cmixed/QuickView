@@ -144,7 +144,7 @@ void HelpOverlay::RebuildList() {
     m_items.push_back({ false, L"Ctrl + (+/-)", L"Zoom (+/- 1%)" });
     
     m_items.push_back({ false, L"I / Tab", L"Info Panel (Full / Lite)" });
-    m_items.push_back({ false, L"Numpad 0-5", L"Star Rating (0 clears)" });
+    m_items.push_back({ false, L"0-5 / Numpad 0-5", L"Star Rating (0 clears)" });
     m_items.push_back({ false, L"C", AppStrings::Help_Item_Compare });
     m_items.push_back({ false, L"Ctrl + F11", AppStrings::Settings_Label_SpanDisplays });
 

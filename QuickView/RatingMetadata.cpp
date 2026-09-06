@@ -172,12 +172,12 @@ std::optional<int> ParseJpegRating(std::span<const uint8_t> bytes) {
         }
 
         if (marker == 0xE1) { // APP1: Exif or XMP
-            if (StartsWith(bytes, payload, "Exif\0\0", EXIF_ID_LEN)) {
+            if (payloadLen >= EXIF_ID_LEN && StartsWith(bytes, payload, "Exif\0\0", EXIF_ID_LEN)) {
                 if (auto exifRating = ParseExifRating(
                         bytes.subspan(payload + EXIF_ID_LEN, payloadLen - EXIF_ID_LEN))) {
                     return exifRating; // cheapest and most authoritative source
                 }
-            } else if (StartsWith(bytes, payload, "http://ns.adobe.com/xap/1.0/\0", XMP_ID_LEN)) {
+            } else if (payloadLen >= XMP_ID_LEN && StartsWith(bytes, payload, "http://ns.adobe.com/xap/1.0/\0", XMP_ID_LEN)) {
                 if (!fromXmp) {
                     const char* text =
                         reinterpret_cast<const char*>(bytes.data()) + payload + XMP_ID_LEN;

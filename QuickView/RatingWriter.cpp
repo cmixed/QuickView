@@ -113,9 +113,14 @@ HRESULT Transcode(IWICImagingFactory* factory, const std::wstring& path, int sta
     // released, and the swap at the end then fails with a sharing violation.
     std::vector<BYTE> sourceBytes;
     {
-        HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
-                                  FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
-                                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+        HANDLE file = INVALID_HANDLE_VALUE;
+        for (int retry = 0; retry < 5; ++retry) {
+            file = CreateFileW(path.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+            if (file != INVALID_HANDLE_VALUE) break;
+            Sleep(15);
+        }
         if (file == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
         LARGE_INTEGER size{};
         if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 || size.QuadPart > MAXDWORD) {
@@ -144,9 +149,9 @@ HRESULT Transcode(IWICImagingFactory* factory, const std::wstring& path, int sta
     hr = decoder->GetContainerFormat(&containerFormat);
     if (FAILED(hr)) return hr;
 
-    ComPtr<IWICBitmapFrameDecode> frameDecode;
-    hr = decoder->GetFrame(0, &frameDecode);
-    if (FAILED(hr)) return hr;
+    UINT frameCount = 0;
+    hr = decoder->GetFrameCount(&frameCount);
+    if (FAILED(hr) || frameCount == 0) return FAILED(hr) ? hr : E_FAIL;
 
     const std::wstring tempPath = path + L".qvrating.tmp";
     ComPtr<IWICStream> stream;
@@ -163,30 +168,39 @@ HRESULT Transcode(IWICImagingFactory* factory, const std::wstring& path, int sta
     hr = encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache);
     if (FAILED(hr)) { dropTemp(); return hr; }
 
-    ComPtr<IWICBitmapFrameEncode> frameEncode;
-    hr = encoder->CreateNewFrame(&frameEncode, nullptr);
-    if (FAILED(hr)) { dropTemp(); return hr; }
-    hr = frameEncode->Initialize(nullptr);
-    if (FAILED(hr)) { dropTemp(); return hr; }
+    for (UINT i = 0; i < frameCount; ++i) {
+        ComPtr<IWICBitmapFrameDecode> frameDecode;
+        hr = decoder->GetFrame(i, &frameDecode);
+        if (FAILED(hr)) { dropTemp(); return hr; }
 
-    // Carry the existing metadata over before adding the rating to it.
-    ComPtr<IWICMetadataBlockReader> blockReader;
-    if (SUCCEEDED(frameDecode.As(&blockReader))) {
-        ComPtr<IWICMetadataBlockWriter> blockWriter;
-        if (SUCCEEDED(frameEncode.As(&blockWriter))) {
-            blockWriter->InitializeFromBlockReader(blockReader.Get());
+        ComPtr<IWICBitmapFrameEncode> frameEncode;
+        hr = encoder->CreateNewFrame(&frameEncode, nullptr);
+        if (FAILED(hr)) { dropTemp(); return hr; }
+        hr = frameEncode->Initialize(nullptr);
+        if (FAILED(hr)) { dropTemp(); return hr; }
+
+        // Carry the existing metadata over before adding the rating to it.
+        ComPtr<IWICMetadataBlockReader> blockReader;
+        if (SUCCEEDED(frameDecode.As(&blockReader))) {
+            ComPtr<IWICMetadataBlockWriter> blockWriter;
+            if (SUCCEEDED(frameEncode.As(&blockWriter))) {
+                blockWriter->InitializeFromBlockReader(blockReader.Get());
+            }
         }
+
+        if (i == 0) {
+            ComPtr<IWICMetadataQueryWriter> writer;
+            if (SUCCEEDED(frameEncode->GetMetadataQueryWriter(&writer))) {
+                ApplyRating(writer.Get(), QueriesFor(path), stars);
+            }
+        }
+
+        hr = frameEncode->WriteSource(frameDecode.Get(), nullptr);
+        if (FAILED(hr)) { dropTemp(); return hr; }
+        hr = frameEncode->Commit();
+        if (FAILED(hr)) { dropTemp(); return hr; }
     }
 
-    ComPtr<IWICMetadataQueryWriter> writer;
-    if (SUCCEEDED(frameEncode->GetMetadataQueryWriter(&writer))) {
-        ApplyRating(writer.Get(), QueriesFor(path), stars);
-    }
-
-    hr = frameEncode->WriteSource(frameDecode.Get(), nullptr);
-    if (FAILED(hr)) { dropTemp(); return hr; }
-    hr = frameEncode->Commit();
-    if (FAILED(hr)) { dropTemp(); return hr; }
     hr = encoder->Commit();
     if (FAILED(hr)) { dropTemp(); return hr; }
 
@@ -195,19 +209,26 @@ HRESULT Transcode(IWICImagingFactory* factory, const std::wstring& path, int sta
     // holds the stream, and ReplaceFileW needs the replacement to itself.
     // (The source file needs no such care: it was decoded from memory, so the
     // original was only ever open for the moment it took to read it.)
-    writer.Reset();
     stream.Reset();
-    frameEncode.Reset();
     encoder.Reset();
-    frameDecode.Reset();
     decoder.Reset();
     sourceStream.Reset();
 
-    if (!ReplaceFileW(path.c_str(), tempPath.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS,
-                      nullptr, nullptr)) {
-        const DWORD err = GetLastError();
+    BOOL replaceOk = FALSE;
+    DWORD lastErr = 0;
+    for (int retry = 0; retry < 5; ++retry) {
+        if (ReplaceFileW(path.c_str(), tempPath.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS,
+                         nullptr, nullptr)) {
+            replaceOk = TRUE;
+            break;
+        }
+        lastErr = GetLastError();
+        Sleep(20);
+    }
+
+    if (!replaceOk) {
         dropTemp();
-        return HRESULT_FROM_WIN32(err);
+        return HRESULT_FROM_WIN32(lastErr);
     }
     return S_OK;
 }
@@ -217,16 +238,25 @@ HRESULT Transcode(IWICImagingFactory* factory, const std::wstring& path, int sta
 WriteStatus WriteRatingToImage(const std::wstring& path, int stars, bool allowTranscode) {
     if (path.empty()) return WriteStatus::Failed;
 
+    const std::wstring_view ext = QuickView::ExtensionOf(path);
+    const bool isTiff = QuickView::ExtEqualsIgnoreCase(ext, L".tif") ||
+                        QuickView::ExtEqualsIgnoreCase(ext, L".tiff");
+
     ComPtr<IWICImagingFactory> factory;
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                                 IID_PPV_ARGS(&factory)))) {
         return WriteStatus::Failed;
     }
 
-    const HRESULT hrInPlace = TryInPlace(factory.Get(), path, stars);
-    if (SUCCEEDED(hrInPlace)) {
-        return WriteStatus::WrittenInPlace;
+    // WIC TIFF decoder does NOT support FastMetadataEncoder (returns WINCODEC_ERR_UNSUPPORTEDOPERATION).
+    // Bypassing TryInPlace for TIFF avoids open handle collisions during subsequent Transcode.
+    if (!isTiff) {
+        const HRESULT hrInPlace = TryInPlace(factory.Get(), path, stars);
+        if (SUCCEEDED(hrInPlace)) {
+            return WriteStatus::WrittenInPlace;
+        }
     }
+
     if (!allowTranscode) return WriteStatus::NeedsTranscode;
 
     const HRESULT hrTrans = Transcode(factory.Get(), path, stars);

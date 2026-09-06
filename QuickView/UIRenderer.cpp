@@ -2585,9 +2585,11 @@ namespace {
             if (p.empty()) return std::nullopt;
             const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(p));
             if (!rating || rating->stars <= 0) return std::nullopt;
-            std::wstring stars;
-            for (int i = 0; i < rating->stars; ++i) stars += L"\u2605";
-            return stars;
+            static constexpr std::wstring_view SOLID_STARS[] = {
+                L"", L"\u2605", L"\u2605\u2605", L"\u2605\u2605\u2605", L"\u2605\u2605\u2605\u2605", L"\u2605\u2605\u2605\u2605\u2605"
+            };
+            const int starCount = std::clamp(rating->stars, 1, 5);
+            return std::wstring(SOLID_STARS[starCount]);
         }
         else if (key == L"Format") {
             std::wstring fmtStr;
@@ -2954,15 +2956,26 @@ std::vector<InfoRow> UIRenderer::BuildGridRows(const CImageLoader::ImageMetadata
     // Shown as soon as the read has landed, unrated included, so that enabling
     // the item does not make the row appear and vanish from photo to photo.
     if (const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(imagePath))) {
-        std::wstring stars;
-        for (int i = 0; i < QuickView::Rating::MAX_STARS; ++i) {
-            stars += (i < rating->stars) ? L"\u2605" : L"\u2606";
-        }
+        static constexpr std::wstring_view FIVE_STAR_BARS[] = {
+            L"\u2606\u2606\u2606\u2606\u2606",
+            L"\u2605\u2606\u2606\u2606\u2606",
+            L"\u2605\u2605\u2606\u2606\u2606",
+            L"\u2605\u2605\u2605\u2606\u2606",
+            L"\u2605\u2605\u2605\u2605\u2606",
+            L"\u2605\u2605\u2605\u2605\u2605"
+        };
+        const int starCount = std::clamp(rating->stars, 0, 5);
+        const std::wstring stars(FIVE_STAR_BARS[starCount]);
+
         // The hot path stays silent about a disagreement between the two files
         // of a pair; the full panel is where it is spelled out.
         std::wstring detail;
         if (rating->conflict) {
-            detail = L"(sidecar; JPG has " + std::to_wstring(rating->otherStars) + L")";
+            std::wstring_view ext = QuickView::ExtensionOf(imagePath);
+            if (!ext.empty() && ext.front() == L'.') ext.remove_prefix(1);
+            wchar_t detBuf[64];
+            swprintf_s(detBuf, L"(sidecar; %.*s has %d)", static_cast<int>(ext.size()), ext.data(), rating->otherStars);
+            detail = detBuf;
         }
         rows.push_back({L"\u2B50", L"Rating", stars, detail,
                         stars + (detail.empty() ? L"" : L" " + detail),

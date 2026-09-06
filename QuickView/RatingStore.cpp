@@ -41,8 +41,8 @@ constexpr auto WRITE_DEBOUNCE = std::chrono::milliseconds(400);
 constexpr DWORD MAX_SIDECAR_BYTES = 4 * 1024 * 1024;
 
 // How long after writing a file a directory-change notification is assumed to
-// be the echo of that write. Long enough to cover the watcher's own debounce.
-constexpr auto SELF_WRITE_ECHO = std::chrono::milliseconds(1500);
+// be the echo of that write. Kept reasonably small to avoid missing external file ops.
+constexpr auto SELF_WRITE_ECHO = std::chrono::milliseconds(600);
 std::atomic<int64_t> g_lastSelfWriteTick{ 0 };
 
 LARGE_INTEGER FileSizeOf(const std::wstring& path) {
@@ -110,10 +110,6 @@ void RatingStore::Shutdown() {
 
     m_writeCv.notify_all();
     if (m_writeWorker.joinable()) m_writeWorker.join();
-    // Ratings the user set moments before closing must still reach the disk,
-    // including any whose rebuild was waiting for the photo to leave the
-    // screen -- which it now has.
-    FlushPendingWrites();
 }
 
 std::wstring RatingStore::SidecarPathFor(const std::wstring& path) {
@@ -129,21 +125,123 @@ std::optional<int> RatingStore::ReadRatingFromSidecar(const std::wstring& sideca
         std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
 }
 
+namespace {
+
+std::optional<int> ReadTiffRatingDirect(const std::wstring& path) {
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return std::nullopt;
+
+    LARGE_INTEGER fileSize{};
+    if (!GetFileSizeEx(file, &fileSize) || fileSize.QuadPart < 8) {
+        CloseHandle(file);
+        return std::nullopt;
+    }
+
+    uint8_t header[8];
+    DWORD read = 0;
+    if (!ReadFile(file, header, 8, &read, nullptr) || read != 8) {
+        CloseHandle(file);
+        return std::nullopt;
+    }
+
+    bool isLE = false;
+    if (header[0] == 'I' && header[1] == 'I' && header[2] == 42 && header[3] == 0) {
+        isLE = true;
+    } else if (header[0] == 'M' && header[1] == 'M' && header[2] == 0 && header[3] == 42) {
+        isLE = false;
+    } else {
+        CloseHandle(file);
+        return std::nullopt;
+    }
+
+    auto read16 = [isLE](const uint8_t* b) -> uint16_t {
+        return isLE ? (uint16_t)(b[0] | (b[1] << 8)) : (uint16_t)((b[0] << 8) | b[1]);
+    };
+    auto read32 = [isLE](const uint8_t* b) -> uint32_t {
+        return isLE ? (uint32_t)(b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24))
+                    : (uint32_t)((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]);
+    };
+
+    uint32_t ifdOffset = read32(header + 4);
+    if (ifdOffset < 8 || (LONGLONG)ifdOffset + 2 > fileSize.QuadPart) {
+        CloseHandle(file);
+        return std::nullopt;
+    }
+
+    LARGE_INTEGER seekPos{};
+    seekPos.QuadPart = ifdOffset;
+    if (!SetFilePointerEx(file, seekPos, nullptr, FILE_BEGIN)) {
+        CloseHandle(file);
+        return std::nullopt;
+    }
+
+    uint8_t countBytes[2];
+    if (!ReadFile(file, countBytes, 2, &read, nullptr) || read != 2) {
+        CloseHandle(file);
+        return std::nullopt;
+    }
+
+    uint16_t entryCount = read16(countBytes);
+    // Sanity limit on IFD entry count to prevent massive allocations on corrupted headers
+    if (entryCount == 0 || entryCount > 4096 ||
+        (LONGLONG)ifdOffset + 2 + (LONGLONG)entryCount * 12 > fileSize.QuadPart) {
+        CloseHandle(file);
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> entries(entryCount * 12);
+    if (!ReadFile(file, entries.data(), (DWORD)entries.size(), &read, nullptr) || read != entries.size()) {
+        CloseHandle(file);
+        return std::nullopt;
+    }
+    CloseHandle(file);
+
+    constexpr uint16_t TAG_SIMPLE_RATING = 0x4746;
+    for (uint16_t i = 0; i < entryCount; ++i) {
+        const uint8_t* e = entries.data() + i * 12;
+        if (read16(e) != TAG_SIMPLE_RATING) continue;
+
+        const uint16_t type = read16(e + 2);
+        const uint32_t count = read32(e + 4);
+        if (count != 1) return std::nullopt;
+
+        int value = 0;
+        switch (type) {
+            case 1: value = e[8]; break;
+            case 3: value = read16(e + 8); break;
+            case 4: value = (int)read32(e + 8); break;
+            default: return std::nullopt;
+        }
+        if (QuickView::Rating::IsValidRating(value)) return value;
+    }
+
+    return std::nullopt;
+}
+
+} // namespace
+
 std::optional<int> RatingStore::ReadRatingFromFile(const std::wstring& path) {
     const std::wstring_view ext = QuickView::ExtensionOf(path);
 
-    // Only formats that actually carry an in-file rating are opened at all.
     const bool isJpeg = QuickView::ExtEqualsIgnoreCase(ext, L".jpg") ||
                         QuickView::ExtEqualsIgnoreCase(ext, L".jpeg");
     const bool isTiff = QuickView::ExtEqualsIgnoreCase(ext, L".tif") ||
                         QuickView::ExtEqualsIgnoreCase(ext, L".tiff");
     if (!isJpeg && !isTiff) return std::nullopt;
 
+    if (isTiff) {
+        // An IFD in a real-world TIFF can reside anywhere, very frequently placed at the
+        // end of the file (after all megabytes of pixel strips). Reading only the first
+        // 128KB fails for virtually all multi-megabyte TIFFs.
+        return ReadTiffRatingDirect(path);
+    }
+
     const std::vector<uint8_t> bytes = ReadFilePrefix(path, HEADER_READ_BYTES);
     if (bytes.empty()) return std::nullopt;
-
-    return isJpeg ? QuickView::Rating::ParseJpegRating(bytes)
-                  : QuickView::Rating::ParseTiffRating(bytes);
+    return QuickView::Rating::ParseJpegRating(bytes);
 }
 
 RatingStore::Writability RatingStore::GetWritability(const std::wstring& renderedPath,
@@ -386,7 +484,7 @@ void RatingStore::WriteLoop() {
                     m_writeCv.wait_until(lock, earliest);
                 }
             }
-            if (!m_running.load()) return;
+            if (!m_running.load()) break;
 
             const auto now = std::chrono::steady_clock::now();
             for (auto it = m_pendingWrites.begin(); it != m_pendingWrites.end();) {
@@ -400,6 +498,8 @@ void RatingStore::WriteLoop() {
         }
         for (const auto& write : due) PerformWrite(write);
     }
+
+    FlushPendingWrites();
 }
 
 std::optional<QuickView::Rating::Resolved> RatingStore::TryGet(ImageID id) const {
