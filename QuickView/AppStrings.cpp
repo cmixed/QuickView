@@ -344,7 +344,6 @@ const wchar_t *Settings_Tooltip_ShowNavigator = nullptr;
 const wchar_t *Settings_Label_KeepWindowSizeOnNav = nullptr;
 const wchar_t *Settings_Label_RememberLastWindowSizeAndPosition = nullptr;
 const wchar_t *Settings_Label_UpscaleSmallImagesWhenLocked = nullptr;
-const wchar_t *Settings_Label_EnableSmoothScaling = nullptr;
 const wchar_t *Settings_Label_ExifMode = nullptr;
 const wchar_t *Settings_Label_ToolbarInfoDefault = nullptr;
 const wchar_t *Settings_Label_OpenFullScreenMode = nullptr;
@@ -973,7 +972,6 @@ struct LanguageTable {
     const wchar_t *Settings_Label_KeepWindowSizeOnNav;
     const wchar_t *Settings_Label_RememberLastWindowSizeAndPosition;
     const wchar_t *Settings_Label_UpscaleSmallImagesWhenLocked;
-    const wchar_t *Settings_Label_EnableSmoothScaling;
     const wchar_t *Settings_Label_ExifMode;
     const wchar_t *Settings_Label_ToolbarInfoDefault;
     const wchar_t *Settings_Label_OpenFullScreenMode;
@@ -1602,7 +1600,6 @@ static const LanguageTable Table_EN = {
     L"Keep Window Size on Navigation", // Settings_Label_KeepWindowSizeOnNav
     L"Remember Last Window Size and Position", // Settings_Label_RememberLastWindowSizeAndPosition
     L"Adapt Small Images", // Settings_Label_UpscaleSmallImagesWhenLocked
-    L"Smooth Window Scaling (GPU)", // Settings_Label_EnableSmoothScaling
     L"EXIF Panel Mode", // Settings_Label_ExifMode
     L"Toolbar Info Default", // Settings_Label_ToolbarInfoDefault
     L"Open Fullscreen", // Settings_Label_OpenFullScreenMode
@@ -2231,7 +2228,6 @@ static const LanguageTable Table_CN = {
     L"导航时保持窗口尺寸不变", // Settings_Label_KeepWindowSizeOnNav
     L"记住最后窗口位置和尺寸", // Settings_Label_RememberLastWindowSizeAndPosition
     L"小于窗口尺寸图片适应窗口", // Settings_Label_UpscaleSmallImagesWhenLocked
-    L"启用窗口平滑缩放 (GPU)", // Settings_Label_EnableSmoothScaling
     L"EXIF 面板模式", // Settings_Label_ExifMode
     L"工具栏信息默认值", // Settings_Label_ToolbarInfoDefault
     L"打开时全屏", // Settings_Label_OpenFullScreenMode
@@ -2860,7 +2856,6 @@ static const LanguageTable Table_TW = {
     L"導航時保持視窗尺寸不變", // Settings_Label_KeepWindowSizeOnNav
     L"記住最後視窗位置和尺寸", // Settings_Label_RememberLastWindowSizeAndPosition
     L"小於視窗尺寸圖片適應視窗", // Settings_Label_UpscaleSmallImagesWhenLocked
-    L"起動視窗平滑縮放 (GPU)", // Settings_Label_EnableSmoothScaling
     L"EXIF 面板模式", // Settings_Label_ExifMode
     L"工具列資訊預設值", // Settings_Label_ToolbarInfoDefault
     L"開啟時全螢幕", // Settings_Label_OpenFullScreenMode
@@ -3489,7 +3484,6 @@ static const LanguageTable Table_JA = {
     L"画像移動時にウィンドウサイズを維持", // Settings_Label_KeepWindowSizeOnNav
     L"前回のウィンドウサイズと位置を記憶", // Settings_Label_RememberLastWindowSizeAndPosition
     L"小さい画像を拡大適応", // Settings_Label_UpscaleSmallImagesWhenLocked
-    L"スムーズなウィンドウ拡大縮小 (GPU)", // Settings_Label_EnableSmoothScaling
     L"EXIF パネルモード", // Settings_Label_ExifMode
     L"ツールバー情報の既定値", // Settings_Label_ToolbarInfoDefault
     L"全画面で開く", // Settings_Label_OpenFullScreenMode
@@ -4118,7 +4112,6 @@ static const LanguageTable Table_RU = {
     L"Не менять размер окна при навигации", // Settings_Label_KeepWindowSizeOnNav
     L"Запоминать последние размер и положение окна", // Settings_Label_RememberLastWindowSizeAndPosition
     L"Адаптировать мелкие изображения", // Settings_Label_UpscaleSmallImagesWhenLocked
-    L"Плавное масштабирование окна (ГП)", // Settings_Label_EnableSmoothScaling
     L"Режим панели EXIF", // Settings_Label_ExifMode
     L"Информация в панели по умолчанию", // Settings_Label_ToolbarInfoDefault
     L"Полноэкранный режим при открытии", // Settings_Label_OpenFullScreenMode
@@ -4747,7 +4740,6 @@ static const LanguageTable Table_DE = {
     L"Fenstergröße bei Navigation beibehalten", // Settings_Label_KeepWindowSizeOnNav
     L"Letzte Fensterposition und -größe merken", // Settings_Label_RememberLastWindowSizeAndPosition
     L"Kleine Bilder anpassen", // Settings_Label_UpscaleSmallImagesWhenLocked
-    L"Flüssige Fensterskalierung (GPU)", // Settings_Label_EnableSmoothScaling
     L"EXIF-Panel-Modus", // Settings_Label_ExifMode
     L"Symbolleisten-Info Standard", // Settings_Label_ToolbarInfoDefault
     L"Im Vollbildmodus öffnen", // Settings_Label_OpenFullScreenMode
@@ -5376,7 +5368,6 @@ static const LanguageTable Table_ES = {
     L"Mantener el tamaño de la ventana al navegar", // Settings_Label_KeepWindowSizeOnNav
     L"Recordar el último tamaño y posición de la ventana", // Settings_Label_RememberLastWindowSizeAndPosition
     L"Adaptar imágenes pequeñas", // Settings_Label_UpscaleSmallImagesWhenLocked
-    L"Escalado suave de ventana (GPU)", // Settings_Label_EnableSmoothScaling
     L"Modo panel EXIF", // Settings_Label_ExifMode
     L"Info de barra por defecto", // Settings_Label_ToolbarInfoDefault
     L"Abrir en pantalla completa", // Settings_Label_OpenFullScreenMode
@@ -6005,7 +5996,6 @@ static const LanguageTable Table_FR = {
     L"Keep Window Size on Navigation", // Settings_Label_KeepWindowSizeOnNav
     L"Remember Last Window Size and Position", // Settings_Label_RememberLastWindowSizeAndPosition
     L"Adapt Small Images", // Settings_Label_UpscaleSmallImagesWhenLocked
-    L"Smooth Window Scaling (GPU)", // Settings_Label_EnableSmoothScaling
     L"EXIF Panel Mode", // Settings_Label_ExifMode
     L"Toolbar Info Default", // Settings_Label_ToolbarInfoDefault
     L"Open Fullscreen", // Settings_Label_OpenFullScreenMode
@@ -6639,7 +6629,6 @@ void Apply(const LanguageTable& t) {
   Settings_Label_KeepWindowSizeOnNav = t.Settings_Label_KeepWindowSizeOnNav;
   Settings_Label_RememberLastWindowSizeAndPosition = t.Settings_Label_RememberLastWindowSizeAndPosition;
   Settings_Label_UpscaleSmallImagesWhenLocked = t.Settings_Label_UpscaleSmallImagesWhenLocked;
-  Settings_Label_EnableSmoothScaling = t.Settings_Label_EnableSmoothScaling;
   Settings_Label_ExifMode = t.Settings_Label_ExifMode;
   Settings_Label_ToolbarInfoDefault = t.Settings_Label_ToolbarInfoDefault;
   Settings_Label_OpenFullScreenMode = t.Settings_Label_OpenFullScreenMode;

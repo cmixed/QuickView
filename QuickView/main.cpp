@@ -691,8 +691,6 @@ static bool g_isImageScaled = false;         // True if current image was decode
 static constexpr UINT_PTR IDT_SVG_RERENDER = 44; // [SVG Lossless] Timer for lazy high-res re-render
 static constexpr UINT_PTR IDT_INTERACTION = 1001; // Interaction debounce for HQ redraw/surface upgrade
 
-static constexpr UINT_PTR IDT_SMOOTH_WINDOW_ZOOM = 1002;
-
 static constexpr UINT_PTR IDT_SMOOTH_ZOOM = 1003; // Drive transform-only smooth zoom animation
 
 
@@ -840,20 +838,6 @@ static void ClearDialogCenter();
 
 
 
-
-static void CancelSmoothWindowZoom(HWND hwnd);
-static void StartSmoothWindowZoom(HWND hwnd,
-                                  const RECT& startRect,
-                                  const RECT& targetRect,
-                                  float startZoom,
-                                  float targetZoom,
-                                  float startPanX,
-                                  float startPanY,
-                                  float targetPanX,
-                                  float targetPanY,
-                                  float maintainTotalScale = 0.0f,
-                                  float durationMs = 80.0f);
-static void TickSmoothWindowZoom(HWND hwnd);
 
 void AdjustWindowToImage(HWND hwnd);
 RECT GetVirtualScreenRect();
@@ -4027,8 +4011,7 @@ static float GetCurrentTotalScale(HWND hwnd) {
         }
     }
 
-    float sourceZoom = (AppContext::GetInstance().SmoothWindowZoom.active) ? AppContext::GetInstance().SmoothWindowZoom.targetZoom : GetPaneContext(PaneSlot::Primary).view.Zoom;
-    return fitScale * sourceZoom;
+    return fitScale * GetPaneContext(PaneSlot::Primary).view.Zoom;
 }
 
 static float ClampTotalScale(HWND hwnd, float newTotalScale) {
@@ -4872,7 +4855,6 @@ void SaveConfig() {
     WriteConfigInt(L"View", L"NavIndicator", g_config.NavIndicator, iniPath.c_str());
     WriteConfigBool(L"View", L"EnableCrossMonitor", g_config.EnableCrossMonitor, iniPath.c_str());
     WriteConfigBool(L"View", L"RoundedCorners", g_config.RoundedCorners, iniPath.c_str());
-    WriteConfigBool(L"View", L"EnableSmoothScaling", g_config.EnableSmoothScaling, iniPath.c_str());
 
     // Control
     WriteConfigInt(L"Controls", L"ZoomModeIn", g_config.ZoomModeIn, iniPath.c_str());
@@ -5186,7 +5168,6 @@ void LoadConfig() {
     if (g_config.NavIndicator > 1) g_config.NavIndicator = 1;
     g_config.EnableCrossMonitor = GetPrivateProfileIntW(L"View", L"EnableCrossMonitor", 0, iniPath.c_str()) != 0;
     g_config.RoundedCorners = GetPrivateProfileIntW(L"View", L"RoundedCorners", 1, iniPath.c_str()) != 0;
-    g_config.EnableSmoothScaling = GetPrivateProfileIntW(L"View", L"EnableSmoothScaling", 0, iniPath.c_str()) != 0;
 
     // Control
     g_config.ZoomModeIn = GetPrivateProfileIntW(L"Controls", L"ZoomModeIn", 0, iniPath.c_str());
@@ -6841,7 +6822,7 @@ static D2D1_COLOR_F ResolveCanvasColor() {
 // [Visual Rotation] Helper to calculate accumulated matrix
 // [Fix] Centralized DComp Synchronization Logic
 // Calculates correct Zoom/Pan/Centering based on Visual Dimensions (Rotated)
-void SyncDCompState([[maybe_unused]] HWND hwnd, float winW, float winH, bool animate) {
+void SyncDCompState([[maybe_unused]] HWND hwnd, float winW, float winH, [[maybe_unused]] bool animate) {
     if (!g_compEngine || !g_compEngine->IsInitialized()) return;
     // [DComp Barrier] Block transient layout garbage frames during sleep-restore or DPI scaling.
     // Viewports below 16px are always invalid system transients and must not pollute image scale.
@@ -6907,8 +6888,6 @@ void SyncDCompState([[maybe_unused]] HWND hwnd, float winW, float winH, bool ani
 
             ClampPanForViewport(vs, winW, effWinH, targetZoom);
 
-            float animationDurationMs = (animate && g_config.EnableSmoothScaling) ? 90.0f : 0.0f;
-
             float displayZoom = targetZoom;
             float displayPanX = GetPaneContext(PaneSlot::Primary).view.PanX;
             float displayPanY = GetPaneContext(PaneSlot::Primary).view.PanY;
@@ -6954,17 +6933,13 @@ void SyncDCompState([[maybe_unused]] HWND hwnd, float winW, float winH, bool ani
                 surfaceVs.IsRotated90 = false;
                 surfaceVs.FlipX = 1.0f;
                 surfaceVs.FlipY = 1.0f;
-                g_compEngine->UpdateTransformMatrix(surfaceVs, winW, winH, 1.0f, 0.0f, galleryH / 2.0f, 0.0f);
+                g_compEngine->UpdateTransformMatrix(surfaceVs, winW, winH, 1.0f, 0.0f, galleryH / 2.0f);
                 
                 // Use adaptive interpolation even during SVG viewport resizing to keep it smooth
                 DCOMPOSITION_BITMAP_INTERPOLATION_MODE interpMode = GetOptimalDCompInterpolationMode(currentScale, g_lastSurfaceSize.width, g_lastSurfaceSize.height);
                 g_compEngine->SetImageInterpolationMode(interpMode);
             } else {
-                const float animMs =
-                    AppContext::GetInstance().SmoothZoom.Active
-                        ? 0.0f
-                        : animationDurationMs;
-                g_compEngine->UpdateTransformMatrix(vs, winW, winH, displayZoom, displayPanX, displayPanY, animMs);
+                g_compEngine->UpdateTransformMatrix(vs, winW, winH, displayZoom, displayPanX, displayPanY);
 
                 float origW = 0.0f;
                 float origH = 0.0f;
@@ -6981,105 +6956,6 @@ void SyncDCompState([[maybe_unused]] HWND hwnd, float winW, float winH, bool ani
         }
     } else {
         AppContext::GetInstance().ZoomAnimCtrl->Reset();
-    }
-}
-
-static float EaseOutCubic01(float t) {
-    t = (std::clamp)(t, 0.0f, 1.0f);
-    float inv = 1.0f - t;
-    return 1.0f - inv * inv * inv;
-}
-
-static void CancelSmoothWindowZoom(HWND hwnd) {
-    AppContext::GetInstance().SmoothWindowZoom.active = false;
-    KillTimer(hwnd, IDT_SMOOTH_WINDOW_ZOOM);
-    g_deferProgrammaticZoomResizeSync = false;
-    g_programmaticResize = false;
-}
-
-static void StartSmoothWindowZoom(HWND hwnd,
-                                  const RECT& startRect,
-                                  const RECT& targetRect,
-                                  float startZoom,
-                                  float targetZoom,
-                                  float startPanX,
-                                  float startPanY,
-                                  float targetPanX,
-                                  float targetPanY,
-                                  float maintainTotalScale,
-                                  float durationMs) {
-    auto& state = AppContext::GetInstance().SmoothWindowZoom;
-    state.active = true;
-    state.startTime = std::chrono::steady_clock::now();
-    state.durationMs = durationMs;
-    state.startRect = startRect;
-    state.targetRect = targetRect;
-    state.startZoom = startZoom;
-    state.targetZoom = targetZoom;
-    state.startPanX = startPanX;
-    state.startPanY = startPanY;
-    state.targetPanX = targetPanX;
-    state.targetPanY = targetPanY;
-    state.maintainTotalScale = maintainTotalScale;
-    g_programmaticResize = true;
-    g_deferProgrammaticZoomResizeSync = true;
-    SetTimer(hwnd, IDT_SMOOTH_WINDOW_ZOOM, 8, nullptr);
-    TickSmoothWindowZoom(hwnd);
-}
-
-static void TickSmoothWindowZoom(HWND hwnd) {
-    if (!AppContext::GetInstance().SmoothWindowZoom.active) return;
-
-    auto now = std::chrono::steady_clock::now();
-    float elapsedMs = std::chrono::duration<float, std::milli>(now - AppContext::GetInstance().SmoothWindowZoom.startTime).count();
-    float t = (AppContext::GetInstance().SmoothWindowZoom.durationMs > 0)
-        ? std::clamp(elapsedMs / AppContext::GetInstance().SmoothWindowZoom.durationMs, 0.0f, 1.0f)
-        : 1.0f;
-    float eased = EaseOutCubic01(t);
-
-    auto lerpFloat = [eased](float a, float b) {
-        return a + (b - a) * eased;
-    };
-    auto lerpLong = [eased](LONG a, LONG b) {
-        return (LONG)std::lround((double)a + ((double)b - (double)a) * (double)eased);
-    };
-
-    RECT stepRect{
-        lerpLong(AppContext::GetInstance().SmoothWindowZoom.startRect.left, AppContext::GetInstance().SmoothWindowZoom.targetRect.left),
-        lerpLong(AppContext::GetInstance().SmoothWindowZoom.startRect.top, AppContext::GetInstance().SmoothWindowZoom.targetRect.top),
-        lerpLong(AppContext::GetInstance().SmoothWindowZoom.startRect.right, AppContext::GetInstance().SmoothWindowZoom.targetRect.right),
-        lerpLong(AppContext::GetInstance().SmoothWindowZoom.startRect.bottom, AppContext::GetInstance().SmoothWindowZoom.targetRect.bottom)
-    };
-
-    GetPaneContext(PaneSlot::Primary).view.Zoom = lerpFloat(AppContext::GetInstance().SmoothWindowZoom.startZoom, AppContext::GetInstance().SmoothWindowZoom.targetZoom);
-    GetPaneContext(PaneSlot::Primary).view.PanX = lerpFloat(AppContext::GetInstance().SmoothWindowZoom.startPanX, AppContext::GetInstance().SmoothWindowZoom.targetPanX);
-    GetPaneContext(PaneSlot::Primary).view.PanY = lerpFloat(AppContext::GetInstance().SmoothWindowZoom.startPanY, AppContext::GetInstance().SmoothWindowZoom.targetPanY);
-
-    {
-        DwmFlush();
-        ProgrammaticResizeScope resizeScope;
-        // WM_SIZE will fire, but DComp sync is deferred — we sync atomically below.
-        SetWindowPos(hwnd, nullptr,
-                     stepRect.left,
-                     stepRect.top,
-                     stepRect.right - stepRect.left,
-                     stepRect.bottom - stepRect.top,
-                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOREDRAW);
-    }
-
-    if (g_compEngine && g_compEngine->IsInitialized()) {
-        RECT rc; GetClientRect(hwnd, &rc);
-        SyncDCompState(hwnd, (float)rc.right, (float)rc.bottom, false);
-        OnPaint(hwnd);
-        g_compEngine->Commit();
-    }
-    RequestRepaint(PaintLayer::Dynamic | PaintLayer::Static);
-
-    if (t >= 1.0f) {
-        GetPaneContext(PaneSlot::Primary).view.Zoom = AppContext::GetInstance().SmoothWindowZoom.targetZoom;
-        GetPaneContext(PaneSlot::Primary).view.PanX = AppContext::GetInstance().SmoothWindowZoom.targetPanX;
-        GetPaneContext(PaneSlot::Primary).view.PanY = AppContext::GetInstance().SmoothWindowZoom.targetPanY;
-        CancelSmoothWindowZoom(hwnd);
     }
 }
 
@@ -9113,10 +8989,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             return 0;
         }
 
-        if (wParam == IDT_SMOOTH_WINDOW_ZOOM) {
-            TickSmoothWindowZoom(hwnd);
-            return 0;
-        }
 
         // [SVG Adaptive] Re-rasterize SVG at current zoom's needed resolution
         if (wParam == IDT_SVG_RERENDER) {
@@ -16539,7 +16411,7 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          const int borderLeft = ptOldClientOrigin.x - rcWin.left;
          const int borderTop = ptOldClientOrigin.y - rcWin.top;
 
-         float oldZoom = (AppContext::GetInstance().SmoothWindowZoom.active) ? AppContext::GetInstance().SmoothWindowZoom.targetZoom : GetPaneContext(PaneSlot::Primary).view.Zoom;
+         float oldZoom = GetPaneContext(PaneSlot::Primary).view.Zoom;
          if (oldZoom < 0.0001f) oldZoom = 0.0001f;
          float zoomRatio = targetZoomState / oldZoom;
 
@@ -16562,49 +16434,34 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
              targetPanY = 0.0f;
          }
 
-         if (useSmoothZoomAnimation && g_config.EnableSmoothScaling) {
-             StartSmoothWindowZoom(hwnd,
-                                   rcWin,
-                                   targetRect,
-                                   GetPaneContext(PaneSlot::Primary).view.Zoom,
-                                   targetZoomState,
-                                   startPanX,
-                                   startPanY,
-                                   targetPanX,
-                                   targetPanY,
-                                   0.0f,
-                                   50.0f);
-             RequestRepaint(PaintLayer::Dynamic | PaintLayer::Image | PaintLayer::Static);
-         } else {
-             // Direct Mode - Snap to target immediately with atomic DComp barrier
-             GetPaneContext(PaneSlot::Primary).view.Zoom = targetZoomState;
-             GetPaneContext(PaneSlot::Primary).view.PanX = targetPanX;
-             GetPaneContext(PaneSlot::Primary).view.PanY = targetPanY;
+         // Direct Mode - Snap to target immediately with atomic DComp barrier
+         GetPaneContext(PaneSlot::Primary).view.Zoom = targetZoomState;
+         GetPaneContext(PaneSlot::Primary).view.PanX = targetPanX;
+         GetPaneContext(PaneSlot::Primary).view.PanY = targetPanY;
 
-             const bool windowRectChanged = (targetRect.left != rcWin.left || 
-                                             targetRect.top != rcWin.top || 
-                                             targetRect.right != rcWin.right || 
-                                             targetRect.bottom != rcWin.bottom);
-             if (windowRectChanged) {
-                 // [VSync Pre-Alignment Barrier] Align to the start of a fresh DWM VSync cycle
-                 // before moving the window, guaranteeing SetWindowPos, SyncDCompState, and OnPaint
-                 // all execute cleanly within the SAME VBlank frame window.
-                 DwmFlush();
-                 ProgrammaticResizeScope resizeScope;
-                 SetWindowPos(hwnd, nullptr, targetRect.left, targetRect.top, 
-                              targetRect.right - targetRect.left, targetRect.bottom - targetRect.top, 
-                              SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOREDRAW);
-             }
-
-             SyncDCompState(hwnd, (float)targetW, (float)targetH, false);
-
-             // [Atomic UI Presentation] Synchronously render OSD and UI in the exact same frame,
-             // eliminating OSD stretching or lag during mouse wheel scrolling.
-             ShowZoomOsd(hwnd, newTotalScale);
-             OnPaint(hwnd);
-
-             if (g_compEngine) g_compEngine->Commit();
+         const bool windowRectChanged = (targetRect.left != rcWin.left || 
+                                         targetRect.top != rcWin.top || 
+                                         targetRect.right != rcWin.right || 
+                                         targetRect.bottom != rcWin.bottom);
+         if (windowRectChanged) {
+             // [VSync Pre-Alignment Barrier] Align to the start of a fresh DWM VSync cycle
+             // before moving the window, guaranteeing SetWindowPos, SyncDCompState, and OnPaint
+             // all execute cleanly within the SAME VBlank frame window.
+             DwmFlush();
+             ProgrammaticResizeScope resizeScope;
+             SetWindowPos(hwnd, nullptr, targetRect.left, targetRect.top, 
+                          targetRect.right - targetRect.left, targetRect.bottom - targetRect.top, 
+                          SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOREDRAW);
          }
+
+         SyncDCompState(hwnd, (float)targetW, (float)targetH, false);
+
+         // [Atomic UI Presentation] Synchronously render OSD and UI in the exact same frame,
+         // eliminating OSD stretching or lag during mouse wheel scrolling.
+         ShowZoomOsd(hwnd, newTotalScale);
+         OnPaint(hwnd);
+
+         if (g_compEngine) g_compEngine->Commit();
     } else {
          // --- Standard Zoom Path (Locked Window) ---
          float winW = currentWinW;
@@ -16615,7 +16472,7 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          const float baseFit = ComputeBaseFitScaleForVisual(vs, winW, effWinH);
          if (baseFit <= 0.0001f) return;
          
-         float oldZoom = (AppContext::GetInstance().SmoothWindowZoom.active) ? AppContext::GetInstance().SmoothWindowZoom.targetZoom : GetPaneContext(PaneSlot::Primary).view.Zoom;
+         float oldZoom = GetPaneContext(PaneSlot::Primary).view.Zoom;
          if (oldZoom < 0.0001f) oldZoom = 0.0001f;
          float newZoom = newTotalScale / baseFit;
          

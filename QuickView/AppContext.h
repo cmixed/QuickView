@@ -95,21 +95,6 @@ struct SmoothZoomState {
     void Reset();
 };
 
-struct SmoothWindowZoomState {
-    bool active = false;
-    std::chrono::steady_clock::time_point startTime;
-    float durationMs = 90.0f;
-    RECT startRect{};
-    RECT targetRect{};
-    float startZoom = 1.0f;
-    float targetZoom = 1.0f;
-    float startPanX = 0.0f;
-    float startPanY = 0.0f;
-    float targetPanX = 0.0f;
-    float targetPanY = 0.0f;
-    float maintainTotalScale = 0.0f; // >0: window-adapt mode, keep this visual scale constant
-};
-
 // --- Compare Mode Definitions ---
 enum class ViewMode {
     Single = 0,
@@ -235,7 +220,6 @@ public:
 
     DialogState Dialog;
     SmoothZoomState SmoothZoom;
-    SmoothWindowZoomState SmoothWindowZoom;
     CompareState Compare;
     LoupeState Loupe;
     MinimapState Minimaps[2];

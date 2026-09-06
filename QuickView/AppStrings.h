@@ -351,7 +351,6 @@ namespace AppStrings {
     extern const wchar_t* Settings_Label_KeepWindowSizeOnNav;
     extern const wchar_t* Settings_Label_RememberLastWindowSizeAndPosition;
     extern const wchar_t* Settings_Label_UpscaleSmallImagesWhenLocked;
-    extern const wchar_t* Settings_Label_EnableSmoothScaling; // New
     extern const wchar_t* Settings_Label_SlideshowInterval;
     extern const wchar_t* Settings_Label_SlideshowImmersive;
     extern const wchar_t* Settings_Option_SlideshowNormal;

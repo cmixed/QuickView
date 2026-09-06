@@ -709,7 +709,6 @@ struct AppConfig {
     
     // --- Image & Edit ---
     bool AutoRotate = true;
-    bool EnableSmoothScaling = false;    // New: Smooth Zoom toggle
     bool ColorManagement = true;         // Master toggle for Color Management System
     int CmsRenderingIntent = 1;          // 0=Perceptual, 1=Relative Colorimetric
     int HdrToneMappingMode = 0;          // 0=Spline, 1=Colorimetric, 2=Legacy Reinhard
