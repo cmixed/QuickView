@@ -6878,6 +6878,9 @@ void SettingsOverlay::DrawComboDropdown(ID2D1DeviceContext* pRT) {
     
     int startIdx = 0;
     
+    const DWRITE_WORD_WRAPPING origWrap = m_textFormatItem->GetWordWrapping();
+    m_textFormatItem->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
     for (int i = 0; i < visibleItems; i++) {
         int idx = startIdx + i;
         if (idx >= count) break;
@@ -6907,6 +6910,7 @@ void SettingsOverlay::DrawComboDropdown(ID2D1DeviceContext* pRT) {
                       m_textFormatItem.Get(), textRect, textBrush);
     }
     
+    m_textFormatItem->SetWordWrapping(origWrap);
     pRT->PopAxisAlignedClip();
 }
 

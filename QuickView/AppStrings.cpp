@@ -3997,8 +3997,8 @@ static const LanguageTable Table_RU = {
     L"Профессиональные инструменты", // Settings_Header_Professional
     L"Стратегия восстановления памяти:", // Settings_Label_MemoryReclaim
     L"Умная (авто)", // Settings_Option_MemSmart
-    L"Агрессивная (макс. производительность)", // Settings_Option_MemAggressive
-    L"По запросу (мин. ОЗУ)", // Settings_Option_MemOnDemand
+    L"Агрессивная (макс.)", // Settings_Option_MemAggressive
+    L"По запросу (мин.)", // Settings_Option_MemOnDemand
     L"Умная: Баланс производительности и ОЗУ.\nАгрессивная: Максимальная производительность и высокий уровень использования памяти.\nПо требованию: Сразу высвобождать память при простоях.", // Settings_Tooltip_MemoryReclaim
     L"Кнопка обновляемых областей в анимации", // Settings_Label_ShowDirtyRect
     L"Показывать кнопку отладки отображаемой области на панели инструментов анимации для отображения обновляемых участков.", // Settings_Tooltip_ShowDirtyRect
@@ -4063,8 +4063,8 @@ static const LanguageTable Table_RU = {
     L"Сила теней окружающего затенения.", // Settings_Tooltip_ShadowIntensity
     L"Векторный рендеринг", // Settings_Header_VectorAssets
     L"Обводка значков", // Settings_Label_VectorStrokeWeight
-    L"Обычная (1.5 пкс)", // Settings_Option_StrokeStandard
-    L"Тонкая (1.0 пкс)", // Settings_Option_StrokeFine
+    L"Обычная (1.5 px)", // Settings_Option_StrokeStandard
+    L"Тонкая (1.0 px)", // Settings_Option_StrokeFine
     L"Профиль оттенка", // Settings_Header_GlassTint
     L"Цветовая логика", // Settings_Label_TintProfile
     L"Авто (адаптивно)", // Settings_Option_TintAuto
@@ -4182,8 +4182,8 @@ static const LanguageTable Table_RU = {
     L"Настройка резкости краев для AI плагина.", // Settings_Tooltip_SrSharpness
     L"AI Шумоподавление", // Settings_Label_SrDenoise
     L"Настройка предварительного шумоподавления для AI сверхразрешения.", // Settings_Tooltip_SrDenoise
-    L"Установленные расширения", // Settings_Segment_InstalledPlugins
-    L"Каталог расширений", // Settings_Segment_Marketplace
+    L"Установленные", // Settings_Segment_InstalledPlugins
+    L"Каталог", // Settings_Segment_Marketplace
     L"Движок сверхразрешения", // Settings_Label_SrEngine
     L"Состояние модели", // Settings_Label_SrModelStatus
     L"Скачать эту модель (~%llu МБ)", // Settings_Format_DownloadModel
@@ -4272,7 +4272,7 @@ static const LanguageTable Table_RU = {
     L"Автоуведомление об ошибке охвата", // Settings_Label_GamutAutoPrompt
     L"Показать OSD-уведомление при обнаружении ошибок охвата. Выделение можно включить вручную на панели инструментов.", // Settings_Tooltip_GamutAutoPrompt
     L"Цвет выделения вне охвата", // Settings_Label_GamutColor
-    L"Относительный колориметрический (точность)", // Settings_Option_CmsIntentRelative
+    L"Относительный (точность)", // Settings_Option_CmsIntentRelative
     L"Перцептивный (восприятие)", // Settings_Option_CmsIntentPerceptual
     L"Использовать систему управления цветом (CMS).\nЕсли включено, применяется высокоточное преобразование цветового пространства через ГП для восстановления истинных цветов.\nЕсли отключено, снижается нагрузка на ГП, но возможно перенасыщение цветов на дисплеях с широким цветовым охватом.", // Settings_Tooltip_CMS
     L"Метод преобразования цветового пространства (цель рендеринга).\nПерцептивный: сжимает цвета вне охвата для сохранения деталей и градиентов (идеально для фото).\nОтносительный колориметрический: сохраняет цвета в пределах охвата и обрезает выходящие за его пределы (идеально для интерфейса и значков).\n* Визуальные различия проявляются только при использовании улучшенных профилей ICC, содержащих LUT (таблицы поиска). Стандартные матричные профили автоматически возвращаются к относительной колориметрии.", // Settings_Tooltip_CmsIntent

@@ -255,15 +255,20 @@ void DrawSegmentGroup(
     if (textFormat) {
         textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        const DWRITE_WORD_WRAPPING origWrap = textFormat->GetWordWrapping();
+        textFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
 
         float curX = rect.left;
         for (size_t i = 0; i < count; i++) {
             D2D1_RECT_F tRect = D2D1::RectF(curX, rect.top, curX + itemWidths[i], rect.bottom);
             bool isSel = (static_cast<int>(i) == selectedIdx);
             brush->SetColor(isDisabled ? palette.textDim : (isSel ? palette.white : palette.text));
+            dc->PushAxisAlignedClip(tRect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             dc->DrawText(options[i].data(), static_cast<UINT32>(options[i].length()), textFormat, tRect, brush.Get());
+            dc->PopAxisAlignedClip();
             curX += itemWidths[i];
         }
+        textFormat->SetWordWrapping(origWrap);
         textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     }
 }
@@ -445,8 +450,13 @@ void DrawPillComboBox(
     if (textFormat) {
         D2D1_RECT_F textRect = D2D1::RectF(rect.left + 14.0f * s, rect.top, rect.right - 30.0f * s, rect.bottom);
         textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        const DWRITE_WORD_WRAPPING origWrap = textFormat->GetWordWrapping();
+        textFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         brush->SetColor(isDisabled ? palette.textDim : palette.text);
+        dc->PushAxisAlignedClip(textRect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         dc->DrawText(text.data(), static_cast<UINT32>(text.length()), textFormat, textRect, brush.Get());
+        dc->PopAxisAlignedClip();
+        textFormat->SetWordWrapping(origWrap);
     }
 
     D2D1_RECT_F arrowRect = D2D1::RectF(rect.right - 28.0f * s, rect.top, rect.right - 4.0f * s, rect.bottom);
