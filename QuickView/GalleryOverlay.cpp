@@ -1912,12 +1912,15 @@ void GalleryOverlay::SetMouseInGallery(bool inGallery) {
 
 void GalleryOverlay::CommitSelectionState() {
     if (m_mode == GalleryMode::FullGrid) {
-        if (m_isPinned || g_config.GalleryKeepVisibleOnThumbnailClick) {
+        // In FullGrid mode, committing a thumbnail selection means the user wants to view the image
+        // in full canvas, so directly dismiss the gallery unless pinned to filmstrip.
+        if (m_isPinned) {
             SetMode(GalleryMode::Filmstrip);
         } else {
             Close(true);
         }
     } else if (!m_isPinned && !g_config.GalleryKeepVisibleOnThumbnailClick) {
+        // Keep-visible semantics only apply to Filmstrip mode.
         Close(true);
     }
 }
