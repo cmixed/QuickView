@@ -6859,13 +6859,8 @@ void SettingsOverlay::DrawComboDropdown(ID2D1DeviceContext* pRT) {
     int maxItems = 16;
     int visibleItems = (count > maxItems) ? maxItems : count;
     
-    // 1. Dropdown Shadow
-    D2D1_RECT_F shadowRect = D2D1::RectF(dropRect.left - 2.0f * s, dropRect.top + 2.0f * s, dropRect.right + 2.0f * s, dropRect.bottom + 4.0f * s);
+    // 1. Dropdown Container Background (100% Opaque solid panel background)
     if (m_brushBg) {
-        m_brushBg->SetColor(palette.shadow);
-        pRT->FillRoundedRectangle(D2D1::RoundedRect(shadowRect, radius + 2.0f * s, radius + 2.0f * s), m_brushBg.Get());
-
-        // 2. Dropdown Container Background (100% Opaque solid panel background)
         D2D1_COLOR_F opaqueBg = palette.panelBg;
         opaqueBg.a = 1.0f;
         m_brushBg->SetColor(opaqueBg);
