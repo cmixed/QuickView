@@ -3381,7 +3381,7 @@ static const LanguageTable Table_RU = {
     L"Всегда сохранять без потерь", // Checkbox_AlwaysSaveLossless
     L"Всегда сохранять с оптимизацией краёв", // Checkbox_AlwaysSaveEdgeAdapted
     L"Всегда сохранять перекодированное", // Checkbox_AlwaysSaveLossy
-    L"Отправлять в корзину без подтверждения", // Checkbox_NeverConfirmDelete
+    L"Отправлять в Корзину без подтверждения", // Checkbox_NeverConfirmDelete
     L"Невозможно декодировать HEIC, установите расширение HEVC", // OSD_HEICCodecMissing
     L"Невозможно декодировать HEIC", // Dialog_HEICTitle
     L"В системе отсутствует расширение HEVC.\\nQuickView использует " L"аппаратное ускорение для лучшей производительности.", // Dialog_HEICContent
@@ -3393,12 +3393,12 @@ static const LanguageTable Table_RU = {
     L"Запуск", // Settings_Group_Startup
     L"Предпочтения", // Settings_Group_Habits
     L"Язык", // Settings_Label_Language
-    L"Один экземпляр", // Settings_Label_SingleInstance
+    L"Только один экземпляр программы", // Settings_Label_SingleInstance
     L"Проверка обновлений", // Settings_Label_CheckUpdates
     L"Канал обновлений", // Settings_Label_UpdateChannel
     L"Стабильный", // Settings_Option_UpdateStable
-    L"Предварительный (Pre-release)", // Settings_Option_UpdatePreRelease
-    L"Стабильный: Выпускается после того, как предварительная версия доказала свою стабильность.\nПредварительный (Pre-release): Моментальная доставка последних изменений для сбора отзывов. Внимание: эти изменения не прошли строгую проверку.", // Settings_Tooltip_PreRelease
+    L"Предварительный", // Settings_Option_UpdatePreRelease
+    L"Стабильный: Выпускается, когда предварительная версия доказала свою стабильность.\nПредварительный: Моментальная публикация последних изменений для сбора отзывов (эти изменения не прошли строгую проверку).", // Settings_Tooltip_PreRelease
     L"Циклическая навигация", // Settings_Label_NavLoopMode
     L"Порядок сортировки", // Settings_Label_SortOrder
     L"По убыванию", // Settings_Label_SortDescending
@@ -3438,10 +3438,10 @@ static const LanguageTable Table_RU = {
     L"Полная панель информации\tI", // Context_FullInfoPanel
     L"Рендеринг RAW", // Context_RenderRAW
     L"Режим пиксель-арта", // Context_PixelArtMode
-    L"Цветовое пространство", // Context_ColorSpace
+    L"Цвет. пространство", // Context_ColorSpace
     L"Полный экран\tF11", // Context_Fullscreen
     L"Вид", // Context_View
-    L"Заполнение", // Context_WallpaperFill
+    L"Заполнить", // Context_WallpaperFill
     L"По размеру", // Context_WallpaperFit
     L"Замостить", // Context_WallpaperTile
     L"Сделать обоями", // Context_SetAsWallpaper
@@ -3507,10 +3507,10 @@ static const LanguageTable Table_RU = {
     L"Удалить выбранное изображение", // Toolbar_Tooltip_CompareDelete
     L"Увеличить (точно)", // Toolbar_Tooltip_CompareZoomIn
     L"Уменьшить (точно)", // Toolbar_Tooltip_CompareZoomOut
-    L"Синхр. масштаба: ДА", // Toolbar_Tooltip_CompareSyncZoomOn
-    L"Синхр. масштаба: НЕТ", // Toolbar_Tooltip_CompareSyncZoomOff
-    L"Синхр. панорамирования: ДА", // Toolbar_Tooltip_CompareSyncPanOn
-    L"Синхр. панорамирования: НЕТ", // Toolbar_Tooltip_CompareSyncPanOff
+    L"Синхронное масштабирование: ДА", // Toolbar_Tooltip_CompareSyncZoomOn
+    L"Синхронное масштабирование: НЕТ", // Toolbar_Tooltip_CompareSyncZoomOff
+    L"Синхронное панорамирование: ДА", // Toolbar_Tooltip_CompareSyncPanOn
+    L"Синхронное панорамирование: НЕТ", // Toolbar_Tooltip_CompareSyncPanOff
     L"Вкл./выкл. эффект прожектора", // Toolbar_Tooltip_SlideshowImmersiveToggle
     L"Выйти из режима слайд-шоу", // Toolbar_Tooltip_SlideshowExit
     L"Выйти из сравнения", // Toolbar_Tooltip_CompareExit
@@ -3526,13 +3526,13 @@ static const LanguageTable Table_RU = {
     L"Стратегия восстановления памяти:", // Settings_Label_MemoryReclaim
     L"Умная (авто)", // Settings_Option_MemSmart
     L"Агрессивная (макс. производительность)", // Settings_Option_MemAggressive
-    L"По требованию (мин. ОЗУ)", // Settings_Option_MemOnDemand
+    L"По запросу (мин. ОЗУ)", // Settings_Option_MemOnDemand
     L"Умная: Баланс производительности и ОЗУ.\nАгрессивная: Максимальная производительность и высокий уровень использования памяти.\nПо требованию: Сразу высвобождать память при простоях.", // Settings_Tooltip_MemoryReclaim
     L"Кнопка обновляемых областей в анимации", // Settings_Label_ShowDirtyRect
     L"Показывать кнопку отладки отображаемой области на панели инструментов анимации для отображения обновляемых участков.", // Settings_Tooltip_ShowDirtyRect
-    L"Скопировано!", // OSD_Copied
-    L"Координаты скопированы!", // OSD_CoordinatesCopied
-    L"Путь к файлу скопирован!", // OSD_FilePathCopied
+    L"Скопировано.", // OSD_Copied
+    L"Координаты скопированы.", // OSD_CoordinatesCopied
+    L"Путь к файлу скопирован.", // OSD_FilePathCopied
     L"Масштаб: 100%", // OSD_Zoom100
     L"Масштаб: По размеру экрана", // OSD_ZoomFit
     L"Масштаб: По размеру окна", // OSD_ZoomFitWindow
@@ -3599,13 +3599,13 @@ static const LanguageTable Table_RU = {
     L"OSD и HUD", // Settings_Label_OsdDensity
     L"Прозрачность для небольших плавающих наложений.", // Settings_Tooltip_OsdDensity
     L"Панель инструментов и боковые панели", // Settings_Label_PanelsDensity
-    L"Прозрачность для постоянных панелей управления.", // Settings_Tooltip_PanelsDensity
+    L"Прозрачность для нижней панели, информационной панели, галереи и элементов управления в правом верхнем углу окна.", // Settings_Tooltip_PanelsDensity
     L"Окна и настройки", // Settings_Label_ModalsDensity
     L"Прозрачность центрированных всплывающих окон.", // Settings_Tooltip_ModalsDensity
     L"Меню", // Settings_Label_MenusDensity
     L"Плотность материала контекстного меню (настраивается только для Acrylic).", // Settings_Tooltip_MenusDensity
     L"Тема", // Settings_Tab_Theme
-    L"Пресет", // Settings_Label_ThemeMode
+    L"Тема", // Settings_Label_ThemeMode
     L"Авто", // Settings_Option_ThemeAuto
     L"Тёмная", // Settings_Option_ThemeDark
     L"Светлая", // Settings_Option_ThemeLight
@@ -3626,15 +3626,15 @@ static const LanguageTable Table_RU = {
     L"Определяет, будут ли блокироваться границы окна по умолчанию при запуске, а не после масштабирования изображения.", // Settings_Tooltip_LockWindow
     L"Автоскрытие заголовка", // Settings_Label_AutoHideTitle
     L"Скруглённые углы", // Settings_Label_RoundedCorners
-    L"Показывать границы UI", // Settings_Label_UIBorders
+    L"Граница интерфейса", // Settings_Label_UIBorders
     L"Определяет, будут ли окно и контекстное меню со скруглёнными углами. Требуется Windows 11.", // Settings_Tooltip_RoundedCorners
     L"Закрепить нижнюю панель", // Settings_Label_LockToolbar
-    L"Мин. ширина окна", // Settings_Label_WindowMinSize
-    L"Макс. начальный размер (%)", // Settings_Label_WindowMaxSizePercent
-    L"Показывать индикаторы переполнения границ", // Settings_Label_ShowBorderIndicator
-    L"Показывает индикаторную линию в направлении, где изображение выходит за границы окна.", // Settings_Tooltip_ShowBorderIndicator
-    L"Показывать мини-карту", // Settings_Label_ShowNavigator
-    L"When mouse is over minimap, Wheel / Thumb Wheel (Shift + Wheel) pans image", // Settings_Tooltip_ShowNavigator
+    L"Минимальная ширина окна", // Settings_Label_WindowMinSize
+    L"Максимальный начальный размер", // Settings_Label_WindowMaxSizePercent
+    L"Индикаторы переполнения границ", // Settings_Label_ShowBorderIndicator
+    L"Показывать индикаторную линию в направлении, где изображение выходит за границы окна.", // Settings_Tooltip_ShowBorderIndicator
+    L"Показывать миникарту", // Settings_Label_ShowNavigator
+    L"Когда мышь находится над миникартой, колёсико/боковое колёсико (Shift + колёсико) перемещает изображение.", // Settings_Tooltip_ShowNavigator
     L"Авто", // Settings_Option_NavigatorAuto
     L"Вкл", // Settings_Option_NavigatorOn
     L"Выкл", // Settings_Option_NavigatorOff
@@ -3649,36 +3649,36 @@ static const LanguageTable Table_RU = {
     L"Вписывать", // Settings_Option_FitScreen
     L"Авто", // Settings_Option_AutoFit
     L"Инвертировать действие колёсика", // Settings_Label_InvertWheel
-    L"Задержка привязки зума (100%)", // Settings_Label_ZoomSnapDamping
+    L"Задержка привязки масштаба (100%)", // Settings_Label_ZoomSnapDamping
     L"Масштабировать окно от позиции мыши", // Settings_Label_MouseAnchorZoom
     L"Масштаб правой кнопкой мыши", // Settings_Label_RightButtonDragZoom
-    L"Скорость зума колёсиком", // Settings_Label_WheelZoomSpeed
+    L"Скорость масштабирования колёсиком", // Settings_Label_WheelZoomSpeed
     L"Боковое колёсико", // Settings_Label_ThumbWheel
-    L"Can be replaced with Shift + Wheel", // Settings_Tooltip_ThumbWheel
-    L"Alt + Wheel temporarily adjusts zoom speed", // Settings_Tooltip_WheelZoomSpeed
-    L"Can be replaced with Ctrl + Left Click", // Settings_Tooltip_MiddleDrag
-    L"Двойной клик", // Settings_Label_DoubleClick
+    L"Вместо этого можно использовать Shift + колёсико", // Settings_Tooltip_ThumbWheel
+    L"Alt + колёсико временно регулирует скорость масштабирования", // Settings_Tooltip_WheelZoomSpeed
+    L"Вместо этого можно использовать Ctrl + ЛКМ", // Settings_Tooltip_MiddleDrag
+    L"Двойной щелчок", // Settings_Label_DoubleClick
     L"Умный", // Settings_Option_DoubleClick_Smart
     L"Режим колёсика 1", // Settings_Option_DoubleClick_WheelMode1
     L"Режим колёсика 2", // Settings_Option_DoubleClick_WheelMode2
-    L"Smart: Default zoom/fullscreen toggle;\nWheel Mode 1: Double-click swaps main & thumb wheel functions;\nWheel Mode 2: Double-click toggles image pan mode;\nTip: Shift + Wheel acts as Thumb Wheel.", // Settings_Tooltip_DoubleClick
-    L"Controls key pan and wheel pan speed", // Settings_Tooltip_PanStepNormal
-    L"Main Wheel: Next/Prev; Thumb/Shift+Wheel: Zoom", // OSD_WheelMode1_NextPrevZoom
-    L"Main Wheel: Zoom; Thumb/Shift+Wheel: Next/Prev", // OSD_WheelMode1_ZoomNextPrev
-    L"Wheel: Pan Mode", // OSD_WheelMode2_Pan
-    L"Wheel: Default Mode", // OSD_WheelMode2_Default
-    L"Скорость зума правой кнопкой", // Settings_Label_RightDragZoomSpeed
-    L"Скорость зума (временно): ", // OSD_WheelZoomSpeed
-    L"Временно настроить скорость зума", // Help_Action_AdjustZoomSpeed
+    L"Умный: Стандартное переключение масштабирования/полноэкранного режима;\nРежим колёсика 1: Двойной щелчок меняет местами функции основного и бокового колёсика;\nРежим колёсика 2: Двойной щелчок переключает режим панорамирования изображения;\nСовет: вместо бокового колёсика можно использовать Shift + колёсико.", // Settings_Tooltip_DoubleClick
+    L"Управляет скоростью панорамирования клавишами и колёсиком", // Settings_Tooltip_PanStepNormal
+    L"Главное колёсико: Следующее/предыдущее; Боковое/Shift+колёсико: Масштаб", // OSD_WheelMode1_NextPrevZoom
+    L"Главное колёсико: Масштаб; Боковое/Shift+колёсико: Следующее/предыдущее", // OSD_WheelMode1_ZoomNextPrev
+    L"Колёсико: панорамирование", // OSD_WheelMode2_Pan
+    L"Колёсико: стандартный режим", // OSD_WheelMode2_Default
+    L"Скорость масштабирования ПКМ", // Settings_Label_RightDragZoomSpeed
+    L"Скорость масштабирования (временно): ", // OSD_WheelZoomSpeed
+    L"Временно настроить скорость масштабирования", // Help_Action_AdjustZoomSpeed
     L"Временно заблокировать масштаб окна", // Help_Action_LockWindowZoom
     L"Инвертировать действие боковых кнопок", // Settings_Label_InvertButtons
-    L"Использовать фиксированные уровни масштабирования", // Settings_Label_UseFixedZoom
-    L"Когда включено, Alt + колесико выполняет обычное масштабирование вместо изменения скорости.", // Settings_Tooltip_UseFixedZoom
-    L"  └  Пользовательские уровни", // Settings_Label_FixedZoomLevels
-    L"Редактировать масштабы", // Dialog_FixedZoomTitle
-    L"Введите масштабы через запятую (например, 0.5, 1, 2):", // Dialog_FixedZoomMsg
-    L"Увеличить", // Settings_Label_ZoomModeIn
-    L"Уменьшить", // Settings_Label_ZoomModeOut
+    L"Фиксированные уровни масштабирования", // Settings_Label_UseFixedZoom
+    L"Если включено, Alt + колёсико выполняет масштабирование, а не изменение скорости масштабирования.", // Settings_Tooltip_UseFixedZoom
+    L"  └  Свои уровни", // Settings_Label_FixedZoomLevels
+    L"Значения масштаба", // Dialog_FixedZoomTitle
+    L"Введите значения масштаба через запятую (например, 0.5, 1, 2):", // Dialog_FixedZoomMsg
+    L"Увеличение", // Settings_Label_ZoomModeIn
+    L"Уменьшение", // Settings_Label_ZoomModeOut
     L"Перетаскивание левой кнопкой", // Settings_Label_LeftDrag
     L"Перетаскивание средней кнопкой", // Settings_Label_MiddleDrag
     L"Щелчок средней кнопкой", // Settings_Label_MiddleClick
@@ -3686,7 +3686,7 @@ static const LanguageTable Table_RU = {
     L"Показывать OSD", // Settings_Label_ShowOSD
     L"Отключить в режиме сравнения", // Settings_Label_DisableEdgeNavInCompare
     L"Индикатор навигации", // Settings_Label_NavIndicator
-    L"Автоповорот (EXIF)", // Settings_Label_AutoRotate
+    L"Автоповорот (по EXIF)", // Settings_Label_AutoRotate
     L"Управление цветом (CMS)", // Settings_Label_CMS
     L"Расширенный цвет (HDR)", // Settings_Label_AdvancedColor
     L"Тональная компрессия HDR", // Settings_Label_HdrToneMapping
@@ -3702,7 +3702,7 @@ static const LanguageTable Table_RU = {
     L"99.9% (агрессивный)", // Settings_Option_HdrPeakPercentile_999
     L"Диапазон обесцвечивания светов HDR", // Settings_Label_HdrDesatThreshold
     L"Порог начала обесцвечивания светлых участков. 0.0 - обесцвечивать все света, 1.0 - не обесцвечивать. Рекомендуемое значение: 0.18.", // Settings_Tooltip_HdrDesatThreshold
-    L"Интенсивность обесцвечивания светов HDR", // Settings_Label_HdrMaxDesat
+    L"Степень обесцвечивания светов HDR", // Settings_Label_HdrMaxDesat
     L"Максимальная интенсивность обесцвечивания экстремальных светов. 0.0 - не обесцвечивать, 1.0 - полностью до белого. Рекомендуемое значение: 0.75.", // Settings_Tooltip_HdrMaxDesat
     L"Колориметрическая", // Settings_Option_HdrColorimetric
     L"Сплайн", // Settings_Option_HdrSpline
@@ -3714,8 +3714,8 @@ static const LanguageTable Table_RU = {
     L"Свой...", // Context_SoftProofCustom
     L"Скоро", // Settings_Value_ComingSoon
     L"Принудительное декодирование RAW", // Settings_Label_ForceRaw
-    L"Связывание RAW+JPEG", // Settings_Label_PairRawJpeg
-    L"Показывать RAW и одноимённый снимок камеры (JPEG/HEIF) как одну фотографию.\nВ списке остаётся только готовое изображение с пометкой формата RAW (например, +CR3); время съёмки проверяется в фоне, несовпадающие пары разделяются.\nКнопка RAW на панели или её горячая клавиша переключает между снимком камеры и декодированным RAW; горячая клавиша парного сравнения показывает обе версии рядом.", // Settings_Tooltip_PairRawJpeg
+    L"Объединение RAW+JPEG", // Settings_Label_PairRawJpeg
+    L"Показывать RAW и одноимённый файл JPEG/HEIF как одно фото.\nВ списке остаётся только готовое изображение с пометкой формата RAW (например, +CR3); время съёмки проверяется в фоне, несовпадающие пары разделяются.\nКнопка RAW на панели или её горячая клавиша переключает между JPEG/HEIF и декодированным RAW; горячая клавиша парного сравнения показывает обе версии рядом.", // Settings_Tooltip_PairRawJpeg
     L"Экспозиция (яркость)", // Settings_Label_Exposure
     L"Регулировка яркости изображения (компенсация экспозиции). Диапазон: 0.18x - 10.0x.", // Settings_Tooltip_Exposure
     L"Добавить в 'Открыть с помощью'", // Settings_Label_AddToOpenWith
@@ -3733,7 +3733,7 @@ static const LanguageTable Table_RU = {
     L"Сбросить все настройки", // Settings_Label_Reset
     L"Восстановить", // Settings_Action_Restore
     L"Готово", // Settings_Action_Done
-    L"Импорт / экспорт (.ini)", // Settings_Header_ConfigManagement
+    L"Импорт/экспорт (.ini)", // Settings_Header_ConfigManagement
     L"Неуправляемый (быстро)", // Settings_Option_CmsUnmanaged
     L"sRGB (стандарт)", // Settings_Option_CmssRGB
     L"Display P3 (широкий охват)", // Settings_Option_CmsP3
@@ -3742,7 +3742,7 @@ static const LanguageTable Table_RU = {
     L"ProPhoto RGB", // Settings_Option_CmsProPhoto
     L"Цель рендеринга", // Settings_Label_CmsIntent
     L"Определение выхода за охват", // Settings_Label_GamutWarning
-    L"Анализ и выделение областей вне цветового охвата. Режимы: Выкл, только в режиме цветопробы (по умолчанию), либо для цветопробы и монитора одновременно.", // Settings_Tooltip_GamutWarning
+    L"Анализ и выделение областей вне цветового охвата. Режимы: выключено / только в режиме цветопробы (по умолчанию) / для цветопробы и монитора одновременно.", // Settings_Tooltip_GamutWarning
     L"Автоуведомление об ошибке охвата", // Settings_Label_GamutAutoPrompt
     L"Показать OSD-уведомление при обнаружении ошибок охвата. Выделение можно включить вручную на панели инструментов.", // Settings_Tooltip_GamutAutoPrompt
     L"Цвет выделения вне охвата", // Settings_Label_GamutColor
@@ -3765,7 +3765,7 @@ static const LanguageTable Table_RU = {
     L"Эффекты", // Settings_Option_Effects
     L"Контекстное меню", // Settings_Label_ContextMenuBackdrop
     L"Стиль эффекта", // Settings_Label_CanvasEffectStyle
-    L"Эффекты Mica и Mica Alt поддерживаются только в Windows 11. Acrylic использует больше системных ресурсов.", // Settings_Tooltip_BackdropEffectsTip
+    L"Эффекты Mica и Mica Alt поддерживаются только в Windows 11. Эффект Acrylic использует больше системных ресурсов.", // Settings_Tooltip_BackdropEffectsTip
     L"Белый", // Settings_Option_White
     L"Сетка", // Settings_Option_Grid
     L"Свой", // Settings_Option_Custom
@@ -3789,8 +3789,8 @@ static const LanguageTable Table_RU = {
     L"Дата съёмки (EXIF)", // Settings_Option_SortDateTaken
     L"Размер", // Settings_Option_SortSize
     L"Тип", // Settings_Option_SortType
-    L"Цикл в папке", // Settings_Option_NavLoop
-    L"Через вложенные папки", // Settings_Option_NavThrough
+    L"Циклично в папке", // Settings_Option_NavLoop
+    L"Заходить во вложенные папки", // Settings_Option_NavThrough
     L"Линейный (простое сглаживание)", // Settings_Option_Linear
     L"По соседним (макс. резкость)", // Settings_Option_Nearest
     L"HQ кубический (макс. сглаживание)", // Settings_Option_HighQualityCubic
@@ -3825,10 +3825,10 @@ static const LanguageTable Table_RU = {
     L"Советы и термины", // Help_Header_Tips
     L"* Горячие клавиши и контекстное меню действуют только на текущий процесс. Настройки не изменяются.", // Help_Tip_ContextScope
     L"Поворот: При оптимизации краёв они слегка обрезаются, чтобы вписать в границы блока " L"(без потерь). В режиме с потерями выполняется полное перекодирование изображения.", // Help_Tip_Rotation
-    L"Видеостена (Ctrl+F11): Распределение картинки по всем мониторам. Если кнопка закрытия скрыта, " L"для выхода дважды щёлкните мышью.", // Help_Tip_VideoWall
+    L"Видеостена (Ctrl+F11): Распределение изображения по всем мониторам. Если кнопка закрытия скрыта, " L"для выхода дважды щёлкните мышью.", // Help_Tip_VideoWall
     L"Режим кальки/плёнки: Если включено, изображение становится полупрозрачным, открывая нижележащие элементы. Размер и прозрачность настраиваются. Включите на панели инструментов режим сквозных щелчков мышью, в котором всё, кроме Shift+Esc, игнорируется - QuickView становится прозрачным наложением.", // Help_Tip_DesignerMode
-    L"Предупреждение о цветовом охвате: Обнаружение цветов вне охвата для монитора или профиля цветопробы. Режимы: Выкл/Только цветопроба/Все (по умолчанию: цветопроба). Переключение - через панель инструментов.", // Help_Tip_GamutDetection
-    L"RAW: По умолчанию QuickView показывает встроенную картинку предпросмотра. Нажмите кнопку RAW " L"для полного декодирования (может выглядеть по-другому из-за параметров рендеринга).", // Help_Tip_Raw
+    L"Предупреждение о цветовом охвате: Обнаружение цветов вне охвата для монитора или профиля цветопробы. Режимы: Выключено/Только цветопроба (по умолчанию)/Все. Переключение - через панель инструментов.", // Help_Tip_GamutDetection
+    L"RAW: По умолчанию QuickView показывает встроенную в RAW картинку предпросмотра. Нажмите кнопку RAW " L"для полного декодирования (из-за параметров рендеринга изображение может выглядеть по-другому).", // Help_Tip_Raw
     L"Качество JPEG: Ориентировочное значение качества. Может слегка " L"отличаться от настройки сохранения из-за различий в алгоритме " L"(например, Photoshop 100% \u2248 98%).", // Help_Tip_JpegQ
     L"Сравнение цветопробы: Вход в режим сравнения при включённой цветопробе автоматически сравнит оригинал и пробу.", // Help_Tip_SoftProofCompare
     L"Доступна новая версия!", // Dialog_UpdateTitle
@@ -3859,9 +3859,9 @@ static const LanguageTable Table_RU = {
     L"Высокая: ", // HUD_Label_High
     L"Низкая: ", // HUD_Label_Low
     L"Эталон: ", // HUD_Label_Ref
-    L"Диафильм из галереи (при наведении сверху)", // Settings_Header_GalleryTrigger
+    L"Фотоплёнка (при наведении вверху)", // Settings_Header_GalleryTrigger
     L"Режим триггера", // Settings_Label_GalleryTriggerMode
-    L"Не скрывать после клика", // Settings_Label_KeepGalleryVisibleOnThumbnailClick
+    L"Не скрывать после щелчка", // Settings_Label_KeepGalleryVisibleOnThumbnailClick
     L"Эта функция автоматически включит блокировку окна и сохранение размера окна при навигации.", // Settings_Tooltip_KeepGalleryVisibleOnThumbnailClick
     L"Автонаведение", // Settings_Option_GalleryTriggerAuto
     L"Наведение на точку", // Settings_Option_GalleryTriggerDelay
@@ -3872,29 +3872,29 @@ static const LanguageTable Table_RU = {
     L"Время задержки", // Settings_Label_GalleryDwellTime
     L"Задержка выхода", // Settings_Label_GalleryExitDelay
 
-    L"Слайд-шоу запущено", // OSD_SlideshowStarted
+    L"Слайд-шоу начато", // OSD_SlideshowStarted
     L"Слайд-шоу остановлено", // OSD_SlideshowStopped
     L"Слайд-шоу возобновлено", // OSD_SlideshowResumed
     L"Слайд-шоу на паузе", // OSD_SlideshowPaused
     L"Эффект: Прожектор", // OSD_ImmersiveSpotlight
     L"Эффект: Обычный", // OSD_ImmersiveNormal
-    L"Задание на печать отправлено. Вы можете продолжить просмотр.", // OSD_PrintJobStarted
+    L"Задание на печать отправлено. Можно продолжать просмотр.", // OSD_PrintJobStarted
     L"Задание на печать успешно отправлено.", // OSD_PrintJobFinished
     L"Режим слайд-шоу", // Context_SlideshowMode
     L"Интервал (сек)", // Settings_Label_SlideshowInterval
     L"Режим погружения", // Settings_Label_SlideshowImmersive
-    L"Настройка краткой инфо-панели", // Settings_Label_CustomLiteInfoPanel
-    L"Настройка полной инфо-панели", // Settings_Label_CustomFullInfoPanel
-    L"Масштаб инфо-панели", // Settings_Label_InfoPanelScale
+    L"Настройка краткой инфопанели", // Settings_Label_CustomLiteInfoPanel
+    L"Настройка полной инфопанели", // Settings_Label_CustomFullInfoPanel
+    L"Масштаб инфопанели", // Settings_Label_InfoPanelScale
     L"Элементы в обычном режиме", // Settings_Label_ItemsInNormalMode
     L"Элементы в режиме сравнения", // Settings_Label_ItemsInCompareMode
     L"Шаблон разделителя", // Settings_Label_SeparatorPreset
     L"Обычный", // Settings_Option_SlideshowNormal
     L"Прожектор", // Settings_Option_SlideshowSpotlight
     L"Форма экранной лупы", // Settings_Label_LoupeShape
-    L"Квадрат", // Settings_Option_LoupeShapeSquare
-    L"Круг", // Settings_Option_LoupeShapeCircle
-    L"Удерживайте сочетание клавиш и прокручивайте колесико мыши, чтобы настроить размер лупы.", // Settings_Tooltip_LoupeHotkey
+    L"Квадратная", // Settings_Option_LoupeShapeSquare
+    L"Круглая", // Settings_Option_LoupeShapeCircle
+    L"Чтобы настроить размер лупы, удерживайте сочетание клавиш и вращайте колёсико мыши.", // Settings_Tooltip_LoupeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -6221,13 +6221,13 @@ void SetLanguage(Language lang) {
     Settings_Tab_Shortcuts = L"Клавиши";
     Settings_Hotkey_PressKey = L"Нажмите клавиши...";
     Settings_Hotkey_Conflict = L"Конфликт клавиш";
-    Settings_Hotkey_ConflictPrompt = L"Занято «%s». Продолжение сбросит привязку.";
+    Settings_Hotkey_ConflictPrompt = L"Занято \"%s\". Продолжение сбросит привязку.";
     Settings_Hotkey_Restore = L"Сбросить горячие клавиши";
     Settings_Hotkey_Restored = L"Восстановлено";
     Settings_Hotkey_MouseTip = L"Подсказка: поддерживаются средняя кнопка, боковые и другие многофункциональные кнопки мыши. Для сопоставления дополнительных кнопок сначала назначьте их на клавиши клавиатуры в драйвере мыши.";
     Settings_Header_KeyboardPan = L"Шаг сдвига";
-    Settings_Label_PanStepNormal = L"Шаг сдвига (Обычный)";
-    Settings_Label_PanStepFast = L"Шаг клавиатурного сдвига (Быстрый)";
+    Settings_Label_PanStepNormal = L"Шаг сдвига (обычный)";
+    Settings_Label_PanStepFast = L"Шаг сдвига клавишами (быстрый)";
     break;
   case Language::German:
     Settings_Tab_Shortcuts = L"Kürzel";
@@ -6479,7 +6479,7 @@ std::wstring GetHotkeyActionName(HotkeyAction action) {
         case AppStrings::Language::ChineseSimplified:  raw = L"配对对比 (直出 vs RAW)"; break;
         case AppStrings::Language::ChineseTraditional: raw = L"配對對比 (直出 vs RAW)"; break;
         case AppStrings::Language::Japanese:           raw = L"ペア比較 (撮って出し vs RAW)"; break;
-        case AppStrings::Language::Russian:            raw = L"Сравнение пары (камерный снимок и RAW)"; break;
+        case AppStrings::Language::Russian:            raw = L"Сравнение пары (JPEG/HEIF и RAW)"; break;
         case AppStrings::Language::German:             raw = L"Paarvergleich (Kamerabild vs. RAW)"; break;
         case AppStrings::Language::Spanish:            raw = L"Comparar par (imagen de cámara vs RAW)"; break;
         case AppStrings::Language::French:             raw = L"Comparer la paire (image boîtier vs RAW)"; break;
