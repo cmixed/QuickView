@@ -1,4 +1,5 @@
 #include "UIRenderer.h"
+#include "RatingStore.h"
 #include "StringUtils.h"
 #include "AppStrings.h"
 #include <Shlwapi.h>
@@ -45,6 +46,7 @@ extern ImageEngine* g_pImageEngine; // [v3.1] Accessor (renamed from g_imageEngi
 
 #include "FileNavigator.h"
 extern FileNavigator& g_navigator;
+extern RatingStore g_ratingStore;
 
 // Dialog rendering is handled by DialogController
 
@@ -113,6 +115,23 @@ static bool PointInRect(float x, float y, const D2D1_RECT_F& rect) {
 }
 
 namespace {
+inline void ApplyStarAccent(IDWriteTextLayout* layout, std::wstring_view text, ID2D1Brush* accentBrush) {
+    if (!layout || !accentBrush) return;
+    size_t i = 0;
+    while (i < text.size()) {
+        if (text[i] == L'\u2605') {
+            size_t start = i;
+            while (i < text.size() && text[i] == L'\u2605') {
+                i++;
+            }
+            DWRITE_TEXT_RANGE range{ (UINT32)start, (UINT32)(i - start) };
+            layout->SetDrawingEffect(accentBrush, range);
+        } else {
+            i++;
+        }
+    }
+}
+
 // Delegate to shared StringUtils
 static std::vector<std::wstring> SplitString(const std::wstring& str, wchar_t delim) {
     return QuickView::SplitAndTrimCSV(str, delim);
@@ -1384,6 +1403,13 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
             m_dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.length(), m_osdFormat.Get(), 1000.0f*s, 100.0f*s, &layout);
             if (!layout) return;
 
+            if (text.find(L'\u2605') != std::wstring::npos) {
+                ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+                D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, m_osdOpacity);
+                dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+                ApplyStarAccent(layout.Get(), text, starAccentBrush.Get());
+            }
+
             DWRITE_TEXT_METRICS tm; layout->GetMetrics(&tm);
             float padV = 8.0f * s;
             float th = tm.height + padV * 2.0f;
@@ -1462,6 +1488,12 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
             m_osdText.c_str(), (UINT32)m_osdText.length(),
             m_osdFormat.Get(), 2000.0f * s, 120.0f * s, &textLayout
         );
+    }
+    if (textLayout && m_osdText.find(L'\u2605') != std::wstring::npos) {
+        ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+        D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, m_osdOpacity);
+        dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+        ApplyStarAccent(textLayout.Get(), m_osdText, starAccentBrush.Get());
     }
     
     float toastW = 300.0f * s, toastH = 50.0f * s;
@@ -2610,6 +2642,19 @@ namespace {
             }
             return std::nullopt;
         }
+        else if (key == L"Rating") {
+            // Only a rated photo takes up room in the compact strip; the
+            // detailed panel is where an unrated one still shows its row.
+            const std::wstring p = path.empty() ? meta.SourcePath : path;
+            if (p.empty()) return std::nullopt;
+            const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(p));
+            if (!rating || rating->stars <= 0) return std::nullopt;
+            static constexpr std::wstring_view SOLID_STARS[] = {
+                L"", L"\u2605", L"\u2605\u2605", L"\u2605\u2605\u2605", L"\u2605\u2605\u2605\u2605", L"\u2605\u2605\u2605\u2605\u2605"
+            };
+            const int starCount = std::clamp(rating->stars, 1, 5);
+            return std::wstring(SOLID_STARS[starCount]);
+        }
         else if (key == L"Format") {
             std::wstring fmtStr;
             if (!meta.FormatDetails.empty()) {
@@ -2869,6 +2914,13 @@ std::wstring UIRenderer::BuildCompactInfoText(float maxFileW) const {
     CombineHash(stateHash, currentZoom);
     CombineHash(stateHash, g_imagePath);
     CombineHash(stateHash, g_config.InfoPanelLiteItemsNormal);
+    // [Ratings] Same reason as the full panel: the read lands asynchronously,
+    // so it must be part of the cache key or the strip would never update.
+    if (const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(g_imagePath))) {
+        CombineHash(stateHash, rating->stars);
+    } else {
+        CombineHash(stateHash, -1);
+    }
     CombineHash(stateHash, maxFileW);
     CombineHash(stateHash, g_currentMetadata.IsFullMetadataLoaded);
     CombineHash(stateHash, g_currentMetadata.HasSharpness);
@@ -2974,6 +3026,38 @@ std::vector<InfoRow> UIRenderer::BuildGridRows(const CImageLoader::ImageMetadata
         }
     }
     
+    // [Ratings] Star rating, read off the decode pipeline by RatingStore; the
+    // row only appears once that background read has landed. Icon: glowing
+    // star is taken by HDR, so the plain star (U+2B50) marks this row.
+    // Shown as soon as the read has landed, unrated included, so that enabling
+    // the item does not make the row appear and vanish from photo to photo.
+    if (const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(imagePath))) {
+        static constexpr std::wstring_view FIVE_STAR_BARS[] = {
+            L"\u2606\u2606\u2606\u2606\u2606",
+            L"\u2605\u2606\u2606\u2606\u2606",
+            L"\u2605\u2605\u2606\u2606\u2606",
+            L"\u2605\u2605\u2605\u2606\u2606",
+            L"\u2605\u2605\u2605\u2605\u2606",
+            L"\u2605\u2605\u2605\u2605\u2605"
+        };
+        const int starCount = std::clamp(rating->stars, 0, 5);
+        const std::wstring stars(FIVE_STAR_BARS[starCount]);
+
+        // The hot path stays silent about a disagreement between the two files
+        // of a pair; the full panel is where it is spelled out.
+        std::wstring detail;
+        if (rating->conflict) {
+            std::wstring_view ext = QuickView::ExtensionOf(imagePath);
+            if (!ext.empty() && ext.front() == L'.') ext.remove_prefix(1);
+            wchar_t detBuf[64];
+            swprintf_s(detBuf, L"(sidecar; %.*s has %d)", static_cast<int>(ext.size()), ext.data(), rating->otherStars);
+            detail = detBuf;
+        }
+        rows.push_back({L"\u2B50", L"Rating", stars, detail,
+                        stars + (detail.empty() ? L"" : L" " + detail),
+                        TruncateMode::None, false});
+    }
+
     // [RAW+JPEG Pairing] Hidden RAW sibling of this photo. Icon: link
     // (U+1F517) = "file paired with this photo"; the film-frames icon is
     // already taken by the Format row.
@@ -3575,6 +3659,16 @@ void UIRenderer::BuildInfoGrid() {
         CombineHash(stateHash, g_currentMetadata.SrHeight);
         CombineHash(stateHash, g_currentMetadata.SrScale);
     }
+    // [Ratings] The background read lands after the panel has already been
+    // built for this photo, so the rating has to take part in the hash --
+    // otherwise the cached rows would never pick the star row up.
+    if (const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(g_imagePath))) {
+        CombineHash(stateHash, rating->stars);
+        CombineHash(stateHash, rating->conflict);
+        CombineHash(stateHash, (int)rating->source);
+    } else {
+        CombineHash(stateHash, -1); // not read yet
+    }
     const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
     CombineHash(stateHash, editState.HasCrop);
     if (editState.HasCrop) {
@@ -3679,7 +3773,26 @@ void UIRenderer::DrawInfoGrid(ID2D1DeviceContext* dc, float startX, float startY
         
         // Draw main value
         D2D1_RECT_F valueRect = D2D1::RectF(valueColStart, y, valueColStart + mainMaxWidth, y + rowH);
-        dc->DrawText(row.displayText.c_str(), (UINT32)row.displayText.length(), m_panelFormat.Get(), valueRect, brushMain.Get());
+        if (row.displayText.find(L'\u2605') != std::wstring::npos || (row.label && wcscmp(row.label, L"Rating") == 0)) {
+            ComPtr<IDWriteTextLayout> valLayout;
+            if (m_dwriteFactory && m_panelFormat) {
+                m_dwriteFactory->CreateTextLayout(
+                    row.displayText.c_str(), (UINT32)row.displayText.length(),
+                    m_panelFormat.Get(), mainMaxWidth, rowH, &valLayout
+                );
+            }
+            if (valLayout) {
+                ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+                D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+                dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+                ApplyStarAccent(valLayout.Get(), row.displayText, starAccentBrush.Get());
+                dc->DrawTextLayout(D2D1::Point2F(valueRect.left, valueRect.top), valLayout.Get(), brushDim.Get());
+            } else {
+                dc->DrawText(row.displayText.c_str(), (UINT32)row.displayText.length(), m_panelFormat.Get(), valueRect, brushMain.Get());
+            }
+        } else {
+            dc->DrawText(row.displayText.c_str(), (UINT32)row.displayText.length(), m_panelFormat.Get(), valueRect, brushMain.Get());
+        }
         
         // Draw sub value (theme-aware dim)
         if (!row.valueSub.empty()) {
@@ -4047,7 +4160,26 @@ void UIRenderer::DrawCompactInfo(ID2D1DeviceContext* dc) {
     
     // Text drawing
     D2D1_RECT_F textRect = D2D1::RectF(textLeft, startY + paddingTop, textRight, startY + paddingTop + itemHeight);
-    dc->DrawText(info.c_str(), (UINT32)info.length(), m_panelFormat.Get(), textRect, brushText.Get());
+    if (info.find(L'\u2605') != std::wstring::npos) {
+        ComPtr<IDWriteTextLayout> infoLayout;
+        if (m_dwriteFactory && m_panelFormat) {
+            m_dwriteFactory->CreateTextLayout(
+                info.c_str(), (UINT32)info.length(),
+                m_panelFormat.Get(), textRight - textLeft, itemHeight, &infoLayout
+            );
+        }
+        if (infoLayout) {
+            ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+            D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+            dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+            ApplyStarAccent(infoLayout.Get(), info, starAccentBrush.Get());
+            dc->DrawTextLayout(D2D1::Point2F(textRect.left, textRect.top), infoLayout.Get(), brushText.Get());
+        } else {
+            dc->DrawText(info.c_str(), (UINT32)info.length(), m_panelFormat.Get(), textRect, brushText.Get());
+        }
+    } else {
+        dc->DrawText(info.c_str(), (UINT32)info.length(), m_panelFormat.Get(), textRect, brushText.Get());
+    }
     
     // Draw expand button "+"
     dc->DrawText(L"+", 1, m_panelFormat.Get(), D2D1::RectF(m_panelToggleRect.left + 4.0f * s, m_panelToggleRect.top, m_panelToggleRect.right, m_panelToggleRect.bottom), brushYellow.Get());
@@ -4999,7 +5131,26 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
                 D2D1_RECT_F r = D2D1::RectF(currentX, y + paddingTop, currentX + tw, y + paddingTop + itemHeight);
                 ID2D1SolidColorBrush* b = m.isWinner ? winBrush : textBrush;
                 
-                dc->DrawText(m.val.c_str(), (UINT32)m.val.length(), m_panelFormat.Get(), r, b);
+                if (m.val.find(L'\u2605') != std::wstring::npos) {
+                    ComPtr<IDWriteTextLayout> metricLayout;
+                    if (m_dwriteFactory && m_panelFormat) {
+                        m_dwriteFactory->CreateTextLayout(
+                            m.val.c_str(), (UINT32)m.val.length(),
+                            m_panelFormat.Get(), tw, itemHeight, &metricLayout
+                        );
+                    }
+                    if (metricLayout) {
+                        ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+                        D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+                        dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+                        ApplyStarAccent(metricLayout.Get(), m.val, starAccentBrush.Get());
+                        dc->DrawTextLayout(D2D1::Point2F(r.left, r.top), metricLayout.Get(), b);
+                    } else {
+                        dc->DrawText(m.val.c_str(), (UINT32)m.val.length(), m_panelFormat.Get(), r, b);
+                    }
+                } else {
+                    dc->DrawText(m.val.c_str(), (UINT32)m.val.length(), m_panelFormat.Get(), r, b);
+                }
                 currentX += tw;
 
                 if (i < metrics.size() - 1) {

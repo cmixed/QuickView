@@ -1776,7 +1776,7 @@ void SettingsOverlay::BuildMenu() {
     tagCloudNormal.label = AppStrings::Settings_Label_ItemsInNormalMode;
     tagCloudNormal.type = OptionType::TagCloud;
     tagCloudNormal.pStrVal = &g_config.InfoPanelLiteItemsNormal;
-    tagCloudNormal.options = { L"Zoom", L"Progress", L"File", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
+    tagCloudNormal.options = { L"Zoom", L"Progress", L"File", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
     tagCloudNormal.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
     tabVisuals.items.push_back(tagCloudNormal);
 
@@ -1784,7 +1784,7 @@ void SettingsOverlay::BuildMenu() {
     tagCloudCompare.label = AppStrings::Settings_Label_ItemsInCompareMode;
     tagCloudCompare.type = OptionType::TagCloud;
     tagCloudCompare.pStrVal = &g_config.InfoPanelLiteItemsCompare;
-    tagCloudCompare.options = { L"Zoom", L"Progress", L"File", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
+    tagCloudCompare.options = { L"Zoom", L"Progress", L"File", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
     tagCloudCompare.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
     tabVisuals.items.push_back(tagCloudCompare);
 
@@ -1813,7 +1813,7 @@ void SettingsOverlay::BuildMenu() {
     tagCloudFullNormal.label = AppStrings::Settings_Label_ItemsInNormalMode;
     tagCloudFullNormal.type = OptionType::TagCloud;
     tagCloudFullNormal.pStrVal = &g_config.InfoPanelFullItemsNormal;
-    tagCloudFullNormal.options = { L"Histogram", L"Position", L"File", L"RAW", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
+    tagCloudFullNormal.options = { L"Histogram", L"Position", L"File", L"RAW", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program", L"GPS" };
     tagCloudFullNormal.tagCloudNoLimit = true;
     tagCloudFullNormal.tagCloudNoSort = true;
     tagCloudFullNormal.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
@@ -1823,7 +1823,7 @@ void SettingsOverlay::BuildMenu() {
     tagCloudFullCompare.label = AppStrings::Settings_Label_ItemsInCompareMode;
     tagCloudFullCompare.type = OptionType::TagCloud;
     tagCloudFullCompare.pStrVal = &g_config.InfoPanelFullItemsCompare;
-    tagCloudFullCompare.options = { L"Histogram", L"File", L"RAW", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
+    tagCloudFullCompare.options = { L"Histogram", L"File", L"RAW", L"Rating", L"Size", L"Disk", L"Date", L"Format", L"Sharp", L"Ent", L"BPP", L"Camera", L"Exp", L"Lens", L"Focal", L"Profile", L"HDR", L"Flash", L"W.Bal", L"Meter", L"Prog", L"Program" };
     tagCloudFullCompare.tagCloudNoLimit = true;
     tagCloudFullCompare.tagCloudNoSort = true;
     tagCloudFullCompare.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
@@ -2107,6 +2107,8 @@ void SettingsOverlay::BuildMenu() {
             tabKeys.items.push_back({ isChinese ? L"动画控制" : L"Animation Control", OptionType::Header });
         } else if (action == HotkeyAction::ToggleGallery) {
             tabKeys.items.push_back({ isChinese ? L"视图模式" : L"View Modes", OptionType::Header });
+        } else if (action == HotkeyAction::Rate0) {
+            tabKeys.items.push_back({ isChinese ? L"星级评分" : L"Rating", OptionType::Header });
         } else if (action == HotkeyAction::OpenFile) {
             tabKeys.items.push_back({ isChinese ? L"文件操作" : L"File Operations", OptionType::Header });
         } else if (action == HotkeyAction::ToggleOverlay) {

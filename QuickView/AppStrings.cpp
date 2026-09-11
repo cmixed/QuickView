@@ -1385,8 +1385,8 @@ static const LanguageTable Table_EN = {
     L"Flip Horizontal\tH", // Context_FlipH
     L"Flip Vertical\tV", // Context_FlipV
     L"Transform", // Context_Transform
-    L"Actual Size (100%)\t1 / Z", // Context_ActualSize
-    L"Fit to Screen\t0 / F", // Context_FitToScreen
+    L"Actual Size (100%)\tZ", // Context_ActualSize
+    L"Fit to Screen\tF", // Context_FitToScreen
     L"Fit Window", // Context_FitWindow
     L"Fill Window", // Context_FillWindow
     L"Zoom In\t+ / Ctrl +", // Context_ZoomIn
@@ -2013,8 +2013,8 @@ static const LanguageTable Table_CN = {
     L"水平翻转\tH", // Context_FlipH
     L"垂直翻转\tV", // Context_FlipV
     L"变换", // Context_Transform
-    L"实际大小 (100%)\t1 / Z", // Context_ActualSize
-    L"适应屏幕\t0 / F", // Context_FitToScreen
+    L"实际大小 (100%)\tZ", // Context_ActualSize
+    L"适应屏幕\tF", // Context_FitToScreen
     L"适应窗口", // Context_FitWindow
     L"填充窗口", // Context_FillWindow
     L"放大\t+ / Ctrl +", // Context_ZoomIn
@@ -2641,8 +2641,8 @@ static const LanguageTable Table_TW = {
     L"水平翻轉\tH", // Context_FlipH
     L"垂直翻轉\tV", // Context_FlipV
     L"變換", // Context_Transform
-    L"實際大小 (100%)\t1 / Z", // Context_ActualSize
-    L"適應螢幕\t0 / F", // Context_FitToScreen
+    L"實際大小 (100%)\tZ", // Context_ActualSize
+    L"適應螢幕\tF", // Context_FitToScreen
     L"適應視窗", // Context_FitWindow
     L"填滿視窗", // Context_FillWindow
     L"放大\t+ / Ctrl +", // Context_ZoomIn
@@ -3269,8 +3269,8 @@ static const LanguageTable Table_JA = {
     L"左右反転\tH", // Context_FlipH
     L"上下反転\tV", // Context_FlipV
     L"変形", // Context_Transform
-    L"原寸大 (100%)\t1 / Z", // Context_ActualSize
-    L"画面に合わせる\t0 / F", // Context_FitToScreen
+    L"原寸大 (100%)\tZ", // Context_ActualSize
+    L"画面に合わせる\tF", // Context_FitToScreen
     L"ウィンドウに合わせる", // Context_FitWindow
     L"ウィンドウを埋める", // Context_FillWindow
     L"拡大\t+ / Ctrl +", // Context_ZoomIn
@@ -3897,8 +3897,8 @@ static const LanguageTable Table_RU = {
     L"Отразить по горизонтали\tH", // Context_FlipH
     L"Отразить по вертикали\tV", // Context_FlipV
     L"Преобразовать", // Context_Transform
-    L"Настоящий размер (100%)\t1 / Z", // Context_ActualSize
-    L"По размеру экрана\t0 / F", // Context_FitToScreen
+    L"Настоящий размер (100%)\tZ", // Context_ActualSize
+    L"По размеру экрана\tF", // Context_FitToScreen
     L"По размеру окна", // Context_FitWindow
     L"Заполнить окно", // Context_FillWindow
     L"Увеличить\t+ / Ctrl +", // Context_ZoomIn
@@ -4525,8 +4525,8 @@ static const LanguageTable Table_DE = {
     L"Horizontal spiegeln\tH", // Context_FlipH
     L"Vertikal spiegeln\tV", // Context_FlipV
     L"Transformieren", // Context_Transform
-    L"Originalgröße (100%)\t1 / Z", // Context_ActualSize
-    L"An Bildschirm anpassen\t0 / F", // Context_FitToScreen
+    L"Originalgröße (100%)\tZ", // Context_ActualSize
+    L"An Bildschirm anpassen\tF", // Context_FitToScreen
     L"An Fenster anpassen", // Context_FitWindow
     L"Fenster ausfüllen", // Context_FillWindow
     L"Vergrößern\t+ / Strg +", // Context_ZoomIn
@@ -5153,8 +5153,8 @@ static const LanguageTable Table_ES = {
     L"Voltear horizontal\tH", // Context_FlipH
     L"Voltear vertical\tV", // Context_FlipV
     L"Transformar", // Context_Transform
-    L"Tamaño real (100%)\t1 / Z", // Context_ActualSize
-    L"Ajustar a pantalla\t0 / F", // Context_FitToScreen
+    L"Tamaño real (100%)\tZ", // Context_ActualSize
+    L"Ajustar a pantalla\tF", // Context_FitToScreen
     L"Ajustar a ventana", // Context_FitWindow
     L"Rellenar ventana", // Context_FillWindow
     L"Acercar\t+ / Ctrl +", // Context_ZoomIn
@@ -5781,8 +5781,8 @@ static const LanguageTable Table_FR = {
     L"Flip Horizontal\tH", // Context_FlipH
     L"Flip Vertical\tV", // Context_FlipV
     L"Transform", // Context_Transform
-    L"Actual Size (100%)\t1 / Z", // Context_ActualSize
-    L"Fit to Screen\t0 / F", // Context_FitToScreen
+    L"Actual Size (100%)\tZ", // Context_ActualSize
+    L"Fit to Screen\tF", // Context_FitToScreen
     L"Fit Window", // Context_FitWindow
     L"Fill Window", // Context_FillWindow
     L"Zoom In\t+ / Ctrl +", // Context_ZoomIn
@@ -7348,6 +7348,34 @@ std::wstring GetHotkeyActionName(HotkeyAction action) {
     case HotkeyAction::RenderRaw:
         raw = AppStrings::Context_RenderRAW;
         break;
+    case HotkeyAction::Rate0:
+    case HotkeyAction::Rate1:
+    case HotkeyAction::Rate2:
+    case HotkeyAction::Rate3:
+    case HotkeyAction::Rate4:
+    case HotkeyAction::Rate5: {
+        needsCleaning = false;
+        const int stars = (int)action - (int)HotkeyAction::Rate0;
+        // Kept as one string per language rather than a table entry: these
+        // names appear only in the shortcut list.
+        static thread_local std::wstring s_rateName;
+        const wchar_t* pattern;
+        switch (GetActiveLanguage()) {
+        case AppStrings::Language::ChineseSimplified:  pattern = stars ? L"评分 %d 星" : L"清除评分"; break;
+        case AppStrings::Language::ChineseTraditional: pattern = stars ? L"評分 %d 星" : L"清除評分"; break;
+        case AppStrings::Language::Japanese:           pattern = stars ? L"評価 %d つ星" : L"評価を消去"; break;
+        case AppStrings::Language::Russian:            pattern = stars ? L"Оценка: %d" : L"Снять оценку"; break;
+        case AppStrings::Language::German:             pattern = stars ? L"%d Sterne" : L"Bewertung löschen"; break;
+        case AppStrings::Language::Spanish:            pattern = stars ? L"%d estrellas" : L"Quitar valoración"; break;
+        case AppStrings::Language::French:             pattern = stars ? L"%d étoiles" : L"Effacer la note"; break;
+        default:                                       pattern = stars ? L"Rate %d Stars" : L"Clear Rating"; break;
+        }
+        wchar_t buf[64];
+        swprintf_s(buf, pattern, stars);
+        s_rateName = buf;
+        raw = s_rateName.c_str();
+        break;
+    }
     case HotkeyAction::ComparePair: {
         needsCleaning = false;
         switch (GetActiveLanguage()) {

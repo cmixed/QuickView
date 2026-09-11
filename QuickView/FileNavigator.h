@@ -198,6 +198,14 @@ public:
     // only) cannot parse: RAW via LibRaw, HEIF etc. via WIC. Injected at
     // startup because the unit-test binary links FileNavigator without
     // LibRaw/WIC. Returns 0 when unavailable.
+    // [Ratings] Injected predicate: true when QuickView itself wrote a file
+    // in the watched folder a moment ago, so a directory-change notification
+    // is its own echo and rescanning would be waste. Injected rather than
+    // called directly to keep the navigator (and the test binary) free of the
+    // rating subsystem.
+    using SelfWriteProbe = bool (*)();
+    static void SetSelfWriteProbe(SelfWriteProbe probe) { s_selfWriteProbe = probe; }
+
     using CaptureTimeFallbackReader = int64_t (*)(const wchar_t* path);
     static void SetCaptureTimeFallbackReader(CaptureTimeFallbackReader reader) { s_captureTimeFallback = reader; }
 
@@ -247,6 +255,7 @@ private:
     std::wstring m_verifyDir;
     std::atomic<uint32_t> m_verifyGeneration{ 0 }; // cancels superseded runs
     inline static CaptureTimeFallbackReader s_captureTimeFallback = nullptr;
+    inline static SelfWriteProbe s_selfWriteProbe = nullptr;
     int m_currentIndex = -1;
     bool m_hitEnd = false;
     std::wstring m_crossFolderMessage;
