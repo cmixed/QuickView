@@ -29,8 +29,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install Toolchain
-        run: choco install llvm -y
+      # Note: Visual Studio on GitHub Actions runner already includes matched LLVM/Clang-cl/lld-link
 
       - name: Setup Ninja
         uses: seanmiddleditch/gha-setup-ninja@master
