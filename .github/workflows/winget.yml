@@ -7,6 +7,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to submit (leave blank for latest release)'
+        required: false
+        default: ''
 
 jobs:
   winget:
@@ -14,6 +19,23 @@ jobs:
     name: Submit to WinGet
     runs-on: ubuntu-latest
     steps:
+      - name: Determine Release Tag
+        id: get-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CUSTOM_TAG="${{ inputs.release_tag }}"
+          EVENT_TAG="${{ github.event.release.tag_name }}"
+          if [ -n "$CUSTOM_TAG" ]; then
+            TAG="$CUSTOM_TAG"
+          elif [ -n "$EVENT_TAG" ]; then
+            TAG="$EVENT_TAG"
+          else
+            TAG=$(gh release view --repo ${{ github.repository }} --json tagName -q '.tagName')
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Selected Release Tag for WinGet: $TAG"
+
       - name: Auto-sync Fork with Microsoft Upstream
         env:
           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
@@ -44,3 +66,4 @@ jobs:
           identifier: justnullname.QuickView
           token: ${{ secrets.WINGET_TOKEN }}
           installers-regex: '.*_Installer_.*\.exe$'
+          release-tag: ${{ steps.get-tag.outputs.tag }}
