@@ -411,6 +411,8 @@ add_executable(QuickViewTests
     QuickView/ArchiveVFS.cpp 
     QuickView/exif.cpp
     QuickView/RatingMetadata.cpp
+    QuickView/RatingWriter.cpp
+    QuickView/RatingStore.cpp
     QuickView/QuickViewETW.cpp
     QuickView/pch.cpp
 )
@@ -429,6 +431,11 @@ target_link_libraries(QuickViewTests PRIVATE
     unrar-mini
     ZLIB::ZLIB
     libjpeg-turbo::turbojpeg-static
+    brotli::common
+    brotli::dec
+    libjxl::jxl
+    libjxl::jxl_cms
+    hwy::hwy
 )
 target_include_directories(QuickViewTests PRIVATE QuickView third_party/unrar-mini)
 target_compile_definitions(QuickViewTests PRIVATE UNICODE _UNICODE)

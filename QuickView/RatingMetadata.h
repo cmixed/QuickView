@@ -60,6 +60,30 @@ std::optional<int> ParseJpegRating(std::span<const uint8_t> bytes);
 // directly (no APP1 wrapper), so it needs its own entry point.
 std::optional<int> ParseTiffRating(std::span<const uint8_t> bytes);
 
+// Scan the head of a PNG for a rating before IDAT:
+//   1. eXIf chunk -> Exif IFD0 tag 0x4746 (SimpleRating)
+//   2. iTXt chunk -> XML:com.adobe.xmp -> xmp:Rating
+// Returns nothing when absent or before IDAT without a rating.
+std::optional<int> ParsePngRating(std::span<const uint8_t> bytes);
+
+// Scan a WebP RIFF stream for a rating:
+//   1. EXIF chunk -> Exif IFD0 tag 0x4746 (SimpleRating)
+//   2. XMP  chunk -> xmp:Rating
+// Returns nothing when absent or malformed.
+std::optional<int> ParseWebpRating(std::span<const uint8_t> bytes);
+
+// Scan an ISOBMFF container (AVIF, HEIC, HEIF) for a rating:
+//   1. Exif item -> Exif IFD0 tag 0x4746 (SimpleRating)
+//   2. mime item (application/rdf+xml) -> xmp:Rating
+// Returns nothing when absent or malformed.
+std::optional<int> ParseIsobmffRating(std::span<const uint8_t> bytes);
+
+// Scan a JPEG XL (JXL) stream for a rating:
+//   1. If bare codestream (starts with 0xFF 0x0A): returns nullopt (no metadata in codestream)
+//   2. If container (starts with JXL signature box): scans boxes for Exif, xml, or brob
+// Returns nothing when absent or malformed.
+std::optional<int> ParseJxlRating(std::span<const uint8_t> bytes);
+
 // Replace xmp:Rating inside an existing XMP document, touching nothing else.
 // A sidecar written by Lightroom or Capture One carries the develop settings
 // for that photo, so the update is a surgical edit of that one property and
@@ -73,6 +97,12 @@ std::optional<std::string> UpdateXmpRating(std::string_view xmp, int stars);
 
 // A minimal sidecar for a photo that has none yet.
 std::string BuildMinimalXmp(int stars);
+
+// Update or insert xmp:Rating inside an existing XMP document while strictly
+// preserving the exact byte length by expanding or shrinking the trailing
+// whitespace padding before <?xpacket end=...?>.
+// Returns nothing if the document does not have enough whitespace padding or is malformed.
+std::optional<std::string> PatchXmpRatingInPlaceStrict(std::string_view xmp, int stars);
 
 // Which file of a pair a displayed rating came from.
 enum class Source { None, InFile, Sidecar };

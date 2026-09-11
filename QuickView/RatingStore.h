@@ -68,7 +68,7 @@ public:
     // nothing when a key is pressed.
     enum class Writability {
         Writable,
-        UnsupportedFormat, // no place to put a rating (HEIC, PNG, archive entry...)
+        UnsupportedFormat, // no place to put a rating (HEIC, archive entry...)
         ReadOnlyFile,
     };
     static Writability GetWritability(const std::wstring& renderedPath,

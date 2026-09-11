@@ -828,10 +828,9 @@ void GalleryOverlay::Render(ID2D1DeviceContext *pDC, const D2D1_SIZE_F &size,
                 pDC->FillRoundedRectangle(D2D1::RoundedRect(badge, br, br), m_brushBg.Get());
 
                 D2D1_COLOR_F prevStarTxt = m_brushText->GetColor();
-                // Same white-on-dark chip as the RAW badge: the star shape
-                // already carries the meaning, so a coloured one would only
-                // shout across a wall of thumbnails.
-                m_brushText->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+                // Filled stars use the theme accent color for visual clarity on dark chips
+                const D2D1_COLOR_F accentColor = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+                m_brushText->SetColor(accentColor);
                 m_brushText->SetOpacity(m_transitionProgress * 0.95f);
                 pDC->DrawText(stars.data(), (UINT32)stars.length(), m_textFormatBadge.Get(), badge, m_brushText.Get());
                 m_brushText->SetColor(prevStarTxt);

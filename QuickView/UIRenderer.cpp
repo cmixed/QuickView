@@ -116,6 +116,23 @@ static bool PointInRect(float x, float y, const D2D1_RECT_F& rect) {
 }
 
 namespace {
+inline void ApplyStarAccent(IDWriteTextLayout* layout, std::wstring_view text, ID2D1Brush* accentBrush) {
+    if (!layout || !accentBrush) return;
+    size_t i = 0;
+    while (i < text.size()) {
+        if (text[i] == L'\u2605') {
+            size_t start = i;
+            while (i < text.size() && text[i] == L'\u2605') {
+                i++;
+            }
+            DWRITE_TEXT_RANGE range{ (UINT32)start, (UINT32)(i - start) };
+            layout->SetDrawingEffect(accentBrush, range);
+        } else {
+            i++;
+        }
+    }
+}
+
 // Delegate to shared StringUtils
 static std::vector<std::wstring> SplitString(const std::wstring& str, wchar_t delim) {
     return QuickView::SplitAndTrimCSV(str, delim);
@@ -1406,6 +1423,13 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
             m_dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.length(), m_osdFormat.Get(), 1000.0f*s, 100.0f*s, &layout);
             if (!layout) return;
 
+            if (text.find(L'\u2605') != std::wstring::npos) {
+                ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+                D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, m_osdOpacity);
+                dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+                ApplyStarAccent(layout.Get(), text, starAccentBrush.Get());
+            }
+
             DWRITE_TEXT_METRICS tm; layout->GetMetrics(&tm);
             float padV = 8.0f * s;
             float th = tm.height + padV * 2.0f;
@@ -1484,6 +1508,12 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
             m_osdText.c_str(), (UINT32)m_osdText.length(),
             m_osdFormat.Get(), 2000.0f * s, 120.0f * s, &textLayout
         );
+    }
+    if (textLayout && m_osdText.find(L'\u2605') != std::wstring::npos) {
+        ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+        D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, m_osdOpacity);
+        dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+        ApplyStarAccent(textLayout.Get(), m_osdText, starAccentBrush.Get());
     }
     
     float toastW = 300.0f * s, toastH = 50.0f * s;
@@ -3676,7 +3706,26 @@ void UIRenderer::DrawInfoGrid(ID2D1DeviceContext* dc, float startX, float startY
         
         // Draw main value
         D2D1_RECT_F valueRect = D2D1::RectF(valueColStart, y, valueColStart + mainMaxWidth, y + rowH);
-        dc->DrawText(row.displayText.c_str(), (UINT32)row.displayText.length(), m_panelFormat.Get(), valueRect, brushMain.Get());
+        if (row.displayText.find(L'\u2605') != std::wstring::npos || (row.label && wcscmp(row.label, L"Rating") == 0)) {
+            ComPtr<IDWriteTextLayout> valLayout;
+            if (m_dwriteFactory && m_panelFormat) {
+                m_dwriteFactory->CreateTextLayout(
+                    row.displayText.c_str(), (UINT32)row.displayText.length(),
+                    m_panelFormat.Get(), mainMaxWidth, rowH, &valLayout
+                );
+            }
+            if (valLayout) {
+                ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+                D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+                dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+                ApplyStarAccent(valLayout.Get(), row.displayText, starAccentBrush.Get());
+                dc->DrawTextLayout(D2D1::Point2F(valueRect.left, valueRect.top), valLayout.Get(), brushDim.Get());
+            } else {
+                dc->DrawText(row.displayText.c_str(), (UINT32)row.displayText.length(), m_panelFormat.Get(), valueRect, brushMain.Get());
+            }
+        } else {
+            dc->DrawText(row.displayText.c_str(), (UINT32)row.displayText.length(), m_panelFormat.Get(), valueRect, brushMain.Get());
+        }
         
         // Draw sub value (theme-aware dim)
         if (!row.valueSub.empty()) {
@@ -4044,7 +4093,26 @@ void UIRenderer::DrawCompactInfo(ID2D1DeviceContext* dc) {
     
     // Text drawing
     D2D1_RECT_F textRect = D2D1::RectF(textLeft, startY + paddingTop, textRight, startY + paddingTop + itemHeight);
-    dc->DrawText(info.c_str(), (UINT32)info.length(), m_panelFormat.Get(), textRect, brushText.Get());
+    if (info.find(L'\u2605') != std::wstring::npos) {
+        ComPtr<IDWriteTextLayout> infoLayout;
+        if (m_dwriteFactory && m_panelFormat) {
+            m_dwriteFactory->CreateTextLayout(
+                info.c_str(), (UINT32)info.length(),
+                m_panelFormat.Get(), textRight - textLeft, itemHeight, &infoLayout
+            );
+        }
+        if (infoLayout) {
+            ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+            D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+            dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+            ApplyStarAccent(infoLayout.Get(), info, starAccentBrush.Get());
+            dc->DrawTextLayout(D2D1::Point2F(textRect.left, textRect.top), infoLayout.Get(), brushText.Get());
+        } else {
+            dc->DrawText(info.c_str(), (UINT32)info.length(), m_panelFormat.Get(), textRect, brushText.Get());
+        }
+    } else {
+        dc->DrawText(info.c_str(), (UINT32)info.length(), m_panelFormat.Get(), textRect, brushText.Get());
+    }
     
     // Draw expand button "+"
     dc->DrawText(L"+", 1, m_panelFormat.Get(), D2D1::RectF(m_panelToggleRect.left + 4.0f * s, m_panelToggleRect.top, m_panelToggleRect.right, m_panelToggleRect.bottom), brushYellow.Get());
@@ -4994,7 +5062,26 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
                 D2D1_RECT_F r = D2D1::RectF(currentX, y + paddingTop, currentX + tw, y + paddingTop + itemHeight);
                 ID2D1SolidColorBrush* b = m.isWinner ? winBrush : textBrush;
                 
-                dc->DrawText(m.val.c_str(), (UINT32)m.val.length(), m_panelFormat.Get(), r, b);
+                if (m.val.find(L'\u2605') != std::wstring::npos) {
+                    ComPtr<IDWriteTextLayout> metricLayout;
+                    if (m_dwriteFactory && m_panelFormat) {
+                        m_dwriteFactory->CreateTextLayout(
+                            m.val.c_str(), (UINT32)m.val.length(),
+                            m_panelFormat.Get(), tw, itemHeight, &metricLayout
+                        );
+                    }
+                    if (metricLayout) {
+                        ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+                        D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+                        dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+                        ApplyStarAccent(metricLayout.Get(), m.val, starAccentBrush.Get());
+                        dc->DrawTextLayout(D2D1::Point2F(r.left, r.top), metricLayout.Get(), b);
+                    } else {
+                        dc->DrawText(m.val.c_str(), (UINT32)m.val.length(), m_panelFormat.Get(), r, b);
+                    }
+                } else {
+                    dc->DrawText(m.val.c_str(), (UINT32)m.val.length(), m_panelFormat.Get(), r, b);
+                }
                 currentX += tw;
 
                 if (i < metrics.size() - 1) {
