@@ -2649,11 +2649,10 @@ namespace {
             if (p.empty()) return std::nullopt;
             const auto rating = g_ratingStore.TryGet(FileNavigator::PathToImageID(p));
             if (!rating || rating->stars <= 0) return std::nullopt;
-            static constexpr std::wstring_view SOLID_STARS[] = {
-                L"", L"\u2605", L"\u2605\u2605", L"\u2605\u2605\u2605", L"\u2605\u2605\u2605\u2605", L"\u2605\u2605\u2605\u2605\u2605"
-            };
             const int starCount = std::clamp(rating->stars, 1, 5);
-            return std::wstring(SOLID_STARS[starCount]);
+            wchar_t sz[16];
+            swprintf_s(sz, L"%d\u2605", starCount);
+            return std::wstring(sz);
         }
         else if (key == L"Format") {
             std::wstring fmtStr;
@@ -4945,6 +4944,17 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
                     else if (itemKey == L"Ent") {
                         win = m.HasEntropy && other.HasEntropy && (m.Entropy > other.Entropy);
                     }
+                    else if (itemKey == L"Rating") {
+                        auto getStars = [](const std::wstring& p, const CImageLoader::ImageMetadata& meta) {
+                            const std::wstring realPath = p.empty() ? meta.SourcePath : p;
+                            if (realPath.empty()) return 0;
+                            const auto r = g_ratingStore.TryGet(FileNavigator::PathToImageID(realPath));
+                            return r ? r->stars : 0;
+                        };
+                        int myStars = getStars(path, m);
+                        int otherStars = getStars(other.SourcePath, other);
+                        win = (myStars > otherStars && myStars > 0);
+                    }
                     v.push_back({ L"", *valOpt, win });
                 }
             }
@@ -5218,6 +5228,20 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
         CombineHash(stateHash, rightMeta.SrScale);
     }
     CombineHash(stateHash, g_runtime.ShowHdrDetailsExpanded);
+    if (const auto r = g_ratingStore.TryGet(FileNavigator::PathToImageID(leftMeta.SourcePath))) {
+        CombineHash(stateHash, r->stars);
+        CombineHash(stateHash, r->conflict);
+        CombineHash(stateHash, (int)r->source);
+    } else {
+        CombineHash(stateHash, -1);
+    }
+    if (const auto r = g_ratingStore.TryGet(FileNavigator::PathToImageID(rightMeta.SourcePath))) {
+        CombineHash(stateHash, r->stars);
+        CombineHash(stateHash, r->conflict);
+        CombineHash(stateHash, (int)r->source);
+    } else {
+        CombineHash(stateHash, -1);
+    }
     
     if (m_compareLeftRows.empty() || m_lastCompareStateHash != stateHash) {
         
@@ -5300,11 +5324,11 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
 	    if (hudMode == 0) {
 	        // Lite Mode
 	        hudGroups = {
-	            { L"LITE MODE", { L"File", L"RAW", L"Size", L"Disk", L"Sharp", L"Ent", L"BPP", L"Date", L"HDR" } }
+	            { L"LITE MODE", { L"File", L"RAW", L"Rating", L"Size", L"Disk", L"Sharp", L"Ent", L"BPP", L"Date", L"HDR" } }
 	        };
 	    } else {
 	        hudGroups = {
-	            { AppStrings::HUD_Group_Physical, { L"File", L"RAW", L"Size", L"Disk", L"Date", L"Format" } },
+	            { AppStrings::HUD_Group_Physical, { L"File", L"RAW", L"Rating", L"Size", L"Disk", L"Date", L"Format" } },
 	            { AppStrings::HUD_Group_Scientific, { L"Sharp", L"Ent", L"BPP" } }
 	        };
 	        if (hudMode == 2) {
@@ -5576,6 +5600,16 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
                             UINT64 rSize = (UINT64)rightMeta.Width * rightMeta.Height;
                             if (isLeft && lSize > rSize) winnerMark = L" ↑";
                             if (!isLeft && rSize > lSize) winnerMark = L" ↑";
+                        } else if (label == L"Rating") {
+                            auto getStars = [](const std::wstring& p) {
+                                if (p.empty()) return 0;
+                                const auto r = g_ratingStore.TryGet(FileNavigator::PathToImageID(p));
+                                return r ? r->stars : 0;
+                            };
+                            int lStars = getStars(leftMeta.SourcePath);
+                            int rStars = getStars(rightMeta.SourcePath);
+                            if (isLeft && lStars > rStars) winnerMark = L" ↑";
+                            if (!isLeft && rStars > lStars) winnerMark = L" ↑";
                         } else {
 	                            if (isLeft && IsBetter(label, GetHudRowText(lRow), GetHudRowText(rRow))) winnerMark = L" ↑";
 	                            if (!isLeft && IsBetter(label, GetHudRowText(rRow), GetHudRowText(lRow))) winnerMark = L" ↑";
@@ -5631,6 +5665,35 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
                 // Draw logic with separate arrow color
 	                m_panelFormat->SetTextAlignment(isLeft ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_LEADING);
 	                
+	                if (val.find(L'\u2605') != std::wstring::npos || label == L"Rating") {
+	                    float valWidth = MeasureTextWidth(val, m_panelFormat.Get());
+	                    D2D1_RECT_F valRect = rect;
+	                    if (!winnerMark.empty()) {
+	                        if (isLeft) valRect.right -= arrowWidth;
+	                        else valRect.right = (std::min)(rect.right, rect.left + valWidth);
+	                    }
+	                    float layoutW = (std::max)(0.0f, valRect.right - valRect.left);
+	                    ComPtr<IDWriteTextLayout> valLayout;
+	                    if (m_dwriteFactory && m_panelFormat && layoutW > 0.0f) {
+	                        m_dwriteFactory->CreateTextLayout(val.c_str(), (UINT32)val.length(), m_panelFormat.Get(), layoutW, rowH, &valLayout);
+	                    }
+	                    if (valLayout) {
+	                        valLayout->SetTextAlignment(isLeft ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_LEADING);
+	                        ComPtr<ID2D1SolidColorBrush> starAccentBrush;
+	                        D2D1_COLOR_F accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+	                        dc->CreateSolidColorBrush(accentClr, &starAccentBrush);
+	                        ApplyStarAccent(valLayout.Get(), val, starAccentBrush.Get());
+	                        dc->DrawTextLayout(D2D1::Point2F(valRect.left, valRect.top), valLayout.Get(), brushLabel.Get());
+	                        if (!winnerMark.empty()) {
+	                            D2D1_RECT_F arrowRect = rect;
+	                            if (isLeft) arrowRect.left = rect.right - arrowWidth;
+	                            else arrowRect.left = valRect.right;
+	                            dc->DrawText(winnerMark.c_str(), (UINT32)winnerMark.length(), m_panelFormat.Get(), arrowRect, winBrush);
+	                        }
+	                        return;
+	                    }
+	                }
+
 	                if (!winnerMark.empty()) {
 	                    float valWidth = MeasureTextWidth(val, m_panelFormat.Get());
 	                    
