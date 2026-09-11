@@ -14,6 +14,30 @@ jobs:
     name: Submit to WinGet
     runs-on: ubuntu-latest
     steps:
+      - name: Auto-sync Fork with Microsoft Upstream
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          echo "Syncing fork justnullname/winget-pkgs with upstream microsoft/winget-pkgs..."
+          if gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              /repos/justnullname/winget-pkgs/merge-upstream \
+              -f branch='master' 2>/dev/null; then
+            echo "Successfully synced fork via merge-upstream API."
+          else
+            echo "API fast-forward skipped, applying robust shallow reset..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git clone --depth 1 https://x-access-token:${TOKEN}@github.com/justnullname/winget-pkgs.git /tmp/winget-fork
+            cd /tmp/winget-fork
+            git remote add upstream https://github.com/microsoft/winget-pkgs.git
+            git fetch --depth 1 upstream master
+            git reset --hard upstream/master
+            git push --force origin master
+            echo "Successfully force-synced fork master with upstream."
+          fi
+
       - name: Submit to WinGet
         uses: vedantmgoyal9/winget-releaser@v2
         with:
