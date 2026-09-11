@@ -28,6 +28,8 @@ namespace AppStrings {
 
     // OSD Messages
     extern const wchar_t* OSD_NoImage;
+    extern const wchar_t* OSD_FolderEmpty;
+    extern const wchar_t* OSD_SvgStaticFallback;
     extern const wchar_t* OSD_Lossless;
     extern const wchar_t* OSD_ReencodedLossless;
     extern const wchar_t* OSD_EdgeAdapted;
@@ -58,6 +60,13 @@ namespace AppStrings {
     extern const wchar_t* Dialog_ButtonSaveAs;
     extern const wchar_t* Dialog_ButtonDiscard;
     extern const wchar_t* Dialog_ButtonContinue;
+    extern const wchar_t* Dialog_CropUnsavedTitle;
+    extern const wchar_t* Dialog_SaveAsTitle;
+    extern const wchar_t* Dialog_ExportTitle;
+    extern const wchar_t* Dialog_ButtonOverwrite;
+    extern const wchar_t* Dialog_EmbedICC;
+    extern const wchar_t* Dialog_SizeEstimating;
+    extern const wchar_t* Dialog_ExportError;
 
     // Context Menu
     extern const wchar_t* Context_Open;
@@ -65,7 +74,9 @@ namespace AppStrings {
     extern const wchar_t* Context_Edit;
     extern const wchar_t* Context_ShowInExplorer;
     extern const wchar_t* Context_OpenFolder;
-    extern const wchar_t* Context_CopyImage;
+    extern const wchar_t* Context_CopyPixels;
+    extern const wchar_t* Context_CopyFile;
+    extern const wchar_t* Context_CopyImage; // Alias for backward compatibility
     extern const wchar_t* Context_CopyPath;
     extern const wchar_t* Context_Print;
     extern const wchar_t* Context_RotateCW;
@@ -111,6 +122,7 @@ namespace AppStrings {
     extern const wchar_t* Context_GalleryOpenCompare;
     extern const wchar_t* Context_GalleryOpenNewWindow;
     extern const wchar_t* Context_Exit;
+    extern const wchar_t* Context_Crop;
     
     // Taskbar / System Menu
     extern const wchar_t* Menu_ExitPassthrough;
@@ -137,6 +149,10 @@ namespace AppStrings {
     extern const wchar_t* Toolbar_Tooltip_Pin;
     extern const wchar_t* Toolbar_Tooltip_Unpin;
     extern const wchar_t* Toolbar_Tooltip_GamutWarning;
+    extern const wchar_t* Toolbar_Tooltip_CropCopy;
+    extern const wchar_t* Toolbar_Tooltip_CropSave;
+    extern const wchar_t* Toolbar_Tooltip_CropApply;
+    extern const wchar_t* Toolbar_Tooltip_CropCancel;
 
     // Overlay Mode Tooltips
     extern const wchar_t* Toolbar_Tooltip_OverlayAlphaUp;
@@ -174,6 +190,9 @@ namespace AppStrings {
 
     // OSD Messages
     extern const wchar_t* OSD_Copied;
+    extern const wchar_t* OSD_PixelsCopied;
+    extern const wchar_t* OSD_PixelsExtracting;
+    extern const wchar_t* OSD_FileCopied;
     extern const wchar_t* OSD_CoordinatesCopied;
     extern const wchar_t* OSD_FilePathCopied;
     extern const wchar_t* OSD_Zoom100;
@@ -211,6 +230,8 @@ namespace AppStrings {
     extern const wchar_t* OSD_ImmersiveNormal;
     extern const wchar_t* OSD_PrintJobStarted;
     extern const wchar_t* OSD_PrintJobFinished;
+    extern const wchar_t* OSD_EnterCropMode;
+    extern const wchar_t* OSD_CropCopied;
 
     extern const wchar_t* Context_ColorSpace;
     
@@ -260,6 +281,7 @@ namespace AppStrings {
     extern const wchar_t* Settings_Label_GalleryTriggerAreaHeight;
     extern const wchar_t* Settings_Label_GalleryDwellTime;
     extern const wchar_t* Settings_Label_GalleryExitDelay;
+    extern const wchar_t* Settings_Label_GalleryMinSize;
 
     
     extern const wchar_t* Settings_Group_Foundation;
@@ -311,7 +333,6 @@ namespace AppStrings {
     extern const wchar_t* Settings_Tooltip_BackdropEffectsTip;
     extern const wchar_t* Settings_Label_Overlay;
     extern const wchar_t* Settings_Label_ShowGrid;
-    extern const wchar_t* Settings_Label_CrossFade;
     extern const wchar_t* Settings_Label_AlwaysOnTop;
     extern const wchar_t* Settings_Label_LockWindow;
     extern const wchar_t* Settings_Tooltip_LockWindow;
@@ -654,6 +675,7 @@ namespace AppStrings {
     extern const wchar_t* Settings_Option_LoupeShapeSquare;
     extern const wchar_t* Settings_Option_LoupeShapeCircle;
     extern const wchar_t* Settings_Tooltip_LoupeHotkey;
+    extern const wchar_t* Settings_Tooltip_CropModeHotkey;
 
     extern const wchar_t* Settings_Tab_Theme;
     extern const wchar_t* Settings_Label_ThemeMode;

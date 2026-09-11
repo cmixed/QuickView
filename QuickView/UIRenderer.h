@@ -181,6 +181,19 @@ public:
     // ===== Info Panel Rendering Helpers =====
     D2D1_SIZE_F GetRequiredInfoPanelSize() const; // Calculate required dimensions
     D2D1_RECT_F GetLastInfoPanelRect() const { return m_lastInfoPanelRect; }
+    bool IsMouseOverInfoPanel(POINT pt) const {
+        if (m_lastInfoPanelRect.right > m_lastInfoPanelRect.left &&
+            pt.x >= m_lastInfoPanelRect.left && pt.x <= m_lastInfoPanelRect.right &&
+            pt.y >= m_lastInfoPanelRect.top && pt.y <= m_lastInfoPanelRect.bottom) {
+            return true;
+        }
+        if (m_lastHUDRect.right > m_lastHUDRect.left &&
+            pt.x >= m_lastHUDRect.left && pt.x <= m_lastHUDRect.right &&
+            pt.y >= m_lastHUDRect.top && pt.y <= m_lastHUDRect.bottom) {
+            return true;
+        }
+        return false;
+    }
 
 private:
     struct AdaptiveUiPalette {
@@ -229,6 +242,7 @@ private:
     
     // Drawing functions
     void DrawOSD(ID2D1DeviceContext* dc, HWND hwnd);
+    void DrawCropOverlay(ID2D1DeviceContext* dc, HWND hwnd);
     // [Loupe] press-and-hold magnifier overlay (shows the region at actual pixels)
     void DrawLoupe(ID2D1DeviceContext* dc, HWND hwnd);
     void DrawWindowControls(ID2D1DeviceContext* dc, HWND hwnd);

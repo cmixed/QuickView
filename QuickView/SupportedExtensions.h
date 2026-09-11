@@ -37,9 +37,10 @@ inline constexpr std::array<std::wstring_view, 9> WEB_MODERN_EXTENSIONS = {
 };
 
 // Professional / HDR / Legacy formats
-inline constexpr std::array<std::wstring_view, 21> PRO_LEGACY_EXTENSIONS = {
+inline constexpr std::array<std::wstring_view, 25> PRO_LEGACY_EXTENSIONS = {
     L".exr", L".hdr", L".pic", L".psd", L".psb", L".tga", L".icb", L".vda", L".vst", L".pcx", L".qoi",
-    L".wbmp", L".pam", L".pbm", L".pgm", L".ppm", L".pnm", L".wdp", L".hdp", L".jxr", L".hif"
+    L".wbmp", L".pam", L".pbm", L".pgm", L".ppm", L".pnm", L".wdp", L".hdp", L".jxr", L".hif",
+    L".wmf", L".emf", L".wmz", L".emz"
 };
 
 // Camera RAW formats that QuickView browses (LibRaw-decoded, part of
@@ -136,6 +137,18 @@ constexpr bool IsArchivePath(std::wstring_view path) {
     return IsArchiveExtension(ExtensionOf(path));
 }
 
+constexpr bool IsSupportedExtension(std::wstring_view ext) {
+    for (const auto& s : SUPPORTED_EXTENSIONS) {
+        if (ExtEqualsIgnoreCase(ext, s)) return true;
+    }
+    return false;
+}
+
+// Folder slideshow playlist: every browsable image except archive containers
+constexpr bool IsPlaylistImageExtension(std::wstring_view ext) {
+    return IsSupportedExtension(ext) && !IsArchiveExtension(ext);
+}
+
 // ============================================================================
 // RAW+JPEG pairing policy
 // ============================================================================
@@ -164,7 +177,7 @@ constexpr bool IsRenderedPairExtension(std::wstring_view ext) {
 }
 
 // Compile-time regression tests (zero runtime cost)
-static_assert(SUPPORTED_EXTENSIONS.size() == 67);
+static_assert(SUPPORTED_EXTENSIONS.size() == 71);
 static_assert(RAW_EXTENSIONS.size() == 43);
 static_assert(IsRawExtension(L".crw"));   // was missing from main.cpp's IsRawFile
 static_assert(IsRawExtension(L".CR3"));   // case-insensitive
@@ -178,6 +191,9 @@ static_assert(IsArchivePath(L"C:\\comics\\manga.CBZ"));
 static_assert(IsRenderedPairExtension(L".JPG"));
 static_assert(!IsRenderedPairExtension(L".tif"));  // TIFF is a RAW-derived export
 static_assert(!IsRenderedPairExtension(L".png")); // not camera-written beside a RAW
+static_assert(IsPlaylistImageExtension(L".JPG"));
+static_assert(IsPlaylistImageExtension(L".CR3"));
+static_assert(!IsPlaylistImageExtension(L".zip"));
 
 // Generate the COMDLG filter string, e.g., "All Images\0*.jpg;*.png...\0All Files\0*.*\0\0"
 inline std::wstring GetSupportedExtensionsFilter() {

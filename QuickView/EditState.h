@@ -22,6 +22,39 @@
 
 extern HCURSOR g_currentCursor;
 
+// Dihedral Group D4 2D Rigid Transformation for precise EXIF & Edit composition
+struct Transform2D {
+    int Rotation = 0;   // 0, 90, 180, 270
+    bool FlipH = false; // Horizontal Flip
+
+    static constexpr Transform2D FromExif(int exifOrientation) {
+        switch (exifOrientation) {
+            case 1: return { 0,   false };
+            case 2: return { 0,   true  };
+            case 3: return { 180, false };
+            case 4: return { 180, true  };
+            case 5: return { 90,  true  };
+            case 6: return { 90,  false };
+            case 7: return { 270, true  };
+            case 8: return { 270, false };
+            default: return { 0,  false };
+        }
+    }
+
+    static constexpr Transform2D Combine(Transform2D exif, Transform2D edit) {
+        Transform2D result;
+        if (!edit.FlipH) {
+            result.Rotation = (exif.Rotation + edit.Rotation) % 360;
+            result.FlipH = exif.FlipH;
+        } else {
+            result.Rotation = (edit.Rotation - exif.Rotation + 360) % 360;
+            result.FlipH = !exif.FlipH;
+        }
+        return result;
+    }
+};
+
+
 struct EditState {
     bool IsDirty = false;               // Has unsaved changes
     std::wstring TempFilePath;          // Temp file path
@@ -34,6 +67,12 @@ struct EditState {
     // [Visual Rotation] Queue of pending operations to be applied on Save
     std::vector<TransformType> PendingTransforms;
 
+    bool HasCrop = false;
+    int CropLeft = 0;
+    int CropTop = 0;
+    int CropRight = 0;
+    int CropBottom = 0;
+
     void Reset() {
         IsDirty = false;
         TempFilePath.clear();
@@ -43,6 +82,8 @@ struct EditState {
         FlippedV = false;
         Quality = EditQuality::Lossless;
         PendingTransforms.clear();
+        HasCrop = false;
+        CropLeft = CropTop = CropRight = CropBottom = 0.0f;
     }
     
     /// <summary>
@@ -141,25 +182,30 @@ enum class HotkeyAction : uint8_t {
     AnimNextFrame,     // Animation Next Frame
     AnimPrevFrame,     // Animation Previous Frame
     ToggleGallery,     // Toggle Gallery Overlay
+    ToggleFilmstrip,   // Toggle Filmstrip Gallery
     ToggleInfoPanel,   // Toggle Info Panel (Lite)
     ToggleExifPanel,   // Toggle Exif Panel (Full)
     ToggleMinimap,     // Toggle Minimap visibility (Hotkey M)
     ToggleFullscreen,  // Toggle Fullscreen
     ToggleSpan,        // Toggle Span Displays
     ToggleSlideshow,   // Toggle Slideshow Mode
+    ToggleSettings,    // Toggle Settings Overlay (Hotkey S)
     RenderRaw,         // Toggle RAW decode / switch to the paired RAW
     OpenFile,          // Open File Dialog
     EditFile,          // Edit with External Editor
     RenameFile,        // Rename File Dialog
     DeleteFile,        // Delete File Dialog
-    CopyImage,         // Copy Image to Clipboard
-    CopyPath,          // Copy Path to Clipboard
+    CopyPixels,        // Copy Pixels to Clipboard (Ctrl+C)
+    CopyFileItem,      // Copy File to Clipboard (Ctrl+Shift+C)
+    CopyPath,          // Copy Path to Clipboard (Ctrl+Alt+C)
     ShowInExplorer,    // Show in File Explorer
     ToggleCompare,     // Toggle Compare Mode
     ComparePair,       // Compare a pair: rendered vs RAW side by side
     AlwaysOnTop,       // Toggle Always on Top
     ToggleDebugHud,    // Toggle Debug Performance HUD
     Print,             // Print Image
+    EnterCropMode,     // Enter Crop Mode
+    SaveAs,            // Save As / Export Image (Ctrl+S)
     ToggleOverlay,     // Toggle Tracing Mode (Overlay Mode)
     OverlayAlphaUp,    // Adjust Overlay Alpha Up
     OverlayAlphaDown,  // Adjust Overlay Alpha Down
@@ -203,6 +249,7 @@ inline std::wstring_view HotkeyActionToString(HotkeyAction action) noexcept {
         case HotkeyAction::AnimNextFrame: return L"AnimNextFrame";
         case HotkeyAction::AnimPrevFrame: return L"AnimPrevFrame";
         case HotkeyAction::ToggleGallery: return L"ToggleGallery";
+        case HotkeyAction::ToggleFilmstrip: return L"ToggleFilmstrip";
         case HotkeyAction::ToggleInfoPanel: return L"ToggleInfoPanel";
         case HotkeyAction::ToggleExifPanel: return L"ToggleExifPanel";
         case HotkeyAction::ToggleMinimap: return L"ToggleMinimap";
@@ -212,7 +259,8 @@ inline std::wstring_view HotkeyActionToString(HotkeyAction action) noexcept {
         case HotkeyAction::EditFile: return L"EditFile";
         case HotkeyAction::RenameFile: return L"RenameFile";
         case HotkeyAction::DeleteFile: return L"DeleteFile";
-        case HotkeyAction::CopyImage: return L"CopyImage";
+        case HotkeyAction::CopyPixels: return L"CopyPixels";
+        case HotkeyAction::CopyFileItem: return L"CopyFile";
         case HotkeyAction::CopyPath: return L"CopyPath";
         case HotkeyAction::ShowInExplorer: return L"ShowInExplorer";
         case HotkeyAction::ToggleCompare: return L"ToggleCompare";
@@ -220,12 +268,15 @@ inline std::wstring_view HotkeyActionToString(HotkeyAction action) noexcept {
         case HotkeyAction::AlwaysOnTop: return L"AlwaysOnTop";
         case HotkeyAction::ToggleDebugHud: return L"ToggleDebugHud";
         case HotkeyAction::Print: return L"Print";
+        case HotkeyAction::EnterCropMode: return L"EnterCropMode";
+        case HotkeyAction::SaveAs: return L"SaveAs";
         case HotkeyAction::ToggleOverlay: return L"ToggleOverlay";
         case HotkeyAction::OverlayAlphaUp: return L"OverlayAlphaUp";
         case HotkeyAction::OverlayAlphaDown: return L"OverlayAlphaDown";
         case HotkeyAction::OverlayTogglePassthrough: return L"OverlayTogglePassthrough";
         case HotkeyAction::Help: return L"Help";
         case HotkeyAction::ToggleSlideshow: return L"ToggleSlideshow";
+        case HotkeyAction::ToggleSettings: return L"ToggleSettings";
         case HotkeyAction::Exit: return L"Exit";
         case HotkeyAction::Loupe: return L"Loupe";
         case HotkeyAction::Undo: return L"Undo";
@@ -261,6 +312,7 @@ inline HotkeyAction StringToHotkeyAction(std::wstring_view sv) noexcept {
     if (sv == L"AnimNextFrame") return HotkeyAction::AnimNextFrame;
     if (sv == L"AnimPrevFrame") return HotkeyAction::AnimPrevFrame;
     if (sv == L"ToggleGallery") return HotkeyAction::ToggleGallery;
+    if (sv == L"ToggleFilmstrip") return HotkeyAction::ToggleFilmstrip;
     if (sv == L"ToggleInfoPanel") return HotkeyAction::ToggleInfoPanel;
     if (sv == L"ToggleExifPanel") return HotkeyAction::ToggleExifPanel;
     if (sv == L"ToggleMinimap") return HotkeyAction::ToggleMinimap;
@@ -270,7 +322,8 @@ inline HotkeyAction StringToHotkeyAction(std::wstring_view sv) noexcept {
     if (sv == L"EditFile") return HotkeyAction::EditFile;
     if (sv == L"RenameFile") return HotkeyAction::RenameFile;
     if (sv == L"DeleteFile") return HotkeyAction::DeleteFile;
-    if (sv == L"CopyImage") return HotkeyAction::CopyImage;
+    if (sv == L"CopyPixels" || sv == L"CopyImage") return HotkeyAction::CopyPixels;
+    if (sv == L"CopyFile" || sv == L"CopyFileItem") return HotkeyAction::CopyFileItem;
     if (sv == L"CopyPath") return HotkeyAction::CopyPath;
     if (sv == L"ShowInExplorer") return HotkeyAction::ShowInExplorer;
     if (sv == L"ToggleCompare") return HotkeyAction::ToggleCompare;
@@ -278,12 +331,15 @@ inline HotkeyAction StringToHotkeyAction(std::wstring_view sv) noexcept {
     if (sv == L"AlwaysOnTop") return HotkeyAction::AlwaysOnTop;
     if (sv == L"ToggleDebugHud") return HotkeyAction::ToggleDebugHud;
     if (sv == L"Print") return HotkeyAction::Print;
+    if (sv == L"EnterCropMode") return HotkeyAction::EnterCropMode;
+    if (sv == L"SaveAs") return HotkeyAction::SaveAs;
     if (sv == L"ToggleOverlay") return HotkeyAction::ToggleOverlay;
     if (sv == L"OverlayAlphaUp") return HotkeyAction::OverlayAlphaUp;
     if (sv == L"OverlayAlphaDown") return HotkeyAction::OverlayAlphaDown;
     if (sv == L"OverlayTogglePassthrough") return HotkeyAction::OverlayTogglePassthrough;
     if (sv == L"Help") return HotkeyAction::Help;
     if (sv == L"ToggleSlideshow") return HotkeyAction::ToggleSlideshow;
+    if (sv == L"ToggleSettings" || sv == L"Settings") return HotkeyAction::ToggleSettings;
     if (sv == L"Exit") return HotkeyAction::Exit;
     if (sv == L"Loupe") return HotkeyAction::Loupe;
     if (sv == L"Undo") return HotkeyAction::Undo;
@@ -513,7 +569,7 @@ struct AppConfig {
     bool SortArchivesByNameAscending = true;
     bool ConfirmDelete = true;
     bool PortableMode = false;
-    int UIScalePreset = 0;               // 0=Auto(DPI), 1=90%, 2=100%, 3=110%, 4=125%
+    int UIScalePreset = 0;               // 0=Auto(DPI), 1=75%, 2=90%, 3=100%, 4=110%, 5=125%, 6=150%, 7=175%, 8=200%, 9=225%, 10=250%, 11=300%
 
     // --- View ---
     int ThemeMode = 0;                  // 0=Auto, 1=Dark, 2=Light, 3=Custom
@@ -601,7 +657,6 @@ struct AppConfig {
     int InfoPanelAlignY = 0; // 0=Top, 1=Bottom
 
     // --- Control ---
-    bool EnableCrossFade = true;        // Enable cross-fade animation when changing images
     int ZoomModeIn = 0;                 // 0=Auto, 1=Linear, 2=Nearest, 3=High Quality Cubic
     int ZoomModeOut = 0;                // 0=Auto, 1=Linear, 2=Nearest, 3=High Quality Cubic
     bool InvertWheel = false;
@@ -639,6 +694,7 @@ struct AppConfig {
     float GalleryExitDelay = 0.80f;        // Exit dismissal delay in seconds (0.10 ~ 3.0)
     int GalleryThumbnailSize = 0;       // 0=Auto(140px), 80~300=explicit pixel size
     float GalleryFilmstripHeight = 140.0f; // Preferred height of filmstrip in logical pixels
+    float GalleryMinSize = 600.0f;      // FullGrid expand target, physical window px (2-col min … work-area max)
     int PrefetchGear = 1;               // 0=Off, 1=Auto, 2=Eco, 3=Balanced, 4=Ultra
     int MemoryReclaimStrategy = 0;      // 0=Smart, 1=Aggressive, 2=OnDemand
     
@@ -794,6 +850,62 @@ struct AppConfig {
         return (GlassVectorStrokeWeightIndex == 1) ? 1.0f : 1.5f;
     }
 };
+
+// ============================================================================
+// Crop State (6.31.0)
+// ============================================================================
+struct CropState {
+    bool IsActive = false;
+    bool IsDragging = false;
+    bool IsQuickActionVisible = false;
+    bool IsInputInvalid = false;
+    
+    // Coordinates in FULL IMAGE pixel space
+    int CropLeft = 0;
+    int CropTop = 0;
+    int CropRight = 0;
+    int CropBottom = 0;
+    
+    // UI Interaction states
+    int ActiveHandle = -1; // -1: None, 0: TopLeft, 1: TopRight, 2: BottomLeft, 3: BottomRight, 4: Center (Move)
+    POINT DragStartMousePos = { 0, 0 };
+    int DragStartCropLeft = 0;
+    int DragStartCropTop = 0;
+    int DragStartCropRight = 0;
+    int DragStartCropBottom = 0;
+
+    enum class InputField { None, Width, Height };
+    InputField FocusedField = InputField::None;
+    InputField HoverField = InputField::None;
+    wchar_t InputBuffer[16] = { 0 };
+    int InputLen = 0;
+    D2D1_RECT_F WidthCapsuleRect = {};
+    D2D1_RECT_F HeightCapsuleRect = {};
+
+    bool ReachedEdgeX = false;
+    bool ReachedEdgeY = false;
+
+    void Reset() {
+        IsActive = false;
+        IsDragging = false;
+        IsQuickActionVisible = false;
+        IsInputInvalid = false;
+        ReachedEdgeX = false;
+        ReachedEdgeY = false;
+        CropLeft = CropTop = CropRight = CropBottom = 0;
+        DragStartCropLeft = DragStartCropTop = DragStartCropRight = DragStartCropBottom = 0;
+        DragStartMousePos = { 0, 0 };
+        ActiveHandle = -1;
+        FocusedField = InputField::None;
+        HoverField = InputField::None;
+        InputLen = 0;
+        InputBuffer[0] = L'\0';
+        WidthCapsuleRect = {};
+        HeightCapsuleRect = {};
+    }
+};
+
+extern CropState g_cropState;
 
 /// <summary>
 /// View State (Zoom, Pan, Interaction)

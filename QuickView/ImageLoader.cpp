@@ -45,6 +45,11 @@ using namespace QuickView;
 #include <shobjidl.h> // [Add] for IShellItemImageFactory
 #include <thread>
 #include "MiniTiff.h"
+#include "OffscreenWebView2.h"
+#include "WebViewThumbService.h"
+#include "ImageTypes.h"
+#include "MetafileCodec.h"
+#include <zlib.h>
 
 extern FileNavigator& g_navigator;
 
@@ -420,6 +425,8 @@ static void ProbeHdrMetadataNative(const uint8_t *data, size_t size,
     if (memcmp(data + i, appleUrn, urnLen) == 0) {
       pHdr->hasGainMap = true;
       pHdr->isValid = true;
+      // Apple GainMap JPEGs always use Display P3 space natively
+      pHdr->primaries = QuickView::ColorPrimaries::DisplayP3;
       // Default headroom: 1.5 stops (Apple standard when no explicit tag found)
       if (pHdr->gainMapAlternateHeadroom <= 0.0f)
         pHdr->gainMapAlternateHeadroom = 1.5f;
@@ -756,6 +763,14 @@ static std::wstring DetectFormatFromContent(const uint8_t *magic, size_t size) {
   if (size >= 2 && magic[0] == 'P' && magic[1] >= '1' && magic[1] <= '7')
     return L"PNM";
 
+  {
+    const auto mf = QuickView::Metafile::Detect(magic, size);
+    if (mf == QuickView::Metafile::Kind::Emf)
+      return L"EMF";
+    if (mf == QuickView::Metafile::Kind::Wmf)
+      return L"WMF";
+  }
+
   if (size >= 18) {
     bool validColorMap = (magic[1] == 0 || magic[1] == 1);
     bool validType = (magic[2] == 1 || magic[2] == 2 || magic[2] == 3 ||
@@ -789,6 +804,143 @@ bool IsUnifiedBufferCodec(const std::wstring &fmt) {
 bool ShouldProbeAnimatedBufferCodec(const std::wstring &fmt) {
   return fmt == L"WebP" || fmt == L"GIF" || fmt == L"PNG" || fmt == L"AVIF" ||
          fmt == L"JXL";
+}
+
+bool IsMetafileFormat(const std::wstring &fmt) {
+  return fmt == L"EMF" || fmt == L"WMF" || fmt == L"EMZ" || fmt == L"WMZ";
+}
+
+bool InflateGzip(const uint8_t *src, size_t srcLen, std::vector<uint8_t> &dst,
+                 bool requireComplete = true) {
+  if (!src || srcLen < 2 || src[0] != 0x1F || src[1] != 0x8B)
+    return false;
+
+  z_stream strm{};
+  if (inflateInit2(&strm, 15 + 16) != Z_OK)
+    return false;
+
+  strm.next_in = const_cast<Bytef *>(src);
+  strm.avail_in = static_cast<uInt>(srcLen);
+  dst.resize(std::min<size_t>(srcLen * 4 + 4096, 64 * 1024));
+  strm.next_out = dst.data();
+  strm.avail_out = static_cast<uInt>(dst.size());
+
+  int ret = Z_OK;
+  constexpr size_t kMaxInflated = 64 * 1024 * 1024;
+  while (ret == Z_OK) {
+    if (strm.avail_out == 0) {
+      if (dst.size() >= kMaxInflated) {
+        inflateEnd(&strm);
+        dst.clear();
+        return false;
+      }
+      const size_t produced = strm.total_out;
+      dst.resize(std::min(dst.size() * 2, kMaxInflated));
+      strm.next_out = dst.data() + produced;
+      strm.avail_out = static_cast<uInt>(dst.size() - produced);
+    }
+    ret = inflate(&strm, Z_NO_FLUSH);
+  }
+
+  const size_t produced = strm.total_out;
+  inflateEnd(&strm);
+  if (ret != Z_STREAM_END && (requireComplete || produced < 88)) {
+    dst.clear();
+    return false;
+  }
+  dst.resize(produced);
+  return true;
+}
+
+HRESULT DecodeMetafileBuffer(const uint8_t *data, size_t size,
+                             const std::wstring &fmtHint,
+                             const QuickView::Codec::DecodeContext &ctx,
+                             QuickView::Codec::DecodeResult &result) {
+  if (!data || size == 0)
+    return E_INVALIDARG;
+
+  const uint8_t *bytes = data;
+  size_t nbytes = size;
+  std::vector<uint8_t> inflated;
+  if (size >= 2 && data[0] == 0x1F && data[1] == 0x8B) {
+    if (!InflateGzip(data, size, inflated) || inflated.empty())
+      return E_FAIL;
+    bytes = inflated.data();
+    nbytes = inflated.size();
+  }
+
+  auto kind = QuickView::Metafile::Detect(bytes, nbytes);
+  if (kind == QuickView::Metafile::Kind::None) {
+    if (fmtHint == L"WMF" || fmtHint == L"WMZ")
+      kind = QuickView::Metafile::Kind::Wmf;
+    else if (fmtHint == L"EMF" || fmtHint == L"EMZ")
+      kind = QuickView::Metafile::Kind::Emf;
+    else
+      return E_NOTIMPL;
+  }
+
+  HENHMETAFILE hemf = QuickView::Metafile::OpenHemf(bytes, nbytes);
+  if (!hemf)
+    return E_FAIL;
+
+  int dpiX = 96, dpiY = 96;
+  if (HDC screen = GetDC(nullptr)) {
+    dpiX = GetDeviceCaps(screen, LOGPIXELSX);
+    dpiY = GetDeviceCaps(screen, LOGPIXELSY);
+    ReleaseDC(nullptr, screen);
+  }
+
+  int logicalW = 0, logicalH = 0;
+  auto headerSize = QuickView::Metafile::MeasureHeader(bytes, nbytes, dpiX, dpiY);
+  if (headerSize.valid) {
+    logicalW = headerSize.width;
+    logicalH = headerSize.height;
+  } else if (!QuickView::Metafile::MeasureViaGdi(hemf, dpiX, dpiY, logicalW,
+                                                logicalH)) {
+    DeleteEnhMetaFile(hemf);
+    return E_FAIL;
+  }
+
+  int outW = 0, outH = 0;
+  QuickView::Metafile::ChooseRasterSize(logicalW, logicalH, ctx.targetWidth,
+                                        ctx.targetHeight, outW, outH);
+  const int stride = outW * 4;
+  const size_t bufSize = static_cast<size_t>(stride) * outH;
+  uint8_t *pixels = ctx.allocator
+                        ? ctx.allocator(bufSize)
+                        : static_cast<uint8_t *>(_aligned_malloc(bufSize, 64));
+  if (!pixels) {
+    DeleteEnhMetaFile(hemf);
+    return E_OUTOFMEMORY;
+  }
+
+  bool hasAlpha = false;
+  if (!QuickView::Metafile::Rasterize(hemf, outW, outH, pixels, stride, &hasAlpha)) {
+    if (!ctx.allocator)
+      _aligned_free(pixels);
+    DeleteEnhMetaFile(hemf);
+    return E_FAIL;
+  }
+  DeleteEnhMetaFile(hemf);
+
+  result.pixels = pixels;
+  result.width = outW;
+  result.height = outH;
+  result.stride = stride;
+  result.format = PixelFormat::BGRA8888;
+  result.success = true;
+  result.metadata.Width = static_cast<UINT>(outW);
+  result.metadata.Height = static_cast<UINT>(outH);
+  result.metadata.Format = QuickView::Metafile::KindName(kind);
+  result.metadata.LoaderName = L"GDI+ Metafile";
+  result.metadata.hasAlpha = hasAlpha;
+  result.metadata.DpiX = dpiX;
+  result.metadata.DpiY = dpiY;
+  result.metadata.colorInfo.dataSpace = QuickView::PixelDataSpace::EncodedSdr;
+  result.metadata.colorInfo.transfer = QuickView::TransferFunction::SRGB;
+  result.metadata.colorInfo.primaries = QuickView::ColorPrimaries::SRGB;
+  result.metadata.colorInfo.nominalBitDepth = 8;
+  return S_OK;
 }
 
 bool PrefersSdrTarget(const QuickView::Codec::DecodeContext &ctx) {
@@ -1087,6 +1239,11 @@ HRESULT LoadBufferUnified(const uint8_t *mappedData, size_t mappedSize,
     }
   } else if (fmt == L"PIC" || fmt == L"PCX") {
     HRESULT hr = Stb::Load(mappedData, mappedSize, ctx, result);
+    if (SUCCEEDED(hr)) {
+      return S_OK;
+    }
+  } else if (IsMetafileFormat(fmt)) {
+    HRESULT hr = DecodeMetafileBuffer(mappedData, mappedSize, fmt, ctx, result);
     if (SUCCEEDED(hr)) {
       return S_OK;
     }
@@ -1391,9 +1548,19 @@ static std::wstring DetectFormatFromContent(LPCWSTR filePath) {
   if (QuickView::ExtEqualsIgnoreCase(QuickView::ExtensionOf(filePath), L".svg"))
     return L"SVG";
 
+  {
+    const std::wstring_view ext = QuickView::ExtensionOf(filePath);
+    if (QuickView::ExtEqualsIgnoreCase(ext, L".emf") ||
+        QuickView::ExtEqualsIgnoreCase(ext, L".emz"))
+      return L"EMF";
+    if (QuickView::ExtEqualsIgnoreCase(ext, L".wmf") ||
+        QuickView::ExtEqualsIgnoreCase(ext, L".wmz"))
+      return L"WMF";
+  }
+
   // === STEP 2: Magic Bytes Detection (for non-RAW formats) ===
-  uint8_t magic[32] = {0};
-  size_t read = PeekHeader(filePath, magic, 32);
+  uint8_t magic[64] = {0};
+  size_t read = PeekHeader(filePath, magic, 64);
   if (read == 0)
     return L"Unknown";
 
@@ -1914,13 +2081,15 @@ PopulateMetadataFromEasyExif_Refined(const easyexif::EXIFInfo &exif,
     meta.Altitude = exif.GeoLocation.Altitude;
   }
 
-  // [v6.2] Level 1: EXIF Color Space (Fastest)
-  if (exif.ColorSpace == 1)
-    meta.ColorSpace = L"sRGB";
-  else if (exif.ColorSpace == 2)
-    meta.ColorSpace = L"Adobe RGB";
-  else if (exif.ColorSpace == 65535)
-    meta.ColorSpace = L"Uncalibrated";
+  // [v6.2] Level 1: EXIF Color Space (Only if ICC profile didn't specify a profile name)
+  if (meta.ColorSpace.empty()) {
+    if (exif.ColorSpace == 1)
+      meta.ColorSpace = L"sRGB";
+    else if (exif.ColorSpace == 2)
+      meta.ColorSpace = L"Adobe RGB";
+    else if (exif.ColorSpace == 65535)
+      meta.ColorSpace = L"Uncalibrated";
+  }
 
   // [Fix] Populate Orientation!
   if (exif.Orientation >= 1 && exif.Orientation <= 8) {
@@ -4012,21 +4181,52 @@ static HRESULT LoadThumbJXL_Sampled(const uint8_t *pFile, size_t fileSize,
   return cleanup(S_OK);
 }
 
-static HRESULT RasterizeSvgThumbnail(const std::vector<uint8_t> &xmlData,
-                                     float viewBoxW, float viewBoxH,
-                                     int targetSize,
-                                     CImageLoader::ThumbData *pData) {
-  if (!pData || xmlData.empty())
+HRESULT CImageLoader::RasterizeSvgToPixels(const uint8_t *xmlData, size_t xmlSize,
+                                           float viewBoxW, float viewBoxH,
+                                           int targetSize,
+                                           CImageLoader::ThumbData *pData,
+                                           float cropX, float cropY,
+                                           float cropW, float cropH,
+                                           float zoomScale) {
+  if (!pData || !xmlData || xmlSize == 0)
     return E_INVALIDARG;
 
   const float safeW = viewBoxW > 0.0f ? viewBoxW : 512.0f;
   const float safeH = viewBoxH > 0.0f ? viewBoxH : 512.0f;
-  const int maxDim = targetSize > 0 ? targetSize : 512;
-  const float scale =
-      (std::min)(1.0f, (float)maxDim / (std::max)(safeW, safeH));
-  const UINT outW = (UINT)(std::max)(1, (int)std::lround(safeW * scale));
-  const UINT outH = (UINT)(std::max)(1, (int)std::lround(safeH * scale));
 
+  const bool hasCrop = (cropW > 0.0f && cropH > 0.0f);
+  const float renderW = hasCrop ? cropW : safeW;
+  const float renderH = hasCrop ? cropH : safeH;
+
+  float scale = 1.0f;
+  if (targetSize > 0) {
+    scale = (float)targetSize / (std::max)(renderW, renderH);
+  } else {
+    // Vector graphics export / clipboard: ensure 4K/2K crystal sharpness.
+    // Scale up so the longest dimension is at least 2048px (or matches current zoom factor).
+    const float maxDim = (std::max)(renderW, renderH);
+    const float minZoomTarget = (std::max)(1.0f, zoomScale);
+    if (maxDim < 2048.0f) {
+      scale = (std::max)(2048.0f / maxDim, minZoomTarget);
+    } else {
+      scale = minZoomTarget;
+    }
+  }
+  const UINT outW = (UINT)(std::max)(1, (int)std::lround(renderW * scale));
+  const UINT outH = (UINT)(std::max)(1, (int)std::lround(renderH * scale));
+
+  // 1. Check if SVG requires WebView2 rendering (complex CSS, foreignObject, web fonts, animations)
+  if (QuickView::OffscreenWebView2::NeedsFallback(std::string_view(reinterpret_cast<const char*>(xmlData), xmlSize))) {
+    std::vector<uint8_t> xmlVec(xmlData, xmlData + xmlSize);
+    int webTarget = (targetSize > 0) ? targetSize : (int)(std::max)(outW, outH);
+    if (SUCCEEDED(WebViewThumbService::Instance().RasterizeSvgToThumb(
+            xmlVec, safeW, safeH, webTarget, pData)) &&
+        pData->isValid) {
+      return S_OK;
+    }
+  }
+
+  // 2. Direct2D WARP Hardware Rasterization
   UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
   D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
   ComPtr<ID3D11Device> d3dDevice;
@@ -4098,7 +4298,7 @@ static HRESULT RasterizeSvgThumbnail(const std::vector<uint8_t> &xmlData,
   if (FAILED(hr))
     return hr;
 
-  HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, xmlData.size());
+  HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, xmlSize);
   if (!hMem)
     return E_OUTOFMEMORY;
 
@@ -4108,7 +4308,7 @@ static HRESULT RasterizeSvgThumbnail(const std::vector<uint8_t> &xmlData,
     GlobalFree(hMem);
     return E_OUTOFMEMORY;
   }
-  memcpy(mem, xmlData.data(), xmlData.size());
+  memcpy(mem, xmlData, xmlSize);
   GlobalUnlock(hMem);
   hr = CreateStreamOnHGlobal(hMem, TRUE, &stream);
   if (FAILED(hr)) {
@@ -4119,18 +4319,45 @@ static HRESULT RasterizeSvgThumbnail(const std::vector<uint8_t> &xmlData,
   ComPtr<ID2D1SvgDocument> svgDoc;
   hr = d2dContext5->CreateSvgDocument(stream.Get(), D2D1::SizeF(safeW, safeH),
                                       &svgDoc);
-  if (FAILED(hr))
+  if (FAILED(hr)) {
+    // Direct2D SVG creation failed - fallback to WebView2 offscreen rasterizer
+    std::vector<uint8_t> xmlVec(xmlData, xmlData + xmlSize);
+    int webTarget = (targetSize > 0) ? targetSize : (int)(std::max)(outW, outH);
+    if (SUCCEEDED(WebViewThumbService::Instance().RasterizeSvgToThumb(
+            xmlVec, safeW, safeH, webTarget, pData)) &&
+        pData->isValid) {
+      return S_OK;
+    }
     return hr;
+  }
 
   d2dContext5->SetTarget(targetBitmap.Get());
   d2dContext5->BeginDraw();
   d2dContext5->Clear(D2D1::ColorF(0, 0, 0, 0));
-  d2dContext5->SetTransform(
-      D2D1::Matrix3x2F::Scale((float)outW / safeW, (float)outH / safeH));
+
+  if (hasCrop) {
+    // True Vector Sub-Region: Translate to crop origin, then scale to target dimensions
+    d2dContext5->SetTransform(
+        D2D1::Matrix3x2F::Translation(-cropX, -cropY) *
+        D2D1::Matrix3x2F::Scale((float)outW / renderW, (float)outH / renderH));
+  } else {
+    d2dContext5->SetTransform(
+        D2D1::Matrix3x2F::Scale((float)outW / safeW, (float)outH / safeH));
+  }
+
   d2dContext5->DrawSvgDocument(svgDoc.Get());
   hr = d2dContext5->EndDraw();
-  if (FAILED(hr))
+  if (FAILED(hr)) {
+    // Direct2D SVG drawing failed - fallback to WebView2 offscreen rasterizer
+    std::vector<uint8_t> xmlVec(xmlData, xmlData + xmlSize);
+    int webTarget = (targetSize > 0) ? targetSize : (int)(std::max)(outW, outH);
+    if (SUCCEEDED(WebViewThumbService::Instance().RasterizeSvgToThumb(
+            xmlVec, safeW, safeH, webTarget, pData)) &&
+        pData->isValid) {
+      return S_OK;
+    }
     return hr;
+  }
 
   D3D11_TEXTURE2D_DESC stagingDesc = texDesc;
   stagingDesc.BindFlags = 0;
@@ -4166,6 +4393,14 @@ static HRESULT RasterizeSvgThumbnail(const std::vector<uint8_t> &xmlData,
   pData->isValid = true;
   pData->isBlurry = false;
   return S_OK;
+}
+
+static HRESULT RasterizeSvgThumbnail(const std::vector<uint8_t> &xmlData,
+                                     float viewBoxW, float viewBoxH,
+                                     int targetSize,
+                                     CImageLoader::ThumbData *pData) {
+  if (xmlData.empty()) return E_INVALIDARG;
+  return CImageLoader::RasterizeSvgToPixels(xmlData.data(), xmlData.size(), viewBoxW, viewBoxH, targetSize, pData);
 }
 
 HRESULT CImageLoader::LoadThumbnail(LPCWSTR filePath, int targetSize,
@@ -4352,9 +4587,24 @@ HRESULT CImageLoader::LoadThumbnail(LPCWSTR filePath, int targetSize,
 
     HRESULT hr = LoadToFrame(filePath, pFrame.get(), nullptr, targetSize,
                              targetSize, &pData->loaderName, {}, {});
-    if (SUCCEEDED(hr) && pFrame->IsSvg() && pFrame->svg) {
-      hr = RasterizeSvgThumbnail(pFrame->svg->xmlData, pFrame->svg->viewBoxW,
-                                 pFrame->svg->viewBoxH, targetSize, pData);
+    if (SUCCEEDED(hr) && pFrame->svg &&
+        (pFrame->IsSvg() || pFrame->IsWebView())) {
+      // Complex SVG (WebView): CapturePreview via shared offscreen WebView2
+      // (gallery + same pipeline as minimap quality). Simple SVG: D2D first.
+      if (pFrame->IsWebView()) {
+        hr = WebViewThumbService::Instance().RasterizeSvgToThumb(
+            pFrame->svg->xmlData, pFrame->svg->viewBoxW, pFrame->svg->viewBoxH,
+            targetSize, pData);
+        if (FAILED(hr) || !pData->isValid) {
+          pData->isValid = false;
+          pData->pixels.clear();
+          hr = RasterizeSvgThumbnail(pFrame->svg->xmlData, pFrame->svg->viewBoxW,
+                                     pFrame->svg->viewBoxH, targetSize, pData);
+        }
+      } else {
+        hr = RasterizeSvgThumbnail(pFrame->svg->xmlData, pFrame->svg->viewBoxW,
+                                   pFrame->svg->viewBoxH, targetSize, pData);
+      }
     } else if (SUCCEEDED(hr) && pFrame->pixels && pFrame->width > 0 &&
                pFrame->height > 0) {
       pData->width = pFrame->width;
@@ -4740,13 +4990,15 @@ static void PopulateMetadataFromEasyExif(const easyexif::EXIFInfo &exif,
   if (!exif.LensInfo.Model.empty())
     meta.Lens = toW(exif.LensInfo.Model);
 
-  // [v6.0] Color Space
-  if (exif.ColorSpace == 1)
-    meta.ColorSpace = L"sRGB";
-  else if (exif.ColorSpace == 2)
-    meta.ColorSpace = L"Adobe RGB";
-  else if (exif.ColorSpace == 65535)
-    meta.ColorSpace = L"Uncalibrated";
+  // [v6.0] Color Space (Only if ICC profile didn't specify a profile name)
+  if (meta.ColorSpace.empty()) {
+    if (exif.ColorSpace == 1)
+      meta.ColorSpace = L"sRGB";
+    else if (exif.ColorSpace == 2)
+      meta.ColorSpace = L"Adobe RGB";
+    else if (exif.ColorSpace == 65535)
+      meta.ColorSpace = L"Uncalibrated";
+  }
 
   // [Fix] Populate Orientation! (Crucial for TurboJPEG/Buffer Loaders)
   if (exif.Orientation >= 1 && exif.Orientation <= 8) {
@@ -5443,19 +5695,26 @@ HRESULT CImageLoader::LoadJXL(LPCWSTR filePath, IWICBitmap **ppBitmap,
 HRESULT CImageLoader::LoadRaw(LPCWSTR filePath, IWICBitmap **ppBitmap,
                               bool forceFullDecode,
                               [[maybe_unused]] ImageMetadata *pMetadata) {
-  // Optimization: Try to load embedded JPEG preview first (FAST)
-  // Fallback: Full RAW decode (SLOW)
-
-  std::pmr::vector<uint8_t> rawBuf(std::pmr::get_default_resource());
-  if (!ReadFileToPMR(filePath, rawBuf, {}))
-    return E_FAIL;
+  if (!filePath || !ppBitmap)
+    return E_INVALIDARG;
 
   LibRaw RawProcessor;
-  if (RawProcessor.open_buffer(rawBuf.data(), rawBuf.size()) != LIBRAW_SUCCESS)
+#ifdef _WIN32
+  if (RawProcessor.open_file(filePath) != LIBRAW_SUCCESS)
     return E_FAIL;
+#else
+  std::string pathUtf8;
+  int len = WideCharToMultiByte(CP_UTF8, 0, filePath, -1, NULL, 0, NULL, NULL);
+  if (len > 0) {
+    pathUtf8.resize(len);
+    WideCharToMultiByte(CP_UTF8, 0, filePath, -1, &pathUtf8[0], len, NULL, NULL);
+    pathUtf8.pop_back();
+  }
+  if (RawProcessor.open_file(pathUtf8.c_str()) != LIBRAW_SUCCESS)
+    return E_FAIL;
+#endif
 
-  // [Fix] Capture RAW orientation early (same mapping as LoadImageUnified RAW
-  // Codec)
+  // [Fix] Capture RAW orientation early (same mapping as LoadImageUnified RAW Codec)
   int flip = RawProcessor.imgdata.sizes.flip;
   int exifOrientation = 1;
   if (flip == 3)
@@ -5480,53 +5739,44 @@ HRESULT CImageLoader::LoadRaw(LPCWSTR filePath, IWICBitmap **ppBitmap,
 
     if (thumb) {
       if (thumb->type == LIBRAW_IMAGE_JPEG) {
-        // JPEG Thumbnail
-        ComPtr<IWICStream> stream;
-        HRESULT hr = m_wicFactory->CreateStream(&stream);
-        if (SUCCEEDED(hr))
-          hr = stream->InitializeFromMemory(thumb->data, thumb->data_size);
+        // High-compatibility TurboJPEG decompression (Consistent with RawCodec::Load)
+        DecodeContext ctx;
+        ctx.allocator.pfn = [](void *, size_t s) -> uint8_t * {
+          return new (std::nothrow) uint8_t[s];
+        };
+        ctx.freeFunc.pfn = [](void *, uint8_t *p) { delete[] p; };
 
-        ComPtr<IWICBitmapDecoder> decoder;
-        if (SUCCEEDED(hr))
-          hr = m_wicFactory->CreateDecoderFromStream(
-              stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder);
-
-        ComPtr<IWICBitmapFrameDecode> frame;
-        if (SUCCEEDED(hr))
-          hr = decoder->GetFrame(0, &frame);
-
-        ComPtr<IWICFormatConverter> converter;
-        if (SUCCEEDED(hr))
-          hr = m_wicFactory->CreateFormatConverter(&converter);
-        if (SUCCEEDED(hr))
-          hr = converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
-                                     WICBitmapDitherTypeNone, nullptr, 0.f,
-                                     WICBitmapPaletteTypeMedianCut);
-
-        if (SUCCEEDED(hr)) {
-          hr = m_wicFactory->CreateBitmapFromSource(
-              converter.Get(), WICBitmapCacheOnLoad, ppBitmap);
-        }
-
-        if (SUCCEEDED(hr)) {
-          // [Fix] Embedded JPEG preview is pre-rotated by camera firmware.
-          // Set orientation to 1 to prevent double-rotation in compare mode.
-          g_lastExifOrientation = 1;
-          RawProcessor.dcraw_clear_mem(thumb);
-          return hr; // Success with JPEG Preview!
+        DecodeResult result;
+        HRESULT hr = JPEG::Load(reinterpret_cast<const uint8_t *>(thumb->data),
+                                thumb->data_size, ctx, result);
+        if (SUCCEEDED(hr) && result.pixels && result.width > 0 && result.height > 0) {
+          hr = CreateWICBitmapCopy(
+              result.width, result.height, GUID_WICPixelFormat32bppBGRA,
+              result.stride, (UINT)(result.stride * result.height),
+              result.pixels, ppBitmap);
+          ctx.freeFunc(result.pixels);
+          if (SUCCEEDED(hr)) {
+            g_lastExifOrientation = (result.metadata.ExifOrientation > 1)
+                                        ? result.metadata.ExifOrientation
+                                        : exifOrientation;
+            RawProcessor.dcraw_clear_mem(thumb);
+            return S_OK; // Success with TurboJPEG Embedded Preview!
+          }
+        } else if (result.pixels) {
+          ctx.freeFunc(result.pixels);
         }
       } else if (thumb->type == LIBRAW_IMAGE_BITMAP) {
-        // Bitmap Thumbnail (RGB)
+        // Bitmap Thumbnail (RGB 24bpp -> BGRA 32bpp standalone copy via Google Highway SIMD)
         if (thumb->bits == 8 && thumb->colors == 3) {
-          UINT width = thumb->width;
-          UINT height = thumb->height;
-          UINT stride = width * 3;
-          HRESULT hr = CreateWICBitmapFromMemory(
-              width, height, GUID_WICPixelFormat24bppRGB, stride,
-              thumb->data_size, thumb->data, ppBitmap);
+          const UINT width = thumb->width;
+          const UINT height = thumb->height;
+          const UINT dstStride = width * 4;
+          std::vector<uint8_t> bgraPixels((size_t)dstStride * height);
+          ImageLoaderSimd::ConvertRGBToBGRA(reinterpret_cast<const uint8_t*>(thumb->data), bgraPixels.data(), width, height, dstStride);
+          HRESULT hr = CreateWICBitmapCopy(
+              width, height, GUID_WICPixelFormat32bppBGRA, dstStride,
+              (UINT)bgraPixels.size(), bgraPixels.data(), ppBitmap);
           if (SUCCEEDED(hr)) {
-            // [Fix] Bitmap thumbnails may NOT be pre-rotated.
-            // Preserve orientation so renderer can apply it.
             g_lastExifOrientation = exifOrientation;
             RawProcessor.dcraw_clear_mem(thumb);
             return hr; // Success with Bitmap Preview!
@@ -5537,19 +5787,21 @@ HRESULT CImageLoader::LoadRaw(LPCWSTR filePath, IWICBitmap **ppBitmap,
     }
   }
 
-  // 2. Fallback: Full Decode (Slow)
-  // Optimization: Disable Auto WB (slow), use Camera WB
+  // 2. Full RAW Decode (LibRaw Demosaic)
   RawProcessor.imgdata.params.use_camera_wb = 1;
-  RawProcessor.imgdata.params.use_auto_wb = 0; // Speed up
-  RawProcessor.imgdata.params.user_qual =
-      2; // 0=Linear(fast), 2=AHD(good), 3=AHD+Interpolation
-  // [Fix] Disable auto-rotation so bitmap stays in sensor orientation.
-  // This matches LoadImageUnified RAW Codec behavior.
-  // Rotation is handled by the renderer using g_lastExifOrientation.
-  RawProcessor.imgdata.params.user_flip = 0;
-
-  // If you want extreme speed at cost of resolution, uncomment:
-  // RawProcessor.imgdata.params.half_size = 1;
+  RawProcessor.imgdata.params.use_auto_wb = 1; // Fallback to Auto-WB if camera WB is missing
+  RawProcessor.imgdata.params.use_camera_matrix = 3; // Use camera color matrix
+  RawProcessor.imgdata.params.no_auto_bright = 1; // Disable auto brightness guessing
+  RawProcessor.imgdata.params.highlight = 0; // Natural highlight clip
+  RawProcessor.imgdata.params.exp_correc = 0; // Preserve linear dynamic range
+  RawProcessor.imgdata.params.exp_shift = 1.0f;
+  RawProcessor.imgdata.params.gamm[0] = 1.0 / 2.222; // Standard sRGB Gamma curve
+  RawProcessor.imgdata.params.gamm[1] = 4.5;
+  RawProcessor.imgdata.params.user_qual = 2; // AHD (Standard Quality)
+  RawProcessor.imgdata.params.half_size = 0;
+  RawProcessor.imgdata.params.output_bps = 8; // Guarantee 8-bit output
+  RawProcessor.imgdata.params.output_color = 1; // Guarantee sRGB
+  RawProcessor.imgdata.params.user_flip = 0; // Sensor orientation (UI handles rotation)
 
   if (RawProcessor.unpack() != LIBRAW_SUCCESS)
     return E_FAIL;
@@ -5562,19 +5814,37 @@ HRESULT CImageLoader::LoadRaw(LPCWSTR filePath, IWICBitmap **ppBitmap,
 
   HRESULT hr = E_FAIL;
 
-  if (image->type == LIBRAW_IMAGE_BITMAP) {
-    if (image->bits == 8 && image->colors == 3) {
-      UINT width = image->width;
-      UINT height = image->height;
-      UINT stride = width * 3;
-      hr = CreateWICBitmapFromMemory(width, height, GUID_WICPixelFormat24bppRGB,
-                                     stride, image->data_size, image->data,
-                                     ppBitmap);
+  if (image->type == LIBRAW_IMAGE_BITMAP && image->colors == 3) {
+    const UINT width = image->width;
+    const UINT height = image->height;
+    const UINT dstStride = width * 4;
+    std::vector<uint8_t> bgraPixels((size_t)dstStride * height);
+    uint8_t* dst = bgraPixels.data();
+
+    if (image->bits == 8) {
+      // Highway SIMD + OpenMP multi-core accelerated conversion
+      ImageLoaderSimd::ConvertRGBToBGRA(reinterpret_cast<const uint8_t*>(image->data), dst, width, height, dstStride);
+    } else if (image->bits == 16) {
+      const uint16_t* src = reinterpret_cast<const uint16_t*>(image->data);
+      for (UINT y = 0; y < height; ++y) {
+        const uint16_t* s = src + (size_t)y * (width * 3);
+        uint8_t* d = dst + (size_t)y * dstStride;
+        for (UINT x = 0; x < width; ++x) {
+          d[x * 4 + 0] = static_cast<uint8_t>(s[x * 3 + 2] >> 8); // B
+          d[x * 4 + 1] = static_cast<uint8_t>(s[x * 3 + 1] >> 8); // G
+          d[x * 4 + 2] = static_cast<uint8_t>(s[x * 3 + 0] >> 8); // R
+          d[x * 4 + 3] = 255;                                     // A
+        }
+      }
     }
+
+    hr = CreateWICBitmapCopy(width, height, GUID_WICPixelFormat32bppBGRA,
+                             dstStride, (UINT)bgraPixels.size(), bgraPixels.data(),
+                             ppBitmap);
   }
 
   if (SUCCEEDED(hr)) {
-    // [Fix] Bitmap is un-rotated (user_flip=0). Store real orientation.
+    // Bitmap is un-rotated (user_flip=0). Store real orientation.
     g_lastExifOrientation = exifOrientation;
   }
 
@@ -6351,10 +6621,7 @@ static HRESULT Load(const uint8_t *pBuf, size_t bufSize,
 
   // [CMS] Extract and Merge Multi-segment ICC Profile from APP2 markers
   {
-    size_t iccTotalSize = 0;
-    int iccNumMarkers = 0;
-
-    // First pass: identify markers and calculate size
+    // First pass: identify markers for UltraHDR
     for (jpeg_saved_marker_ptr marker = cinfo.marker_list; marker;
          marker = marker->next) {
       // [UltraHDR Diagnostic]
@@ -6394,53 +6661,21 @@ static HRESULT Load(const uint8_t *pBuf, size_t bufSize,
         }
       }
 
-      if (marker->marker == 0xE2 && marker->data_length >= 14) {
-        if (memcmp(marker->data, "ICC_PROFILE", 11) == 0) {
-          iccTotalSize += (marker->data_length - 14);
-          iccNumMarkers++;
-        }
-      }
+      // Handled above or via jpeg_read_icc_profile
     }
 
-    {
-      QV_LOG("Loader_JPEG", TraceLoggingInt32(iccNumMarkers, "IccSegments"),
-             TraceLoggingUInt64(iccTotalSize, "IccTotalSize"));
-    }
-
-    if (iccNumMarkers > 0) {
-      result.metadata.iccProfileData.resize(iccTotalSize);
-      uint8_t *pIcc = result.metadata.iccProfileData.data();
-      size_t currentOffset = 0;
-      int markersmerged = 0;
-
-      // Second pass: Merge segments in correct sequence
-      for (int seq = 1; seq <= 255; ++seq) {
-        bool found = false;
-        for (jpeg_saved_marker_ptr marker = cinfo.marker_list; marker;
-             marker = marker->next) {
-          if (marker->marker == JPEG_APP0 + 2 && marker->data_length >= 14 &&
-              memcmp(marker->data, "ICC_PROFILE\0", 12) == 0) {
-            if (marker->data[12] == seq) {
-              size_t partLen = marker->data_length - 14;
-              if (currentOffset + partLen <= iccTotalSize) {
-                memcpy(pIcc + currentOffset, marker->data + 14, partLen);
-                currentOffset += partLen;
-                markersmerged++;
-              }
-              found = true;
-              break;
-            }
-          }
-        }
-        if (!found)
-          break; // Finished or missing segment
+    // Official libjpeg-turbo ICC Profile Reader (Handles multi-segment, sequence alignment & validation)
+    JOCTET *iccBuf = nullptr;
+    unsigned int iccLen = 0;
+    if (jpeg_read_icc_profile(&cinfo, &iccBuf, &iccLen) && iccBuf && iccLen > 0) {
+      result.metadata.iccProfileData.assign(iccBuf, iccBuf + iccLen);
+      result.metadata.HasEmbeddedColorProfile = true;
+      result.metadata.colorInfo.hasEmbeddedIcc = true;
+      std::wstring parsedName = CImageLoader::ParseICCProfileName(iccBuf, iccLen);
+      if (!parsedName.empty()) {
+        result.metadata.ColorSpace = parsedName;
       }
-
-      if (markersmerged > 0) {
-        result.metadata.HasEmbeddedColorProfile = true;
-      } else {
-        result.metadata.iccProfileData.clear();
-      }
+      free(iccBuf);
     }
   }
 
@@ -7972,8 +8207,32 @@ static HRESULT Load(LPCWSTR filePath, const DecodeContext &ctx,
   if (ctx.checkCancel && ctx.checkCancel())
     return E_ABORT;
 
+  // 1. Target Color Space & Gamma Mapping
+  int outputColor = 1; // Default sRGB
+  QuickView::ColorPrimaries outPrimaries = QuickView::ColorPrimaries::SRGB;
+
+  if (ctx.targetPrimaries == QuickView::ColorPrimaries::AdobeRGB) {
+    outputColor = 2; // Adobe RGB (1998)
+    outPrimaries = QuickView::ColorPrimaries::AdobeRGB;
+  } else if (ctx.targetPrimaries == QuickView::ColorPrimaries::DisplayP3) {
+    outputColor = 3; // Wide Gamut RGB (covers DCI-P3)
+    outPrimaries = QuickView::ColorPrimaries::DisplayP3;
+  } else if (ctx.targetPrimaries == QuickView::ColorPrimaries::ProPhotoRGB) {
+    outputColor = 4; // ProPhoto RGB (ROMM RGB)
+    outPrimaries = QuickView::ColorPrimaries::ProPhotoRGB;
+  }
+
+  RawProcessor.imgdata.params.output_color = outputColor;
   RawProcessor.imgdata.params.use_camera_wb = 1;
-  RawProcessor.imgdata.params.use_auto_wb = 0;
+  RawProcessor.imgdata.params.use_auto_wb = 1; // Fallback to Auto-WB if Camera WB is missing
+  RawProcessor.imgdata.params.use_camera_matrix = 3; // Use camera color matrix
+  RawProcessor.imgdata.params.no_auto_bright = 1; // Disable auto brightness guessing
+  RawProcessor.imgdata.params.highlight = 0; // Natural highlight clip
+  RawProcessor.imgdata.params.exp_correc = 0; // Preserve linear dynamic range
+  RawProcessor.imgdata.params.exp_shift = 1.0f;
+  RawProcessor.imgdata.params.gamm[0] = 1.0 / 2.222; // Standard sRGB/P3 Gamma curve
+  RawProcessor.imgdata.params.gamm[1] = 4.5;
+  RawProcessor.imgdata.params.output_bps = 8; // Guarantee 8-bit output
 
   // [v9.9] Optimize demosaic algorithm based on decode mode
   if (g_runtime.ForceRawDecode) {
@@ -8026,9 +8285,17 @@ static HRESULT Load(LPCWSTR filePath, const DecodeContext &ctx,
     result.stride = stride;
     result.format = PixelFormat::BGRA8888;
     result.success = true;
+    result.metadata.colorInfo.primaries = outPrimaries;
+    result.metadata.colorInfo.transfer = QuickView::TransferFunction::SRGB;
     result.metadata.LoaderName = L"LibRaw";
     result.metadata.IsRawFullDecode = true; // [Compare RAW] mark as full decode
     result.metadata.FormatDetails = L"RAW Developed";
+    if (outPrimaries == QuickView::ColorPrimaries::AdobeRGB)
+      result.metadata.FormatDetails += L" (AdobeRGB)";
+    else if (outPrimaries == QuickView::ColorPrimaries::DisplayP3)
+      result.metadata.FormatDetails += L" (Display-P3)";
+    else if (outPrimaries == QuickView::ColorPrimaries::ProPhotoRGB)
+      result.metadata.FormatDetails += L" (ProPhoto)";
     if (RawProcessor.imgdata.params.half_size)
       result.metadata.FormatDetails += L" (Half)";
     else
@@ -8953,6 +9220,14 @@ HRESULT CImageLoader::LoadImageUnifiedInternal(LPCWSTR filePath,
     // If Unknown or DDS, falls through to WIC/Fallback (E_NOTIMPL -> WIC).
   }
 
+  if (IsMetafileFormat(fmt)) {
+    auto fileMap = std::make_shared<QuickView::MappedFile>(filePath);
+    if (!fileMap->IsValid() || !fileMap->data() || fileMap->size() == 0)
+      return E_FAIL;
+    return DecodeMetafileBuffer(fileMap->data(), fileMap->size(), fmt, ctx,
+                                result);
+  }
+
   // --- Buffer Based Codecs ---
   // [v6.7] Expanded: Include ALL integrated specialized formats
   bool isBufferCodec = IsUnifiedBufferCodec(fmt) || fmt == L"HEIC";
@@ -9417,6 +9692,38 @@ HRESULT CImageLoader::GetImageInfoFast(LPCWSTR filePath, ImageInfo *pInfo) {
   size_t size = header.size();
 
   // 3. Detect format and parse header
+
+  {
+    const uint8_t *mfData = data;
+    size_t mfSize = size;
+    std::vector<uint8_t> inflated;
+    auto mf = QuickView::Metafile::Detect(mfData, mfSize);
+    if (mf == QuickView::Metafile::Kind::None && size >= 2 && data[0] == 0x1F &&
+        data[1] == 0x8B && InflateGzip(data, size, inflated, false) &&
+        !inflated.empty()) {
+      mfData = inflated.data();
+      mfSize = inflated.size();
+      mf = QuickView::Metafile::Detect(mfData, mfSize);
+    }
+    if (mf != QuickView::Metafile::Kind::None) {
+      pInfo->format = QuickView::Metafile::KindName(mf);
+      int dpiX = 96, dpiY = 96;
+      if (HDC screen = GetDC(nullptr)) {
+        dpiX = GetDeviceCaps(screen, LOGPIXELSX);
+        dpiY = GetDeviceCaps(screen, LOGPIXELSY);
+        ReleaseDC(nullptr, screen);
+      }
+      auto logical = QuickView::Metafile::MeasureHeader(mfData, mfSize, dpiX, dpiY);
+      if (logical.valid) {
+        pInfo->width = logical.width;
+        pInfo->height = logical.height;
+      }
+      pInfo->channels = 3;
+      pInfo->bitDepth = 8;
+      pInfo->hasAlpha = false;
+      return S_OK;
+    }
+  }
 
   // --- JPEG: Iterative Header Parsing (Streaming) ---
   if (size >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) {
@@ -10811,7 +11118,9 @@ static HRESULT ReadMetadataLibRaw(LPCWSTR filePath,
     tm tmBuf;
     localtime_s(&tmBuf, &t);
     wchar_t buf[64];
-    wcsftime(buf, 64, L"%Y-%m-%d %H:%M", &tmBuf);
+    swprintf_s(buf, L"%04d-%02d-%02d %02d:%02d",
+               tmBuf.tm_year + 1900, tmBuf.tm_mon + 1, tmBuf.tm_mday,
+               tmBuf.tm_hour, tmBuf.tm_min);
     pMetadata->Date = buf;
   }
 
@@ -11334,9 +11643,11 @@ HRESULT CImageLoader::ReadMetadata(LPCWSTR filePath, ImageMetadata *pMetadata,
           else if (csVar.vt == VT_UI4)
             csVal = csVar.ulVal;
 
-          if (csVal == 1)
+          if (csVal == 1) {
             pMetadata->ColorSpace = L"sRGB";
-          else if (csVal == 2)
+            pMetadata->HasEmbeddedColorProfile = false;
+            pMetadata->colorInfo.hasEmbeddedIcc = false;
+          } else if (csVal == 2)
             pMetadata->ColorSpace = L"Adobe RGB";
           else if (csVal == 65535)
             pMetadata->ColorSpace = L"Uncalibrated";
@@ -11390,19 +11701,22 @@ HRESULT CImageLoader::ReadMetadata(LPCWSTR filePath, ImageMetadata *pMetadata,
                       cbProfile, profile.data(), &cbProfile))) {
                 std::wstring desc = CImageLoader::ParseICCProfileName(
                     profile.data(), profile.size());
-                if (!desc.empty()) {
-                  // Skip WIC-synthesized profiles when native probe already determined the state
-                  if (pMetadata->HasEmbeddedColorProfile.has_value() && !pMetadata->HasEmbeddedColorProfile.value())
-                    continue; // Reject fake ICC from WIC
 
-                  pMetadata->ColorSpace = desc;
-                  found = true;
-                  if (!pMetadata->HasEmbeddedColorProfile.has_value())
-                    pMetadata->HasEmbeddedColorProfile = true;
-                  pMetadata->colorInfo.hasEmbeddedIcc = true;
-                  if (pMetadata->iccProfileData.empty())
-                    pMetadata->iccProfileData.assign(profile.begin(), profile.end());
+                // Skip WIC-synthesized profiles when native probe already determined the state
+                if (pMetadata->HasEmbeddedColorProfile.has_value() && !pMetadata->HasEmbeddedColorProfile.value())
+                  continue; // Reject fake ICC from WIC
+
+                if (desc.empty()) {
+                  desc = L"Embedded Profile";
                 }
+
+                pMetadata->ColorSpace = desc;
+                found = true;
+                if (!pMetadata->HasEmbeddedColorProfile.has_value())
+                  pMetadata->HasEmbeddedColorProfile = true;
+                pMetadata->colorInfo.hasEmbeddedIcc = true;
+                if (pMetadata->iccProfileData.empty())
+                  pMetadata->iccProfileData.assign(profile.begin(), profile.end());
               }
             }
           }
@@ -13052,6 +13366,10 @@ CImageLoader::ImageHeaderInfo CImageLoader::PeekHeader(LPCWSTR filePath) {
         result.format = L"AVIF";
       else if (ext == L".jxl")
         result.format = L"JXL";
+      else if (ext == L".emf" || ext == L".emz")
+        result.format = L"EMF";
+      else if (ext == L".wmf" || ext == L".wmz")
+        result.format = L"WMF";
       else
         result.format = L"JPEG"; // Fallback
     } else {
@@ -13241,7 +13559,8 @@ HRESULT CImageLoader::LoadToFrame(
     LPCWSTR filePath, QuickView::RawImageFrame *outFrame, QuantumArena *arena,
     int targetWidth, int targetHeight, std::wstring *pLoaderName,
     CancelPredicate checkCancel, ImageMetadata *pMetadata, bool allowFakeBase,
-    bool isTitanMode, float targetHdrHeadroomStops) {
+    bool isTitanMode, float targetHdrHeadroomStops,
+    QuickView::ColorPrimaries targetPrimaries) {
   using namespace QuickView;
 
   if (!filePath || !outFrame)
@@ -13345,6 +13664,7 @@ HRESULT CImageLoader::LoadToFrame(
       (arena != nullptr); // [v6.2.5.3] Main viewport requests always use an
                           // arena; protect them from CPU SDR reduction!
   ctx.targetHdrHeadroomStops = targetHdrHeadroomStops;
+  ctx.targetPrimaries = targetPrimaries;
 
   // Pass callback to intercept async AuxLayer from LoadImageUnified
   ctx.onAuxLayerReady = outFrame->onAuxLayerReady;
@@ -13872,7 +14192,33 @@ HRESULT CImageLoader::LoadToFrame(
       if (svgH <= 0)
         svgH = 512;
 
-      // 3. Populate RawImageFrame
+      // 3. Check for WebView2 DComp Composition (filters, SMIL/CSS animation, script)
+      if (QuickView::OffscreenWebView2::NeedsFallback(svgContent)) {
+          // Tag as SVG_WEBVIEW -- UI thread will route to WebContentHost DComp visual
+          outFrame->format = PixelFormat::SVG_WEBVIEW;
+          outFrame->width = (int)std::lround(svgW);
+          outFrame->height = (int)std::lround(svgH);
+          outFrame->stride = 0; // No pixels -- WebView2 renders via DComp composition
+          outFrame->pixels = nullptr;
+
+          outFrame->svg = std::make_unique<RawImageFrame::SvgData>();
+          outFrame->svg->xmlData.assign(svgContent.begin(), svgContent.end());
+          outFrame->svg->viewBoxW = svgW;
+          outFrame->svg->viewBoxH = svgH;
+
+          if (pLoaderName) *pLoaderName = L"SVG (WebView2 DComp)";
+          if (pMetadata) {
+              pMetadata->LoaderName = L"SVG (WebView2 DComp)";
+              pMetadata->Format = L"SVG";
+              pMetadata->FormatDetails = L"Complex Vector (DComp)";
+              pMetadata->Width = (UINT)svgW;
+              pMetadata->Height = (UINT)svgH;
+          }
+          outFrame->formatDetails = L"Complex SVG";
+          return S_OK;
+      }
+
+      // 4. Native Direct2D SVG Fast-Track
       outFrame->format = PixelFormat::SVG_XML;
       outFrame->width = (int)std::lround(svgW);
       outFrame->height = (int)std::lround(svgH);

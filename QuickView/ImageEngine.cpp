@@ -6,6 +6,7 @@ static constexpr const char* CURRENT_MODULE = "ImageEngine";
 #include "HeavyLanePool.h"  // [N+1] Include pool implementation
 #include "EditState.h"      // [v9.9] Access g_runtime.ForceRawDecode for dispatch decisions
 #include "TileManager.h"    // [Infinity Engine]
+#include "OffscreenWebView2.h"
 
 #include <algorithm>
 #include <psapi.h>
@@ -148,6 +149,12 @@ void ImageEngine::SetTargetHdrHeadroomStops(float stops) {
     m_targetHdrHeadroomStops.store(stops, std::memory_order_relaxed);
     if (m_heavyPool) {
         m_heavyPool->SetTargetHdrHeadroomStops(stops);
+    }
+}
+
+void ImageEngine::SetTargetColorPrimaries(QuickView::ColorPrimaries primaries) {
+    if (m_heavyPool) {
+        m_heavyPool->SetTargetColorPrimaries(primaries);
     }
 }
 
@@ -323,10 +330,29 @@ void ImageEngine::DispatchImageLoad(const std::wstring& path, ImageID imageId, u
 
         if (cachedFrame) {
             bool isHit = true;
+
+            // Drop corrupt SVG_WEBVIEW cache entries (pre-fix: raster path stripped svg).
+            if (cachedFrame->format == QuickView::PixelFormat::SVG_WEBVIEW &&
+                !cachedFrame->IsWebView()) {
+                InvalidateCache(path);
+                cachedFrame.reset();
+                isHit = false;
+            }
+
+            // Same-process upgrade: old SVG_XML entries that now classify as animated/complex.
+            if (cachedFrame && cachedFrame->format == QuickView::PixelFormat::SVG_XML &&
+                cachedFrame->svg && !cachedFrame->svg->xmlData.empty()) {
+                const auto& xml = cachedFrame->svg->xmlData;
+                if (QuickView::OffscreenWebView2::NeedsFallback(
+                        std::string_view(reinterpret_cast<const char*>(xml.data()), xml.size()))) {
+                    cachedFrame->format = QuickView::PixelFormat::SVG_WEBVIEW;
+                    cachedFrame->formatDetails = L"Complex SVG";
+                }
+            }
             
             // [v9.0] Smart RAW Quality Check
             // RAW files require strict quality matching (Preview vs Full) for A/B comparison
-            if (info.format.contains(L"RAW")) {
+            if (cachedFrame && info.format.contains(L"RAW")) {
                   bool wantFull = m_config.ForceRawDecode;
                   bool hasFull = (cachedFrame->quality == QuickView::DecodeQuality::Full);
                   
@@ -340,7 +366,7 @@ void ImageEngine::DispatchImageLoad(const std::wstring& path, ImageID imageId, u
                   }
             }
 
-            if (isHit) {
+            if (cachedFrame && isHit) {
                 EngineEvent e;
                 e.type = EventType::FullReady;
                 e.filePath = path; 
@@ -363,6 +389,12 @@ void ImageEngine::DispatchImageLoad(const std::wstring& path, ImageID imageId, u
                 if (!e.metadata.HasEmbeddedColorProfile.has_value()) {
                     e.metadata.HasEmbeddedColorProfile =
                         cachedFrame->colorInfo.hasEmbeddedIcc || !cachedFrame->iccProfile.empty();
+                }
+                if (e.metadata.iccProfileData.empty() && !cachedFrame->iccProfile.empty()) {
+                    e.metadata.iccProfileData.assign(cachedFrame->iccProfile.begin(), cachedFrame->iccProfile.end());
+                }
+                if (e.metadata.ColorSpace.empty() && !e.metadata.iccProfileData.empty()) {
+                    e.metadata.ColorSpace = CImageLoader::ParseICCProfileName(e.metadata.iccProfileData.data(), e.metadata.iccProfileData.size());
                 }
                 
                 if (cachedFrame->IsSvg()) e.metadata.Format = L"SVG"; 
@@ -1220,7 +1252,7 @@ void ImageEngine::FastLane::QueueWorker() {
                 // When FastLane immediately starts next job, Arena memory is reused.
                 // Main thread may not have consumed this frame yet -> corruption!
                 auto safeFrame = std::make_shared<QuickView::RawImageFrame>();
-                if (rawFrame.IsSvg()) {
+                if (rawFrame.IsSvg() || rawFrame.IsWebView()) {
                     safeFrame->format = rawFrame.format;
                     safeFrame->formatDetails = rawFrame.formatDetails;
                     safeFrame->width = rawFrame.width;
@@ -1274,6 +1306,12 @@ void ImageEngine::FastLane::QueueWorker() {
                 if (!e.metadata.HasEmbeddedColorProfile.has_value()) {
                     e.metadata.HasEmbeddedColorProfile =
                         rawFrame.colorInfo.hasEmbeddedIcc || !safeFrame->iccProfile.empty();
+                }
+                if (e.metadata.iccProfileData.empty() && safeFrame && !safeFrame->iccProfile.empty()) {
+                    e.metadata.iccProfileData.assign(safeFrame->iccProfile.begin(), safeFrame->iccProfile.end());
+                }
+                if (e.metadata.ColorSpace.empty() && !e.metadata.iccProfileData.empty()) {
+                    e.metadata.ColorSpace = CImageLoader::ParseICCProfileName(e.metadata.iccProfileData.data(), e.metadata.iccProfileData.size());
                 }
                     
                 // [v5.3] Metadata is now populated by LoadToFrame (Unified path)
@@ -1554,7 +1592,13 @@ void ImageEngine::AddToCache(int index, const std::wstring& path, std::shared_pt
     // 1. Calculate true backing-store size.
     // Float HDR frames are 16 Bpp, not 4 Bpp, so width*height*4 badly underestimates
     // both cache pressure and the cost of prefetch deep copies.
-    size_t newSize = frame->GetBufferSize();
+    // SVG / SVG_WEBVIEW: no pixels — account for XML payload only.
+    size_t newSize = 0;
+    if ((frame->IsSvg() || frame->IsWebView()) && frame->svg) {
+        newSize = frame->svg->xmlData.size();
+    } else {
+        newSize = frame->GetBufferSize();
+    }
     
     std::lock_guard lock(m_cacheMutex);
     
@@ -1627,16 +1671,21 @@ void ImageEngine::AddToCache(int index, const std::wstring& path, std::shared_pt
         // We must copy the data to independently-owned heap memory for safe caching.
         auto cachedFrame = std::make_shared<QuickView::RawImageFrame>();
         
-        if (frame->IsSvg()) {
-            // SVG: Copy the SVG data struct
+        // SVG_XML (D2D) and SVG_WEBVIEW (WebContentHost) both carry xmlData only.
+        // IsSvg() is SVG_XML-only — WebView frames must use the same branch or
+        // they fall into the raster path without svg, so IsWebView() fails on revisit.
+        if (frame->IsSvg() || frame->IsWebView()) {
+            // SVG / complex-SVG: Copy the SVG data struct (no pixel buffer)
             cachedFrame->format = frame->format;
             cachedFrame->formatDetails = frame->formatDetails;
             cachedFrame->width = frame->width;
             cachedFrame->height = frame->height;
             cachedFrame->svg = std::make_unique<QuickView::RawImageFrame::SvgData>();
-            cachedFrame->svg->xmlData = frame->svg->xmlData; // Vector copy
-            cachedFrame->svg->viewBoxW = frame->svg->viewBoxW;
-            cachedFrame->svg->viewBoxH = frame->svg->viewBoxH;
+            if (frame->svg) {
+                cachedFrame->svg->xmlData = frame->svg->xmlData; // Vector copy
+                cachedFrame->svg->viewBoxW = frame->svg->viewBoxW;
+                cachedFrame->svg->viewBoxH = frame->svg->viewBoxH;
+            }
             cachedFrame->srcWidth = frame->srcWidth;
             cachedFrame->srcHeight = frame->srcHeight;
             
@@ -1647,6 +1696,9 @@ void ImageEngine::AddToCache(int index, const std::wstring& path, std::shared_pt
         } else {
             // Raster: Deep copy pixels to heap
             size_t bufferSize = frame->GetBufferSize();
+            if (!frame->pixels || bufferSize == 0) {
+                return; // Refuse to cache invalid raster
+            }
             uint8_t* heapPixels = new uint8_t[bufferSize];
             memcpy(heapPixels, frame->pixels, bufferSize);
             
@@ -1846,13 +1898,16 @@ void ImageEngine::InvalidateCache(const std::wstring& path) {
     if (cit != m_cache.end()) {
         m_currentCacheBytes -= cit->second.sizeBytes;
         m_cache.erase(cit);
-        
         // Remove from LRU list (O(N) unfortunately, but safe)
-        // Finding element in list by value needs scan
         auto lit = std::find(m_lruOrder.begin(), m_lruOrder.end(), path);
         if (lit != m_lruOrder.end()) {
             m_lruOrder.erase(lit);
         }
+    }
+
+    // Release MMF handle if it matches the invalidated file path to unlock file on disk
+    if (m_mmf && (path.empty() || _wcsicmp(m_currentNavPath.c_str(), path.c_str()) == 0)) {
+        m_mmf.reset();
     }
 }
 

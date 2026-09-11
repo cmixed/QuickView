@@ -22,7 +22,7 @@ void HelpOverlay::Init(ID2D1RenderTarget* pRT, HWND hwnd) {
 }
 
 void HelpOverlay::SetUIScale(float scale) {
-    if (scale < 1.0f) scale = 1.0f;
+    if (scale < 0.75f) scale = 0.75f;
     if (scale > 4.0f) scale = 4.0f;
     if (fabsf(m_uiScale - scale) < 0.001f) return;
     m_uiScale = scale;
@@ -189,6 +189,8 @@ void HelpOverlay::SetVisible(bool visible) {
             extern GalleryOverlay g_gallery;
             if (g_gallery.IsVisible()) {
                 g_gallery.Close(true);
+                extern void NotifyGallerySessionEnded();
+                NotifyGallerySessionEnded();
             }
             g_gallery.SetHoveringHotspot(false);
             if (m_hwnd) {
@@ -283,9 +285,10 @@ void HelpOverlay::Render(ID2D1RenderTarget* pRT, float winW, float winH) {
     // Close Button [ X ]
     m_closeRect = D2D1::RectF(x + panelW - 40.0f * s, y + 12.0f * s, x + panelW - 12.0f * s, y + 40.0f * s);
     
-    // Check hover
+    // Check hover (Circular close button)
     if (m_hoverClose) {
-        pRT->FillRoundedRectangle(D2D1::RoundedRect(m_closeRect, 4.0f * s, 4.0f * s), m_brushCloseBg.Get());
+        float closeR = (m_closeRect.bottom - m_closeRect.top) * 0.5f;
+        pRT->FillRoundedRectangle(D2D1::RoundedRect(m_closeRect, closeR, closeR), m_brushCloseBg.Get());
     }
     const float cw = m_closeRect.right - m_closeRect.left;
     const float ch = m_closeRect.bottom - m_closeRect.top;

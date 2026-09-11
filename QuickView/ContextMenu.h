@@ -16,8 +16,11 @@ enum ContextMenuCommand : UINT {
     IDM_EDIT,  // Open with default editor
     IDM_SHOW_IN_EXPLORER,
     IDM_OPEN_FOLDER,
-    IDM_COPY_IMAGE,
+    IDM_COPY_PIXELS,
+    IDM_COPY_IMAGE = IDM_COPY_PIXELS,
+    IDM_COPY_FILE,
     IDM_COPY_PATH,
+    IDM_SAVE_AS,
     IDM_PRINT,
 
     // [View Control] Group
@@ -53,6 +56,7 @@ enum ContextMenuCommand : UINT {
 
 
     // [Transform] Group
+    IDM_ENTER_CROP_MODE,
     IDM_ROTATE_CW,
     IDM_ROTATE_CCW,
     IDM_FLIP_H,

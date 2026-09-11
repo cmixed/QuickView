@@ -83,6 +83,16 @@ TEST(SupportedExtensionsTest, HeifAndArchiveHelpers) {
     EXPECT_FALSE(IsArchivePath(L"C:\\comics\\page.png"));
 }
 
+TEST(SupportedExtensionsTest, PlaylistImageExcludesArchives) {
+    EXPECT_TRUE(IsSupportedExtension(L".JPG"));
+    EXPECT_TRUE(IsSupportedExtension(L".zip"));
+    EXPECT_TRUE(IsPlaylistImageExtension(L".jpg"));
+    EXPECT_TRUE(IsPlaylistImageExtension(L".CR3"));
+    EXPECT_FALSE(IsPlaylistImageExtension(L".zip"));
+    EXPECT_FALSE(IsPlaylistImageExtension(L".cbz"));
+    EXPECT_FALSE(IsPlaylistImageExtension(L".txt"));
+}
+
 TEST(SupportedExtensionsTest, RenderedPairWhitelist) {
     // Camera-rendered stills that may pair with a RAW
     EXPECT_TRUE(IsRenderedPairExtension(L".jpg"));
@@ -110,6 +120,10 @@ TEST(SupportedExtensionsTest, FilterStringIsWellFormed) {
     EXPECT_NE(filter.find(L"*.jpg"), std::wstring::npos);
     EXPECT_NE(filter.find(L"*.crw"), std::wstring::npos);
     EXPECT_NE(filter.find(L"*.rar"), std::wstring::npos);
+    EXPECT_NE(filter.find(L"*.wmf"), std::wstring::npos);
+    EXPECT_NE(filter.find(L"*.emf"), std::wstring::npos);
+    EXPECT_NE(filter.find(L"*.wmz"), std::wstring::npos);
+    EXPECT_NE(filter.find(L"*.emz"), std::wstring::npos);
     // Extended (non-browsable) RAW must NOT be offered by the folder filter
     EXPECT_EQ(filter.find(L"*.braw"), std::wstring::npos);
 }

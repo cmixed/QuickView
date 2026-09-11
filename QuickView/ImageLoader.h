@@ -329,7 +329,8 @@ public:
                       CancelPredicate checkCancel = {},
                       ImageMetadata *pMetadata = nullptr,
                       bool allowFakeBase = true, bool isTitanMode = false,
-                      float targetHdrHeadroomStops = -1.0f);
+                      float targetHdrHeadroomStops = -1.0f,
+                      QuickView::ColorPrimaries targetPrimaries = QuickView::ColorPrimaries::SRGB);
 
   /// <summary>
   /// Load a frame directly from a mapped/in-memory buffer via the unified
@@ -441,6 +442,9 @@ public:
   HRESULT LoadThumbnail(LPCWSTR filePath, int targetSize, ThumbData *pData,
                         bool allowSlow = true);
 
+  // Direct RAW Loader API
+  HRESULT LoadRaw(LPCWSTR filePath, IWICBitmap **ppBitmap, bool forceFullDecode, ImageMetadata* pMetadata = nullptr); // libraw
+
   // [JXL Global Runner] Global thread pool singleton to avoid creation overhead for each decode
   static void *GetJxlRunner();
   // Public Specialized Loaders (needed by helpers)
@@ -454,6 +458,14 @@ public:
                                      ImageMetadata *pMetadata = nullptr);
 
   static void ReleaseJxlRunner();
+
+  static HRESULT RasterizeSvgToPixels(const uint8_t *xmlData, size_t xmlSize,
+                                      float viewBoxW, float viewBoxH,
+                                      int targetSize,
+                                      ThumbData *pData,
+                                      float cropX = 0.0f, float cropY = 0.0f,
+                                      float cropW = 0.0f, float cropH = 0.0f,
+                                      float zoomScale = 1.0f);
 
 private:
   HRESULT LoadImageUnifiedInternal(LPCWSTR filePath,
@@ -484,7 +496,6 @@ private:
   HRESULT LoadWebP(LPCWSTR filePath, IWICBitmap **ppBitmap, ImageMetadata* pMetadata = nullptr); // libwebp
   HRESULT LoadAVIF(LPCWSTR filePath, IWICBitmap **ppBitmap, ImageMetadata* pMetadata = nullptr); // libavif + dav1d
   HRESULT LoadJXL(LPCWSTR filePath, IWICBitmap **ppBitmap, ImageMetadata* pMetadata = nullptr);  // libjxl
-  HRESULT LoadRaw(LPCWSTR filePath, IWICBitmap **ppBitmap, bool forceFullDecode, ImageMetadata* pMetadata = nullptr); // libraw
 
   // Wuffs (Google's memory-safe decoder) - Ultimate Performance
   // [v4.0] Cancellation Support
@@ -537,6 +548,7 @@ struct DecodeContext {
   PixelFormat format = PixelFormat::BGRA8888;
   bool forcePreview = false;
   float targetHdrHeadroomStops = -1.0f;
+  QuickView::ColorPrimaries targetPrimaries = QuickView::ColorPrimaries::SRGB;
 
   std::wstring *pLoaderName = nullptr;
   std::wstring *pFormatDetails = nullptr;

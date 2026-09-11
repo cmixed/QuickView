@@ -12,10 +12,12 @@
 namespace GeekIcons {
 
     // --- Vector Infrastructure ---
+#pragma pack(push, 1)
     struct IconPathCommand {
         char type; // 'M', 'L', 'B', 'Z'
         int16_t x1, y1, x2, y2, x3, y3;
     };
+#pragma pack(pop)
 
     struct VectorIcon {
         const IconPathCommand* commands;
@@ -29,6 +31,8 @@ namespace GeekIcons {
 
     // Forward declarations of all icons (defined in GeekIconData.h)
     extern const VectorIcon OpenVector;
+    extern const VectorIcon SaveVector;
+    extern const VectorIcon CropVector;
     extern const VectorIcon RenameVector;
     extern const VectorIcon EditVector;
     extern const VectorIcon DeleteVector;
@@ -49,8 +53,6 @@ namespace GeekIcons {
     extern const VectorIcon SortVector;
     extern const VectorIcon NavigationVector;
     extern const VectorIcon SettingsVector;
-    extern const VectorIcon AboutVector;
-    extern const VectorIcon ExitVector;
     extern const VectorIcon ChevronVector;
     extern const VectorIcon CheckVector;
     extern const VectorIcon LockVector;
@@ -111,6 +113,8 @@ namespace GeekIcons {
 
     // --- Legacy Mapping Aliases (now pointing to Vectors) ---
     inline IconGlyph Open        = &OpenVector;
+    inline IconGlyph Save        = &SaveVector;
+    inline IconGlyph Crop        = &CropVector;
     inline IconGlyph Rename      = &RenameVector;
     inline IconGlyph Edit        = &EditVector;
     inline IconGlyph Delete      = &DeleteVector;

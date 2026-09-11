@@ -3,6 +3,8 @@
 #include <windows.h> // For GetUserDefaultUILanguage
 #include "EditState.h"
 
+extern AppConfig g_config;
+
 namespace AppStrings {
 
 // ----------------------------------------------------------------
@@ -11,6 +13,8 @@ namespace AppStrings {
 // ----------------------------------------------------------------
 const wchar_t *CurrentLocale = L"en-us";
 const wchar_t *OSD_NoImage = nullptr;
+const wchar_t *OSD_FolderEmpty = nullptr;
+const wchar_t *OSD_SvgStaticFallback = nullptr;
 const wchar_t *OSD_Lossless = nullptr;
 const wchar_t *OSD_ReencodedLossless = nullptr;
 const wchar_t *OSD_EdgeAdapted = nullptr;
@@ -37,6 +41,19 @@ const wchar_t *Dialog_ButtonSave = nullptr;
 const wchar_t *Dialog_ButtonSaveAs = nullptr;
 const wchar_t *Dialog_ButtonDiscard = nullptr;
 const wchar_t *Dialog_ButtonContinue = nullptr;
+const wchar_t *Dialog_CropUnsavedTitle = nullptr;
+const wchar_t *Dialog_SaveAsTitle = nullptr;
+const wchar_t *Dialog_ExportTitle = nullptr;
+const wchar_t *Dialog_ButtonOverwrite = nullptr;
+const wchar_t *Dialog_EmbedICC = nullptr;
+const wchar_t *Dialog_SizeEstimating = nullptr;
+const wchar_t *Dialog_ExportError = nullptr;
+const wchar_t *Toolbar_Tooltip_CropCopy = nullptr;
+const wchar_t *Toolbar_Tooltip_CropSave = nullptr;
+const wchar_t *Toolbar_Tooltip_CropApply = nullptr;
+const wchar_t *Toolbar_Tooltip_CropCancel = nullptr;
+const wchar_t *OSD_EnterCropMode = nullptr;
+const wchar_t *OSD_CropCopied = nullptr;
 const wchar_t *Checkbox_AlwaysSaveLossless = nullptr;
 const wchar_t *Checkbox_AlwaysSaveEdgeAdapted = nullptr;
 const wchar_t *Checkbox_AlwaysSaveLossy = nullptr;
@@ -87,10 +104,13 @@ const wchar_t *Settings_Status_NoWritePerm = nullptr;
 const wchar_t *Settings_Status_Enabled = nullptr;
 const wchar_t *Settings_Header_PoweredBy = nullptr;
 const wchar_t *Context_Open = nullptr;
+const wchar_t *Context_Crop = nullptr;
 const wchar_t *Context_OpenWith = nullptr;
 const wchar_t *Context_Edit = nullptr;
 const wchar_t *Context_ShowInExplorer = nullptr;
 const wchar_t *Context_OpenFolder = nullptr;
+const wchar_t *Context_CopyPixels = nullptr;
+const wchar_t *Context_CopyFile = nullptr;
 const wchar_t *Context_CopyImage = nullptr;
 const wchar_t *Context_CopyPath = nullptr;
 const wchar_t *Context_Print = nullptr;
@@ -204,7 +224,11 @@ const wchar_t *Settings_Label_LoupeShape = nullptr;
 const wchar_t *Settings_Option_LoupeShapeSquare = nullptr;
 const wchar_t *Settings_Option_LoupeShapeCircle = nullptr;
 const wchar_t *Settings_Tooltip_LoupeHotkey = nullptr;
+const wchar_t *Settings_Tooltip_CropModeHotkey = nullptr;
 const wchar_t *OSD_Copied = nullptr;
+const wchar_t *OSD_PixelsCopied = nullptr;
+const wchar_t *OSD_PixelsExtracting = nullptr;
+const wchar_t *OSD_FileCopied = nullptr;
 const wchar_t *OSD_CoordinatesCopied = nullptr;
 const wchar_t *OSD_FilePathCopied = nullptr;
 const wchar_t *OSD_Zoom100 = nullptr;
@@ -296,7 +320,6 @@ const wchar_t *Settings_Action_ImportTheme = nullptr;
 const wchar_t *Settings_Label_CanvasColor = nullptr;
 const wchar_t *Settings_Label_Overlay = nullptr;
 const wchar_t *Settings_Label_ShowGrid = nullptr;
-const wchar_t *Settings_Label_CrossFade = nullptr;
 const wchar_t *Settings_Label_AlwaysOnTop = nullptr;
 const wchar_t *Settings_Label_LockWindow = nullptr;
 const wchar_t *Settings_Tooltip_LockWindow = nullptr;
@@ -550,6 +573,7 @@ const wchar_t *Settings_Tooltip_GalleryTrigger = nullptr;
 const wchar_t *Settings_Label_GalleryTriggerAreaHeight = nullptr;
 const wchar_t *Settings_Label_GalleryDwellTime = nullptr;
 const wchar_t *Settings_Label_GalleryExitDelay = nullptr;
+const wchar_t *Settings_Label_GalleryMinSize = nullptr;
 
 const wchar_t *OSD_SlideshowStarted = nullptr;
 const wchar_t *OSD_SlideshowStopped = nullptr;
@@ -570,7 +594,7 @@ const wchar_t *Settings_Option_SlideshowNormal = nullptr;
 const wchar_t *Settings_Option_SlideshowSpotlight = nullptr;
 
 // --- Static Constants ---
-const wchar_t *Settings_Text_Copyright = L"Copyright \u00A9 2025-%s Vivor Loong (Github@justnullname)";
+const wchar_t *Settings_Text_Copyright = L"\u00A9 2025\u2013%s Vivor Loong (GitHub: @justnullname)";
 const wchar_t *Settings_Text_License = L"Licensed under GNU GPL v3.0";
 
 // ----------------------------------------------------------------
@@ -578,6 +602,8 @@ const wchar_t *Settings_Text_License = L"Licensed under GNU GPL v3.0";
 // ----------------------------------------------------------------
 struct LanguageTable {
     const wchar_t *OSD_NoImage;
+    const wchar_t *OSD_FolderEmpty;
+    const wchar_t *OSD_SvgStaticFallback;
     const wchar_t *OSD_Lossless;
     const wchar_t *OSD_ReencodedLossless;
     const wchar_t *OSD_EdgeAdapted;
@@ -608,6 +634,20 @@ struct LanguageTable {
     const wchar_t *Dialog_ButtonSaveAs;
     const wchar_t *Dialog_ButtonDiscard;
     const wchar_t *Dialog_ButtonContinue;
+    const wchar_t *Dialog_CropUnsavedTitle;
+    const wchar_t *Dialog_SaveAsTitle;
+    const wchar_t *Dialog_ExportTitle;
+    const wchar_t *Dialog_ButtonOverwrite;
+    const wchar_t *Dialog_EmbedICC;
+    const wchar_t *Dialog_SizeEstimating;
+    const wchar_t *Dialog_ExportError;
+    const wchar_t *Toolbar_Tooltip_CropCopy;
+    const wchar_t *Toolbar_Tooltip_CropSave;
+    const wchar_t *Toolbar_Tooltip_CropApply;
+    const wchar_t *Toolbar_Tooltip_CropCancel;
+    const wchar_t *OSD_EnterCropMode;
+    const wchar_t *OSD_CropCopied;
+    const wchar_t *Context_Crop;
     const wchar_t *Checkbox_AlwaysSaveLossless;
     const wchar_t *Checkbox_AlwaysSaveEdgeAdapted;
     const wchar_t *Checkbox_AlwaysSaveLossy;
@@ -647,6 +687,8 @@ struct LanguageTable {
     const wchar_t *Context_Edit;
     const wchar_t *Context_ShowInExplorer;
     const wchar_t *Context_OpenFolder;
+    const wchar_t *Context_CopyPixels;
+    const wchar_t *Context_CopyFile;
     const wchar_t *Context_CopyImage;
     const wchar_t *Context_CopyPath;
     const wchar_t *Context_Print;
@@ -761,6 +803,9 @@ struct LanguageTable {
     const wchar_t *Settings_Label_ShowDirtyRect;
     const wchar_t *Settings_Tooltip_ShowDirtyRect;
     const wchar_t *OSD_Copied;
+    const wchar_t *OSD_PixelsCopied;
+    const wchar_t *OSD_PixelsExtracting;
+    const wchar_t *OSD_FileCopied;
     const wchar_t *OSD_CoordinatesCopied;
     const wchar_t *OSD_FilePathCopied;
     const wchar_t *OSD_Zoom100;
@@ -850,7 +895,6 @@ struct LanguageTable {
     const wchar_t *Settings_Label_CanvasColor;
     const wchar_t *Settings_Label_Overlay;
     const wchar_t *Settings_Label_ShowGrid;
-    const wchar_t *Settings_Label_CrossFade;
     const wchar_t *Settings_Label_AlwaysOnTop;
     const wchar_t *Settings_Label_LockWindow;
     const wchar_t *Settings_Tooltip_LockWindow;
@@ -1101,6 +1145,7 @@ struct LanguageTable {
     const wchar_t *Settings_Label_GalleryTriggerAreaHeight;
     const wchar_t *Settings_Label_GalleryDwellTime;
     const wchar_t *Settings_Label_GalleryExitDelay;
+    const wchar_t *Settings_Label_GalleryMinSize;
 
     const wchar_t *OSD_SlideshowStarted;
     const wchar_t *OSD_SlideshowStopped;
@@ -1125,6 +1170,7 @@ struct LanguageTable {
     const wchar_t *Settings_Option_LoupeShapeSquare;
     const wchar_t *Settings_Option_LoupeShapeCircle;
     const wchar_t *Settings_Tooltip_LoupeHotkey;
+    const wchar_t *Settings_Tooltip_CropModeHotkey;
 };
 
 // ----------------------------------------------------------------
@@ -1132,6 +1178,8 @@ struct LanguageTable {
 // ----------------------------------------------------------------
 static const LanguageTable Table_EN = {
     L"No image loaded", // OSD_NoImage
+    L"No images in this folder", // OSD_FolderEmpty
+    L"Animated SVG shown as a still image", // OSD_SvgStaticFallback
     L"Lossless", // OSD_Lossless
     L"Re-encoded (Lossless)", // OSD_ReencodedLossless
     L"Cropped", // OSD_EdgeAdapted
@@ -1162,9 +1210,23 @@ static const LanguageTable Table_EN = {
     L"Save As...", // Dialog_ButtonSaveAs
     L"Discard", // Dialog_ButtonDiscard
     L"Continue", // Dialog_ButtonContinue
-    L"Always save lossless transforms", // Checkbox_AlwaysSaveLossless
-    L"Always save edge-adapted", // Checkbox_AlwaysSaveEdgeAdapted
-    L"Always save re-encoded", // Checkbox_AlwaysSaveLossy
+    L"Unsaved crop modifications. Save changes?", // Dialog_CropUnsavedTitle
+    L"Save Image", // Dialog_SaveAsTitle
+    L"Save & Export", // Dialog_ExportTitle
+    L"Overwrite", // Dialog_ButtonOverwrite
+    L"ICC Profile", // Dialog_EmbedICC
+    L"Size: Estimating...", // Dialog_SizeEstimating
+    L"Export Error", // Dialog_ExportError
+    L"Copy Selection (Ctrl+C)", // Toolbar_Tooltip_CropCopy
+    L"Save (Ctrl+S)", // Toolbar_Tooltip_CropSave
+    L"Apply (Enter)", // Toolbar_Tooltip_CropApply
+    L"Exit (Esc)", // Toolbar_Tooltip_CropCancel
+    L"Entered Crop Mode", // OSD_EnterCropMode
+    L"Copied crop selection", // OSD_CropCopied
+    L"Crop", // Context_Crop
+    L"Always Save Lossless Transforms", // Checkbox_AlwaysSaveLossless
+    L"Always Save Edge-Adapted", // Checkbox_AlwaysSaveEdgeAdapted
+    L"Always Save Re-Encoded", // Checkbox_AlwaysSaveLossy
     L"Directly to Recycle Bin, do not confirm again", // Checkbox_NeverConfirmDelete
     L"Cannot decode HEIC - Install HEVC Video Extension", // OSD_HEICCodecMissing
     L"Cannot decode HEIC", // Dialog_HEICTitle
@@ -1186,7 +1248,7 @@ static const LanguageTable Table_EN = {
     L"Loop", // Settings_Label_NavLoopMode
     L"Sort Order", // Settings_Label_SortOrder
     L"Descending", // Settings_Label_SortDescending
-    L"Always sort archives by name", // Settings_Label_SortArchivesByNameAscending
+    L"Always Sort Archives by Name", // Settings_Label_SortArchivesByNameAscending
     L"Confirm Before Delete", // Settings_Label_ConfirmDel
     L"Portable Mode / Cleanup", // Settings_Label_Portable
     L"Portable Mode / Registry Cleanup:\nWhen enabled, QuickView runs in " L"portable mode. It will automatically clean up existing registry " L"associations, disable automatic registry modification, and store " L"configuration files in the application directory instead of AppData.", // Settings_Tooltip_Portable
@@ -1201,7 +1263,9 @@ static const LanguageTable Table_EN = {
     L"Edit\tE", // Context_Edit
     L"Show in Explorer", // Context_ShowInExplorer
     L"Open Folder", // Context_OpenFolder
-    L"Copy Image\tCtrl+C", // Context_CopyImage
+    L"Copy Pixels\tCtrl+C", // Context_CopyPixels
+    L"Copy File\tCtrl+Shift+C", // Context_CopyFile
+    L"Copy Pixels\tCtrl+C", // Context_CopyImage
     L"Copy Path\tCtrl+Alt+C", // Context_CopyPath
     L"Print\tCtrl+P", // Context_Print
     L"Rotate 90\x00B0 CW\tR", // Context_RotateCW
@@ -1312,9 +1376,12 @@ static const LanguageTable Table_EN = {
     L"Aggressive", // Settings_Option_MemAggressive
     L"On-Demand", // Settings_Option_MemOnDemand
     L"Smart: Automatically reclaim memory only when system RAM < 4GB.\n" L"Aggressive: Keep memory reserved for absolute 0ns allocation speed.\n" L"On-Demand: Always reclaim idle memory to save physical RAM.", // Settings_Tooltip_MemoryReclaim
-    L"Show update regions button in animation", // Settings_Label_ShowDirtyRect
+    L"Show Update Regions Button in Animation", // Settings_Label_ShowDirtyRect
     L"Show the update region debug button in animation mode to visualize which parts of the frame are being redrawn.", // Settings_Tooltip_ShowDirtyRect
     L"Copied!", // OSD_Copied
+    L"Pixels copied to clipboard!", // OSD_PixelsCopied
+    L"Extracting raw pixels...", // OSD_PixelsExtracting
+    L"File copied to clipboard!", // OSD_FileCopied
     L"Coordinates copied!", // OSD_CoordinatesCopied
     L"File path copied!", // OSD_FilePathCopied
     L"Zoom: 100%", // OSD_Zoom100
@@ -1375,7 +1442,7 @@ static const LanguageTable Table_EN = {
     L"Standard (1.5px)", // Settings_Option_StrokeStandard
     L"Fine (1.0px)", // Settings_Option_StrokeFine
     L"Tint Profile", // Settings_Header_GlassTint
-    L"Color logic", // Settings_Label_TintProfile
+    L"Color Logic", // Settings_Label_TintProfile
     L"Auto (Adaptive)", // Settings_Option_TintAuto
     L"Custom Color", // Settings_Option_TintCustom
     L"Manual Tint", // Settings_Label_GlassCustomColor
@@ -1404,7 +1471,6 @@ static const LanguageTable Table_EN = {
     L"Canvas Color", // Settings_Label_CanvasColor
     L"Overlay", // Settings_Label_Overlay
     L"Show Grid Overlay", // Settings_Label_ShowGrid
-    L"Image Transition Fade", // Settings_Label_CrossFade
     L"Always on Top", // Settings_Label_AlwaysOnTop
     L"Lock Window", // Settings_Label_LockWindow
     L"Controls whether the program locks the window border by default on startup, rather than following image scaling.", // Settings_Tooltip_LockWindow
@@ -1422,9 +1488,9 @@ static const LanguageTable Table_EN = {
     L"Auto", // Settings_Option_NavigatorAuto
     L"On", // Settings_Option_NavigatorOn
     L"Off", // Settings_Option_NavigatorOff
-    L"Keep window size on navigation", // Settings_Label_KeepWindowSizeOnNav
-    L"Remember last window size and position", // Settings_Label_RememberLastWindowSizeAndPosition
-    L"Adapt small images", // Settings_Label_UpscaleSmallImagesWhenLocked
+    L"Keep Window Size on Navigation", // Settings_Label_KeepWindowSizeOnNav
+    L"Remember Last Window Size and Position", // Settings_Label_RememberLastWindowSizeAndPosition
+    L"Adapt Small Images", // Settings_Label_UpscaleSmallImagesWhenLocked
     L"Smooth Window Scaling (GPU)", // Settings_Label_EnableSmoothScaling
     L"EXIF Panel Mode", // Settings_Label_ExifMode
     L"Toolbar Info Default", // Settings_Label_ToolbarInfoDefault
@@ -1574,7 +1640,7 @@ static const LanguageTable Table_EN = {
     L"Size", // Settings_Option_SortSize
     L"Type", // Settings_Option_SortType
     L"Loop", // Settings_Option_NavLoop
-    L"Through subfolders", // Settings_Option_NavThrough
+    L"Through Subfolders", // Settings_Option_NavThrough
     L"Linear: Basic smoothing", // Settings_Option_Linear
     L"Nearest: Extreme sharpness", // Settings_Option_Nearest
     L"HQ Cubic: Extreme smoothing", // Settings_Option_HighQualityCubic
@@ -1645,7 +1711,7 @@ static const LanguageTable Table_EN = {
     L"Ref: ", // HUD_Label_Ref
     L"Gallery Filmstrip (Top Hover)", // Settings_Header_GalleryTrigger
     L"Trigger Mode", // Settings_Label_GalleryTriggerMode
-    L"Keep visible after clicking thumbnail", // Settings_Label_KeepGalleryVisibleOnThumbnailClick
+    L"Keep Visible After Clicking Thumbnail", // Settings_Label_KeepGalleryVisibleOnThumbnailClick
     L"This feature will automatically enable Window Lock and Keep Window Size On Navigation.", // Settings_Tooltip_KeepGalleryVisibleOnThumbnailClick
     L"Auto Hover", // Settings_Option_GalleryTriggerAuto
     L"Hotspot Hover", // Settings_Option_GalleryTriggerDelay
@@ -1655,6 +1721,7 @@ static const LanguageTable Table_EN = {
     L"Trigger Area Height", // Settings_Label_GalleryTriggerAreaHeight
     L"Dwell Time", // Settings_Label_GalleryDwellTime
     L"Exit Delay", // Settings_Label_GalleryExitDelay
+    L"Gallery Minimum Size", // Settings_Label_GalleryMinSize
 
     L"Slideshow Started", // OSD_SlideshowStarted
     L"Slideshow Stopped", // OSD_SlideshowStopped
@@ -1672,13 +1739,14 @@ static const LanguageTable Table_EN = {
     L"Info Panel Full/Lite Zoom", // Settings_Label_InfoPanelScale
     L"Items in Normal Mode", // Settings_Label_ItemsInNormalMode
     L"Items in Compare Mode", // Settings_Label_ItemsInCompareMode
-    L"Separator preset", // Settings_Label_SeparatorPreset
+    L"Separator Preset", // Settings_Label_SeparatorPreset
     L"Normal", // Settings_Option_SlideshowNormal
     L"Spotlight", // Settings_Option_SlideshowSpotlight
     L"Magnifier Shape", // Settings_Label_LoupeShape
     L"Square", // Settings_Option_LoupeShapeSquare
     L"Circle", // Settings_Option_LoupeShapeCircle
     L"Hold the shortcut key and scroll the mouse wheel to adjust the magnifier size.", // Settings_Tooltip_LoupeHotkey
+    L"Hold Ctrl and drag with the left mouse button to quick-crop.", // Settings_Tooltip_CropModeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -1686,6 +1754,8 @@ static const LanguageTable Table_EN = {
 // ----------------------------------------------------------------
 static const LanguageTable Table_CN = {
     L"没有加载图片", // OSD_NoImage
+    L"文件夹中没有图片", // OSD_FolderEmpty
+    L"动态 SVG 已显示为静态图像", // OSD_SvgStaticFallback
     L"无损", // OSD_Lossless
     L"重编码 (无损)", // OSD_ReencodedLossless
     L"边缘优化", // OSD_EdgeAdapted
@@ -1716,6 +1786,20 @@ static const LanguageTable Table_CN = {
     L"另存为...", // Dialog_ButtonSaveAs
     L"放弃", // Dialog_ButtonDiscard
     L"继续", // Dialog_ButtonContinue
+    L"裁剪修改未保存，是否保存更改？", // Dialog_CropUnsavedTitle
+    L"另存图片", // Dialog_SaveAsTitle
+    L"保存与导出", // Dialog_ExportTitle
+    L"覆盖保存", // Dialog_ButtonOverwrite
+    L"嵌入 ICC 配置", // Dialog_EmbedICC
+    L"大小: 估算中...", // Dialog_SizeEstimating
+    L"导出错误", // Dialog_ExportError
+    L"复制选区 (Ctrl+C)", // Toolbar_Tooltip_CropCopy
+    L"保存 (Ctrl+S)", // Toolbar_Tooltip_CropSave
+    L"应用 (Enter)", // Toolbar_Tooltip_CropApply
+    L"退出 (Esc)", // Toolbar_Tooltip_CropCancel
+    L"已进入裁剪模式", // OSD_EnterCropMode
+    L"已复制裁剪选区", // OSD_CropCopied
+    L"裁剪", // Context_Crop
     L"总是保存无损变换", // Checkbox_AlwaysSaveLossless
     L"总是保存边缘优化结果", // Checkbox_AlwaysSaveEdgeAdapted
     L"总是保存重编码结果", // Checkbox_AlwaysSaveLossy
@@ -1755,7 +1839,9 @@ static const LanguageTable Table_CN = {
     L"编辑\tE", // Context_Edit
     L"在资源管理器中显示", // Context_ShowInExplorer
     L"打开文件夹", // Context_OpenFolder
-    L"复制图像\tCtrl+C", // Context_CopyImage
+    L"复制像素\tCtrl+C", // Context_CopyPixels
+    L"复制文件\tCtrl+Shift+C", // Context_CopyFile
+    L"复制像素\tCtrl+C", // Context_CopyImage
     L"复制路径\tCtrl+Alt+C", // Context_CopyPath
     L"打印\tCtrl+P", // Context_Print
     L"顺时针旋转 90\x00B0\tR", // Context_RotateCW
@@ -1869,6 +1955,9 @@ static const LanguageTable Table_CN = {
     L"动画模式下显示重绘区域预览按钮", // Settings_Label_ShowDirtyRect
     L"在播放动画时显示用于调试重绘区域的工具按钮，以便可视化哪些部分正在更新。", // Settings_Tooltip_ShowDirtyRect
     L"已复制!", // OSD_Copied
+    L"像素已复制到剪贴板!", // OSD_PixelsCopied
+    L"正在提取原片像素...", // OSD_PixelsExtracting
+    L"文件已复制到剪贴板!", // OSD_FileCopied
     L"坐标已复制!", // OSD_CoordinatesCopied
     L"文件路径已复制!", // OSD_FilePathCopied
     L"缩放: 100%", // OSD_Zoom100
@@ -1958,7 +2047,6 @@ static const LanguageTable Table_CN = {
     L"画布颜色", // Settings_Label_CanvasColor
     L"叠加层", // Settings_Label_Overlay
     L"显示网格", // Settings_Label_ShowGrid
-    L"图片切换淡入淡出", // Settings_Label_CrossFade
     L"窗口置顶", // Settings_Label_AlwaysOnTop
     L"锁定窗口", // Settings_Label_LockWindow
     L"此处控制程序启动时默认锁定窗口边框，不跟随图片缩放。", // Settings_Tooltip_LockWindow
@@ -2209,6 +2297,7 @@ static const LanguageTable Table_CN = {
     L"触发区域高度", // Settings_Label_GalleryTriggerAreaHeight
     L"停留时长", // Settings_Label_GalleryDwellTime
     L"退出延迟", // Settings_Label_GalleryExitDelay
+    L"画廊最小尺寸", // Settings_Label_GalleryMinSize
 
     L"开始播放幻灯片", // OSD_SlideshowStarted
     L"停止播放幻灯片", // OSD_SlideshowStopped
@@ -2233,6 +2322,7 @@ static const LanguageTable Table_CN = {
     L"正方形", // Settings_Option_LoupeShapeSquare
     L"圆形", // Settings_Option_LoupeShapeCircle
     L"按住快捷键并滚动鼠标滚轮可调节放大镜尺寸。", // Settings_Tooltip_LoupeHotkey
+    L"按住 Ctrl 并使用鼠标左键拖动可快速进入框选剪裁模式。", // Settings_Tooltip_CropModeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -2240,6 +2330,8 @@ static const LanguageTable Table_CN = {
 // ----------------------------------------------------------------
 static const LanguageTable Table_TW = {
     L"沒有載入圖片", // OSD_NoImage
+    L"資料夾中沒有圖片", // OSD_FolderEmpty
+    L"動態 SVG 已顯示為靜態圖像", // OSD_SvgStaticFallback
     L"無損", // OSD_Lossless
     L"重新編碼 (無損)", // OSD_ReencodedLossless
     L"剪裁", // OSD_EdgeAdapted
@@ -2270,6 +2362,20 @@ static const LanguageTable Table_TW = {
     L"另存為...", // Dialog_ButtonSaveAs
     L"放棄", // Dialog_ButtonDiscard
     L"繼續", // Dialog_ButtonContinue
+    L"裁剪修改未儲存，是否儲存變更？", // Dialog_CropUnsavedTitle
+    L"另存圖片", // Dialog_SaveAsTitle
+    L"儲存與匯出", // Dialog_ExportTitle
+    L"覆蓋儲存", // Dialog_ButtonOverwrite
+    L"嵌入 ICC 設定", // Dialog_EmbedICC
+    L"大小: 估算中...", // Dialog_SizeEstimating
+    L"匯出錯誤", // Dialog_ExportError
+    L"複製選區 (Ctrl+C)", // Toolbar_Tooltip_CropCopy
+    L"儲存 (Ctrl+S)", // Toolbar_Tooltip_CropSave
+    L"應用 (Enter)", // Toolbar_Tooltip_CropApply
+    L"退出 (Esc)", // Toolbar_Tooltip_CropCancel
+    L"已進入裁剪模式", // OSD_EnterCropMode
+    L"已複製裁剪選區", // OSD_CropCopied
+    L"裁剪", // Context_Crop
     L"總是儲存無損變換", // Checkbox_AlwaysSaveLossless
     L"總是儲存邊緣優化結果", // Checkbox_AlwaysSaveEdgeAdapted
     L"總是儲存重新編碼結果", // Checkbox_AlwaysSaveLossy
@@ -2309,7 +2415,9 @@ static const LanguageTable Table_TW = {
     L"編輯\tE", // Context_Edit
     L"在檔案總管中顯示", // Context_ShowInExplorer
     L"開啟資料夾", // Context_OpenFolder
-    L"複製圖像\tCtrl+C", // Context_CopyImage
+    L"複製像素\tCtrl+C", // Context_CopyPixels
+    L"複製檔案\tCtrl+Shift+C", // Context_CopyFile
+    L"複製像素\tCtrl+C", // Context_CopyImage
     L"複製路徑\tCtrl+Alt+C", // Context_CopyPath
     L"列印\tCtrl+P", // Context_Print
     L"順時針旋轉 90\x00B0\tR", // Context_RotateCW
@@ -2423,6 +2531,9 @@ static const LanguageTable Table_TW = {
     L"動畫模式下顯示髒矩形按鈕", // Settings_Label_ShowDirtyRect
     L"在動畫模式工具欄顯示髒矩形調試按鈕，用於觀察局部刷新區域。", // Settings_Tooltip_ShowDirtyRect
     L"已複製!", // OSD_Copied
+    L"像素已複製到剪貼簿!", // OSD_PixelsCopied
+    L"正在擷取原圖像素...", // OSD_PixelsExtracting
+    L"檔案已複製到剪貼簿!", // OSD_FileCopied
     L"座標已複製!", // OSD_CoordinatesCopied
     L"檔案路徑已複製!", // OSD_FilePathCopied
     L"縮放: 100%", // OSD_Zoom100
@@ -2512,7 +2623,6 @@ static const LanguageTable Table_TW = {
     L"畫布顏色", // Settings_Label_CanvasColor
     L"疊加層", // Settings_Label_Overlay
     L"顯示網格", // Settings_Label_ShowGrid
-    L"圖片切換淡入淡出", // Settings_Label_CrossFade
     L"視窗置頂", // Settings_Label_AlwaysOnTop
     L"鎖定視窗", // Settings_Label_LockWindow
     L"此處控制程式啟動時預設鎖定視窗邊框，不跟隨圖片縮放。", // Settings_Tooltip_LockWindow
@@ -2763,6 +2873,7 @@ static const LanguageTable Table_TW = {
     L"觸發區域高度", // Settings_Label_GalleryTriggerAreaHeight
     L"停留時長", // Settings_Label_GalleryDwellTime
     L"退出延遲", // Settings_Label_GalleryExitDelay
+    L"畫廊最小尺寸", // Settings_Label_GalleryMinSize
 
     L"開始播放幻燈片", // OSD_SlideshowStarted
     L"停止播放幻燈片", // OSD_SlideshowStopped
@@ -2787,6 +2898,7 @@ static const LanguageTable Table_TW = {
     L"正方形", // Settings_Option_LoupeShapeSquare
     L"圓形", // Settings_Option_LoupeShapeCircle
     L"按住快捷鍵並滾動滑鼠滾輪可調節放大鏡尺寸。", // Settings_Tooltip_LoupeHotkey
+    L"按住 Ctrl 並使用滑鼠左鍵拖曳可快速進入框選剪裁模式。", // Settings_Tooltip_CropModeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -2794,6 +2906,8 @@ static const LanguageTable Table_TW = {
 // ----------------------------------------------------------------
 static const LanguageTable Table_JA = {
     L"画像が読み込まれていません", // OSD_NoImage
+    L"このフォルダーに画像がありません", // OSD_FolderEmpty
+    L"アニメーション SVG を静止画として表示しています", // OSD_SvgStaticFallback
     L"ロスレス", // OSD_Lossless
     L"再エンコード (ロスレス)", // OSD_ReencodedLossless
     L"クロップ済み", // OSD_EdgeAdapted
@@ -2824,6 +2938,20 @@ static const LanguageTable Table_JA = {
     L"名前を付けて保存...", // Dialog_ButtonSaveAs
     L"破棄", // Dialog_ButtonDiscard
     L"続行", // Dialog_ButtonContinue
+    L"クロップの変更が保存されていません。保存しますか？", // Dialog_CropUnsavedTitle
+    L"画像を保存", // Dialog_SaveAsTitle
+    L"保存とエクスポート", // Dialog_ExportTitle
+    L"上書き保存", // Dialog_ButtonOverwrite
+    L"ICCプロファイル", // Dialog_EmbedICC
+    L"サイズ: 計算中...", // Dialog_SizeEstimating
+    L"エクスポートエラー", // Dialog_ExportError
+    L"選択範囲をコピー (Ctrl+C)", // Toolbar_Tooltip_CropCopy
+    L"保存 (Ctrl+S)", // Toolbar_Tooltip_CropSave
+    L"適用 (Enter)", // Toolbar_Tooltip_CropApply
+    L"終了 (Esc)", // Toolbar_Tooltip_CropCancel
+    L"クロップモードに入りました", // OSD_EnterCropMode
+    L"クロップ範囲をコピーしました", // OSD_CropCopied
+    L"クロップ", // Context_Crop
     L"常にロスレス変換で保存する", // Checkbox_AlwaysSaveLossless
     L"常にエッジ最適化で保存する", // Checkbox_AlwaysSaveEdgeAdapted
     L"常に再エンコードして保存する", // Checkbox_AlwaysSaveLossy
@@ -2863,7 +2991,9 @@ static const LanguageTable Table_JA = {
     L"編集\tE", // Context_Edit
     L"エクスプローラーで表示", // Context_ShowInExplorer
     L"フォルダーを開く", // Context_OpenFolder
-    L"画像をコピー\tCtrl+C", // Context_CopyImage
+    L"ピクセルをコピー\tCtrl+C", // Context_CopyPixels
+    L"ファイルをコピー\tCtrl+Shift+C", // Context_CopyFile
+    L"ピクセルをコピー\tCtrl+C", // Context_CopyImage
     L"パスをコピー\tCtrl+Alt+C", // Context_CopyPath
     L"印刷\tCtrl+P", // Context_Print
     L"右に90\x00B0回転\tR", // Context_RotateCW
@@ -2977,6 +3107,9 @@ static const LanguageTable Table_JA = {
     L"アニメーションモードで更新領域ボタン表示", // Settings_Label_ShowDirtyRect
     L"フレームのどの部分が再描画されているかを視覚化するため、アニメーションモードで更新領域のデバッグボタンを表示します。", // Settings_Tooltip_ShowDirtyRect
     L"コピーしました！", // OSD_Copied
+    L"ピクセルをコピーしました！", // OSD_PixelsCopied
+    L"生ピクセルを抽出中...", // OSD_PixelsExtracting
+    L"ファイルをコピーしました！", // OSD_FileCopied
     L"座標をコピーしました！", // OSD_CoordinatesCopied
     L"ファイルパスをコピーしました！", // OSD_FilePathCopied
     L"ズーム : 100%", // OSD_Zoom100
@@ -3066,7 +3199,6 @@ static const LanguageTable Table_JA = {
     L"キャンバスの色", // Settings_Label_CanvasColor
     L"オーバーレイ", // Settings_Label_Overlay
     L"グリッドオーバーレイを表示", // Settings_Label_ShowGrid
-    L"画像切り替えのフェード", // Settings_Label_CrossFade
     L"常に手前に表示", // Settings_Label_AlwaysOnTop
     L"ウィンドウを固定", // Settings_Label_LockWindow
     L"起動時に画像の倍率に追従せず、既定でウィンドウ枠を固定するかどうかを制御します。", // Settings_Tooltip_LockWindow
@@ -3317,6 +3449,7 @@ static const LanguageTable Table_JA = {
     L"トリガーエリアの高さ", // Settings_Label_GalleryTriggerAreaHeight
     L"ホバー滞在時間", // Settings_Label_GalleryDwellTime
     L"退出ディレイ", // Settings_Label_GalleryExitDelay
+    L"ギャラリー最小サイズ", // Settings_Label_GalleryMinSize
 
     L"スライドショーを開始", // OSD_SlideshowStarted
     L"スライドショーを停止", // OSD_SlideshowStopped
@@ -3341,6 +3474,7 @@ static const LanguageTable Table_JA = {
     L"四角形", // Settings_Option_LoupeShapeSquare
     L"円形", // Settings_Option_LoupeShapeCircle
     L"ショートカットキーを押しながらマウスホイールをスクロールすると、ルーペのサイズを調整できます。", // Settings_Tooltip_LoupeHotkey
+    L"Ctrl キーを押しながら左クリックでドラッグすると、すばやく範囲選択してトリミングできます。", // Settings_Tooltip_CropModeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -3348,6 +3482,8 @@ static const LanguageTable Table_JA = {
 // ----------------------------------------------------------------
 static const LanguageTable Table_RU = {
     L"Изображение не загружено", // OSD_NoImage
+    L"В этой папке нет изображений", // OSD_FolderEmpty
+    L"Анимированный SVG показан как статичный кадр", // OSD_SvgStaticFallback
     L"Без потерь", // OSD_Lossless
     L"Перекодировано (без потерь)", // OSD_ReencodedLossless
     L"Оптимизация краёв", // OSD_EdgeAdapted
@@ -3378,6 +3514,20 @@ static const LanguageTable Table_RU = {
     L"Сохранить как...", // Dialog_ButtonSaveAs
     L"Отменить", // Dialog_ButtonDiscard
     L"Продолжить", // Dialog_ButtonContinue
+    L"Изменения кадрирования не сохранены. Сохранить?", // Dialog_CropUnsavedTitle
+    L"Сохранить изображение", // Dialog_SaveAsTitle
+    L"Сохранение и экспорт", // Dialog_ExportTitle
+    L"Перезаписать", // Dialog_ButtonOverwrite
+    L"Профиль ICC", // Dialog_EmbedICC
+    L"Размер: Оценка...", // Dialog_SizeEstimating
+    L"Ошибка экспорта", // Dialog_ExportError
+    L"Скопировать выделение (Ctrl+C)", // Toolbar_Tooltip_CropCopy
+    L"Сохранить (Ctrl+S)", // Toolbar_Tooltip_CropSave
+    L"Применить (Enter)", // Toolbar_Tooltip_CropApply
+    L"Выход (Esc)", // Toolbar_Tooltip_CropCancel
+    L"Режим кадрирования", // OSD_EnterCropMode
+    L"Область кадрирования скопирована", // OSD_CropCopied
+    L"Кадрировать", // Context_Crop
     L"Всегда сохранять без потерь", // Checkbox_AlwaysSaveLossless
     L"Всегда сохранять с оптимизацией краёв", // Checkbox_AlwaysSaveEdgeAdapted
     L"Всегда сохранять перекодированное", // Checkbox_AlwaysSaveLossy
@@ -3417,7 +3567,9 @@ static const LanguageTable Table_RU = {
     L"Изменить\tE", // Context_Edit
     L"Показать в Проводнике", // Context_ShowInExplorer
     L"Открыть папку", // Context_OpenFolder
-    L"Скопировать изображение\tCtrl+C", // Context_CopyImage
+    L"Скопировать пиксели\tCtrl+C", // Context_CopyPixels
+    L"Скопировать файл\tCtrl+Shift+C", // Context_CopyFile
+    L"Скопировать пиксели\tCtrl+C", // Context_CopyImage
     L"Скопировать путь\tCtrl+Alt+C", // Context_CopyPath
     L"Печать\tCtrl+P", // Context_Print
     L"Повернуть на 90\x00B0 вправо\tR", // Context_RotateCW
@@ -3531,6 +3683,9 @@ static const LanguageTable Table_RU = {
     L"Кнопка обновляемых областей в анимации", // Settings_Label_ShowDirtyRect
     L"Показывать кнопку отладки отображаемой области на панели инструментов анимации для отображения обновляемых участков.", // Settings_Tooltip_ShowDirtyRect
     L"Скопировано.", // OSD_Copied
+    L"Пиксели скопированы в буфер обмена!", // OSD_PixelsCopied
+    L"Извлечение пикселей...", // OSD_PixelsExtracting
+    L"Файл скопирован в буфер обмена!", // OSD_FileCopied
     L"Координаты скопированы.", // OSD_CoordinatesCopied
     L"Путь к файлу скопирован.", // OSD_FilePathCopied
     L"Масштаб: 100%", // OSD_Zoom100
@@ -3620,7 +3775,6 @@ static const LanguageTable Table_RU = {
     L"Цвет холста", // Settings_Label_CanvasColor
     L"Наложение", // Settings_Label_Overlay
     L"Показывать сетку", // Settings_Label_ShowGrid
-    L"Плавный переход между изображениями", // Settings_Label_CrossFade
     L"Поверх всех окон", // Settings_Label_AlwaysOnTop
     L"Заблокировать окно", // Settings_Label_LockWindow
     L"Определяет, будут ли блокироваться границы окна по умолчанию при запуске, а не после масштабирования изображения.", // Settings_Tooltip_LockWindow
@@ -3871,6 +4025,7 @@ static const LanguageTable Table_RU = {
     L"Высота зоны триггера", // Settings_Label_GalleryTriggerAreaHeight
     L"Время задержки", // Settings_Label_GalleryDwellTime
     L"Задержка выхода", // Settings_Label_GalleryExitDelay
+    L"Мин. размер галереи", // Settings_Label_GalleryMinSize
 
     L"Слайд-шоу начато", // OSD_SlideshowStarted
     L"Слайд-шоу остановлено", // OSD_SlideshowStopped
@@ -3895,6 +4050,7 @@ static const LanguageTable Table_RU = {
     L"Квадратная", // Settings_Option_LoupeShapeSquare
     L"Круглая", // Settings_Option_LoupeShapeCircle
     L"Чтобы настроить размер лупы, удерживайте сочетание клавиш и вращайте колёсико мыши.", // Settings_Tooltip_LoupeHotkey
+    L"Удерживайте Ctrl и перетаскивайте левую кнопку мыши для быстрого кадрирования.", // Settings_Tooltip_CropModeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -3902,6 +4058,8 @@ static const LanguageTable Table_RU = {
 // ----------------------------------------------------------------
 static const LanguageTable Table_DE = {
     L"Kein Bild geladen", // OSD_NoImage
+    L"Keine Bilder in diesem Ordner", // OSD_FolderEmpty
+    L"Animiertes SVG als Standbild angezeigt", // OSD_SvgStaticFallback
     L"Verlustfrei", // OSD_Lossless
     L"Neu kodiert (verlustfrei)", // OSD_ReencodedLossless
     L"Kantenoptimiert", // OSD_EdgeAdapted
@@ -3932,6 +4090,20 @@ static const LanguageTable Table_DE = {
     L"Speichern unter...", // Dialog_ButtonSaveAs
     L"Verwerfen", // Dialog_ButtonDiscard
     L"Fortfahren", // Dialog_ButtonContinue
+    L"Zuschneide-Änderungen nicht gespeichert. Speichern?", // Dialog_CropUnsavedTitle
+    L"Bild speichern", // Dialog_SaveAsTitle
+    L"Speichern & Exportieren", // Dialog_ExportTitle
+    L"Überschreiben", // Dialog_ButtonOverwrite
+    L"ICC-Profil", // Dialog_EmbedICC
+    L"Größe: Schätzung...", // Dialog_SizeEstimating
+    L"Exportfehler", // Dialog_ExportError
+    L"Auswahl kopieren (Strg+C)", // Toolbar_Tooltip_CropCopy
+    L"Speichern (Strg+S)", // Toolbar_Tooltip_CropSave
+    L"Anwenden (Enter)", // Toolbar_Tooltip_CropApply
+    L"Beenden (Esc)", // Toolbar_Tooltip_CropCancel
+    L"Zuschneiden-Modus aktiv", // OSD_EnterCropMode
+    L"Zuschneide-Auswahl kopiert", // OSD_CropCopied
+    L"Zuschneiden", // Context_Crop
     L"Immer verlustfrei speichern", // Checkbox_AlwaysSaveLossless
     L"Immer kantenoptimiert speichern", // Checkbox_AlwaysSaveEdgeAdapted
     L"Immer neu kodiert speichern", // Checkbox_AlwaysSaveLossy
@@ -3971,7 +4143,9 @@ static const LanguageTable Table_DE = {
     L"Bearbeiten\tE", // Context_Edit
     L"Im Explorer anzeigen", // Context_ShowInExplorer
     L"Ordner öffnen", // Context_OpenFolder
-    L"Bild kopieren\tStrg+C", // Context_CopyImage
+    L"Pixel kopieren\tStrg+C", // Context_CopyPixels
+    L"Datei kopieren\tStrg+Umschalt+C", // Context_CopyFile
+    L"Pixel kopieren\tStrg+C", // Context_CopyImage
     L"Pfad kopieren\tStrg+Alt+C", // Context_CopyPath
     L"Drucken\tStrg+P", // Context_Print
     L"90\x00B0 im Uhrzeigersinn\tR", // Context_RotateCW
@@ -4085,6 +4259,9 @@ static const LanguageTable Table_DE = {
     L"Dirty-Rect-Taste in Animation anzeigen", // Settings_Label_ShowDirtyRect
     L"Debug-Schaltfläche für Dirty Rects in der Animations-Symbolleiste anzeigen.", // Settings_Tooltip_ShowDirtyRect
     L"Kopiert!", // OSD_Copied
+    L"Pixel in die Zwischenablage kopiert!", // OSD_PixelsCopied
+    L"Rohpixel werden extrahiert...", // OSD_PixelsExtracting
+    L"Datei in die Zwischenablage kopiert!", // OSD_FileCopied
     L"Koordinaten kopiert!", // OSD_CoordinatesCopied
     L"Dateipfad kopiert!", // OSD_FilePathCopied
     L"Zoom: 100%", // OSD_Zoom100
@@ -4145,7 +4322,7 @@ static const LanguageTable Table_DE = {
     L"Standard (1.5px)", // Settings_Option_StrokeStandard
     L"Fine (1.0px)", // Settings_Option_StrokeFine
     L"Tint Profile", // Settings_Header_GlassTint
-    L"Color logic", // Settings_Label_TintProfile
+    L"Color Logic", // Settings_Label_TintProfile
     L"Auto (Adaptive)", // Settings_Option_TintAuto
     L"Custom Color", // Settings_Option_TintCustom
     L"Manual Tint", // Settings_Label_GlassCustomColor
@@ -4174,7 +4351,6 @@ static const LanguageTable Table_DE = {
     L"Leinwandfarbe", // Settings_Label_CanvasColor
     L"Überlagerung", // Settings_Label_Overlay
     L"Raster anzeigen", // Settings_Label_ShowGrid
-    L"Bildübergang ausblenden", // Settings_Label_CrossFade
     L"Immer im Vordergrund", // Settings_Label_AlwaysOnTop
     L"Fenstergröße sperren", // Settings_Label_LockWindow
     L"Legt fest, ob das Programm beim Start standardmäßig den Fensterrahmen sperrt, anstatt der Bildskalierung zu folgen.", // Settings_Tooltip_LockWindow
@@ -4425,6 +4601,7 @@ static const LanguageTable Table_DE = {
     L"Höhe des Auslösebereichs", // Settings_Label_GalleryTriggerAreaHeight
     L"Verweilzeit", // Settings_Label_GalleryDwellTime
     L"Verzögerung beim Beenden", // Settings_Label_GalleryExitDelay
+    L"Galerie-Mindestgröße", // Settings_Label_GalleryMinSize
 
     L"Diashow gestartet", // OSD_SlideshowStarted
     L"Diashow gestoppt", // OSD_SlideshowStopped
@@ -4449,6 +4626,7 @@ static const LanguageTable Table_DE = {
     L"Quadrat", // Settings_Option_LoupeShapeSquare
     L"Kreis", // Settings_Option_LoupeShapeCircle
     L"Halten Sie die Tastenkombination gedrückt und scrollen Sie mit dem Mausrad, um die Lupengröße anzupassen.", // Settings_Tooltip_LoupeHotkey
+    L"Halten Sie Strg gedrückt und ziehen Sie mit der linken Maustaste, um schnell zuzuschneiden.", // Settings_Tooltip_CropModeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -4456,6 +4634,8 @@ static const LanguageTable Table_DE = {
 // ----------------------------------------------------------------
 static const LanguageTable Table_ES = {
     L"No hay imagen cargada", // OSD_NoImage
+    L"No hay imágenes en esta carpeta", // OSD_FolderEmpty
+    L"SVG animado mostrado como imagen fija", // OSD_SvgStaticFallback
     L"Sin pérdida", // OSD_Lossless
     L"Recodificado (sin pérdida)", // OSD_ReencodedLossless
     L"Bordes optimizados", // OSD_EdgeAdapted
@@ -4486,6 +4666,20 @@ static const LanguageTable Table_ES = {
     L"Guardar como...", // Dialog_ButtonSaveAs
     L"Descartar", // Dialog_ButtonDiscard
     L"Continuar", // Dialog_ButtonContinue
+    L"Cambios de recorte no guardados. ¿Guardar cambios?", // Dialog_CropUnsavedTitle
+    L"Guardar imagen", // Dialog_SaveAsTitle
+    L"Guardar y exportar", // Dialog_ExportTitle
+    L"Sobrescribir", // Dialog_ButtonOverwrite
+    L"Perfil ICC", // Dialog_EmbedICC
+    L"Tamaño: Calculando...", // Dialog_SizeEstimating
+    L"Error de exportación", // Dialog_ExportError
+    L"Copiar selección (Ctrl+C)", // Toolbar_Tooltip_CropCopy
+    L"Guardar (Ctrl+S)", // Toolbar_Tooltip_CropSave
+    L"Aplicar (Enter)", // Toolbar_Tooltip_CropApply
+    L"Salir (Esc)", // Toolbar_Tooltip_CropCancel
+    L"Modo de recorte activado", // OSD_EnterCropMode
+    L"Selección de recorte copiada", // OSD_CropCopied
+    L"Recortar", // Context_Crop
     L"Siempre guardar sin pérdida", // Checkbox_AlwaysSaveLossless
     L"Siempre guardar con bordes optimizados", // Checkbox_AlwaysSaveEdgeAdapted
     L"Siempre guardar recodificado", // Checkbox_AlwaysSaveLossy
@@ -4525,7 +4719,9 @@ static const LanguageTable Table_ES = {
     L"Editar\tE", // Context_Edit
     L"Mostrar en Explorador", // Context_ShowInExplorer
     L"Abrir carpeta", // Context_OpenFolder
-    L"Copiar imagen\tCtrl+C", // Context_CopyImage
+    L"Copiar píxeles\tCtrl+C", // Context_CopyPixels
+    L"Copiar archivo\tCtrl+Shift+C", // Context_CopyFile
+    L"Copiar píxeles\tCtrl+C", // Context_CopyImage
     L"Copiar ruta\tCtrl+Alt+C", // Context_CopyPath
     L"Imprimir\tCtrl+P", // Context_Print
     L"Girar 90\x00B0 horario\tR", // Context_RotateCW
@@ -4639,6 +4835,9 @@ static const LanguageTable Table_ES = {
     L"Mostrar botón de regiones en animación", // Settings_Label_ShowDirtyRect
     L"Mostrar botón de depuración de Dirty Rect en la barra de herramientas de animación.", // Settings_Tooltip_ShowDirtyRect
     L"¡Copiado!", // OSD_Copied
+    L"¡Píxeles copiados al portapapeles!", // OSD_PixelsCopied
+    L"Extrayendo píxeles...", // OSD_PixelsExtracting
+    L"¡Archivo copiado al portapapeles!", // OSD_FileCopied
     L"¡Coordenadas copiadas!", // OSD_CoordinatesCopied
     L"¡Ruta del archivo copiada!", // OSD_FilePathCopied
     L"Zoom: 100%", // OSD_Zoom100
@@ -4728,7 +4927,6 @@ static const LanguageTable Table_ES = {
     L"Color del lienzo", // Settings_Label_CanvasColor
     L"Superposición", // Settings_Label_Overlay
     L"Mostrar cuadrícula", // Settings_Label_ShowGrid
-    L"Desvanecimiento de transición de imagen", // Settings_Label_CrossFade
     L"Siempre visible", // Settings_Label_AlwaysOnTop
     L"Bloquear ventana", // Settings_Label_LockWindow
     L"Controla si el programa bloquea el borde de la ventana de forma predeterminada al inicio, sin seguir la escala de la imagen.", // Settings_Tooltip_LockWindow
@@ -4979,6 +5177,7 @@ static const LanguageTable Table_ES = {
     L"Altura del área de activación", // Settings_Label_GalleryTriggerAreaHeight
     L"Tiempo de permanencia", // Settings_Label_GalleryDwellTime
     L"Retardo de salida", // Settings_Label_GalleryExitDelay
+    L"Tamaño mínimo de galería", // Settings_Label_GalleryMinSize
 
     L"Presentación iniciada", // OSD_SlideshowStarted
     L"Presentación detenida", // OSD_SlideshowStopped
@@ -5003,6 +5202,7 @@ static const LanguageTable Table_ES = {
     L"Cuadrado", // Settings_Option_LoupeShapeSquare
     L"Círculo", // Settings_Option_LoupeShapeCircle
     L"Mantenga presionada la tecla de acceso rápido y gire la rueda del mouse para ajustar el tamaño de la lupa.", // Settings_Tooltip_LoupeHotkey
+    L"Mantenga presionado Ctrl y arrastre con el botón izquierdo del mouse para un recorte rápido.", // Settings_Tooltip_CropModeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -5010,6 +5210,8 @@ static const LanguageTable Table_ES = {
 // ----------------------------------------------------------------
 static const LanguageTable Table_FR = {
     L"No image loaded", // OSD_NoImage
+    L"Aucune image dans ce dossier", // OSD_FolderEmpty
+    L"SVG animé affiché comme image fixe", // OSD_SvgStaticFallback
     L"Lossless", // OSD_Lossless
     L"Re-encoded (Lossless)", // OSD_ReencodedLossless
     L"Cropped", // OSD_EdgeAdapted
@@ -5040,9 +5242,23 @@ static const LanguageTable Table_FR = {
     L"Save As...", // Dialog_ButtonSaveAs
     L"Discard", // Dialog_ButtonDiscard
     L"Continuer", // Dialog_ButtonContinue
-    L"Always save lossless transforms", // Checkbox_AlwaysSaveLossless
-    L"Always save edge-adapted", // Checkbox_AlwaysSaveEdgeAdapted
-    L"Always save re-encoded", // Checkbox_AlwaysSaveLossy
+    L"Modifications de recadrage non enregistrées. Enregistrer?", // Dialog_CropUnsavedTitle
+    L"Enregistrer l'image", // Dialog_SaveAsTitle
+    L"Enregistrer et exporter", // Dialog_ExportTitle
+    L"Écraser", // Dialog_ButtonOverwrite
+    L"Profil ICC", // Dialog_EmbedICC
+    L"Taille: Estimation...", // Dialog_SizeEstimating
+    L"Erreur d'exportation", // Dialog_ExportError
+    L"Copier la sélection (Ctrl+C)", // Toolbar_Tooltip_CropCopy
+    L"Enregistrer (Ctrl+S)", // Toolbar_Tooltip_CropSave
+    L"Appliquer (Enter)", // Toolbar_Tooltip_CropApply
+    L"Quitter (Esc)", // Toolbar_Tooltip_CropCancel
+    L"Mode recadrage activé", // OSD_EnterCropMode
+    L"Sélection de recadrage copiée", // OSD_CropCopied
+    L"Recadrer", // Context_Crop
+    L"Always Save Lossless Transforms", // Checkbox_AlwaysSaveLossless
+    L"Always Save Edge-Adapted", // Checkbox_AlwaysSaveEdgeAdapted
+    L"Always Save Re-Encoded", // Checkbox_AlwaysSaveLossy
     L"Envoyer directement à la corbeille sans confirmer", // Checkbox_NeverConfirmDelete
     L"Cannot decode HEIC - Install HEVC Video Extension", // OSD_HEICCodecMissing
     L"Cannot decode HEIC", // Dialog_HEICTitle
@@ -5079,7 +5295,9 @@ static const LanguageTable Table_FR = {
     L"Edit\tE", // Context_Edit
     L"Show in Explorer", // Context_ShowInExplorer
     L"Open Folder", // Context_OpenFolder
-    L"Copy Image\tCtrl+C", // Context_CopyImage
+    L"Copier les pixels\tCtrl+C", // Context_CopyPixels
+    L"Copier le fichier\tCtrl+Shift+C", // Context_CopyFile
+    L"Copier les pixels\tCtrl+C", // Context_CopyImage
     L"Copy Path\tCtrl+Alt+C", // Context_CopyPath
     L"Print\tCtrl+P", // Context_Print
     L"Rotate 90\x00B0 CW\tR", // Context_RotateCW
@@ -5190,9 +5408,12 @@ static const LanguageTable Table_FR = {
     L"Aggressive (Max Perf)", // Settings_Option_MemAggressive
     L"On-Demand (Min RAM)", // Settings_Option_MemOnDemand
     L"Smart: Balance performance and RAM.\nAggressive: Maximize performance, high memory usage.\nOn-Demand: Release memory immediately when idle.", // Settings_Tooltip_MemoryReclaim
-    L"Show update regions button in animation", // Settings_Label_ShowDirtyRect
+    L"Show Update Regions Button in Animation", // Settings_Label_ShowDirtyRect
     L"Show the update region debug button in animation mode to visualize which parts of the frame are being redrawn.", // Settings_Tooltip_ShowDirtyRect
     L"Copied!", // OSD_Copied
+    L"Pixels copiés dans le presse-papiers !", // OSD_PixelsCopied
+    L"Extraction des pixels...", // OSD_PixelsExtracting
+    L"Fichier copié dans le presse-papiers !", // OSD_FileCopied
     L"Coordinates copied!", // OSD_CoordinatesCopied
     L"File path copied!", // OSD_FilePathCopied
     L"Zoom: 100%", // OSD_Zoom100
@@ -5253,7 +5474,7 @@ static const LanguageTable Table_FR = {
     L"Standard (1.5px)", // Settings_Option_StrokeStandard
     L"Fine (1.0px)", // Settings_Option_StrokeFine
     L"Tint Profile", // Settings_Header_GlassTint
-    L"Color logic", // Settings_Label_TintProfile
+    L"Color Logic", // Settings_Label_TintProfile
     L"Auto (Adaptive)", // Settings_Option_TintAuto
     L"Custom Color", // Settings_Option_TintCustom
     L"Manual Tint", // Settings_Label_GlassCustomColor
@@ -5282,7 +5503,6 @@ static const LanguageTable Table_FR = {
     L"Canvas Color", // Settings_Label_CanvasColor
     L"Overlay", // Settings_Label_Overlay
     L"Show Grid Overlay", // Settings_Label_ShowGrid
-    L"Image Transition Fade", // Settings_Label_CrossFade
     L"Always on Top", // Settings_Label_AlwaysOnTop
     L"Lock Window", // Settings_Label_LockWindow
     L"Controls whether the program locks the window border by default on startup, rather than following image scaling.", // Settings_Tooltip_LockWindow
@@ -5300,9 +5520,9 @@ static const LanguageTable Table_FR = {
     L"Auto", // Settings_Option_NavigatorAuto
     L"On", // Settings_Option_NavigatorOn
     L"Off", // Settings_Option_NavigatorOff
-    L"Keep window size on navigation", // Settings_Label_KeepWindowSizeOnNav
-    L"Remember last window size and position", // Settings_Label_RememberLastWindowSizeAndPosition
-    L"Adapt small images", // Settings_Label_UpscaleSmallImagesWhenLocked
+    L"Keep Window Size on Navigation", // Settings_Label_KeepWindowSizeOnNav
+    L"Remember Last Window Size and Position", // Settings_Label_RememberLastWindowSizeAndPosition
+    L"Adapt Small Images", // Settings_Label_UpscaleSmallImagesWhenLocked
     L"Smooth Window Scaling (GPU)", // Settings_Label_EnableSmoothScaling
     L"EXIF Panel Mode", // Settings_Label_ExifMode
     L"Toolbar Info Default", // Settings_Label_ToolbarInfoDefault
@@ -5452,7 +5672,7 @@ static const LanguageTable Table_FR = {
     L"Size", // Settings_Option_SortSize
     L"Type", // Settings_Option_SortType
     L"Loop", // Settings_Option_NavLoop
-    L"Through subfolders", // Settings_Option_NavThrough
+    L"Through Subfolders", // Settings_Option_NavThrough
     L"Linear: Basic smoothing", // Settings_Option_Linear
     L"Nearest: Extreme sharpness", // Settings_Option_Nearest
     L"HQ Cubic: Extreme smoothing", // Settings_Option_HighQualityCubic
@@ -5533,6 +5753,7 @@ static const LanguageTable Table_FR = {
     L"Hauteur de la zone de déclenchement", // Settings_Label_GalleryTriggerAreaHeight
     L"Temps de maintien", // Settings_Label_GalleryDwellTime
     L"Délai de sortie", // Settings_Label_GalleryExitDelay
+    L"Taille minimale de la galerie", // Settings_Label_GalleryMinSize
 
     L"Diaporama démarré", // OSD_SlideshowStarted
     L"Diaporama arrêté", // OSD_SlideshowStopped
@@ -5557,6 +5778,7 @@ static const LanguageTable Table_FR = {
     L"Carré", // Settings_Option_LoupeShapeSquare
     L"Cercle", // Settings_Option_LoupeShapeCircle
     L"Maintenez la touche de raccourci enfoncée et faites défiler la molette de la souris pour ajuster la taille de la loupe.", // Settings_Tooltip_LoupeHotkey
+    L"Maintenez la touche Ctrl enfoncée et faites glisser avec le bouton gauche de la souris pour un recadrage rapide.", // Settings_Tooltip_CropModeHotkey
 };
 
 // ----------------------------------------------------------------
@@ -5564,6 +5786,8 @@ static const LanguageTable Table_FR = {
 // ----------------------------------------------------------------
 void Apply(const LanguageTable& t) {
   OSD_NoImage = t.OSD_NoImage;
+  OSD_FolderEmpty = t.OSD_FolderEmpty;
+  OSD_SvgStaticFallback = t.OSD_SvgStaticFallback;
   OSD_Lossless = t.OSD_Lossless;
   OSD_ReencodedLossless = t.OSD_ReencodedLossless;
   OSD_EdgeAdapted = t.OSD_EdgeAdapted;
@@ -5594,6 +5818,20 @@ void Apply(const LanguageTable& t) {
   Dialog_ButtonSaveAs = t.Dialog_ButtonSaveAs;
   Dialog_ButtonDiscard = t.Dialog_ButtonDiscard;
   Dialog_ButtonContinue = t.Dialog_ButtonContinue;
+  Dialog_CropUnsavedTitle = t.Dialog_CropUnsavedTitle;
+  Dialog_SaveAsTitle = t.Dialog_SaveAsTitle;
+  Dialog_ExportTitle = t.Dialog_ExportTitle;
+  Dialog_ButtonOverwrite = t.Dialog_ButtonOverwrite;
+  Dialog_EmbedICC = t.Dialog_EmbedICC;
+  Dialog_SizeEstimating = t.Dialog_SizeEstimating;
+  Dialog_ExportError = t.Dialog_ExportError;
+  Toolbar_Tooltip_CropCopy = t.Toolbar_Tooltip_CropCopy;
+  Toolbar_Tooltip_CropSave = t.Toolbar_Tooltip_CropSave;
+  Toolbar_Tooltip_CropApply = t.Toolbar_Tooltip_CropApply;
+  Toolbar_Tooltip_CropCancel = t.Toolbar_Tooltip_CropCancel;
+  OSD_EnterCropMode = t.OSD_EnterCropMode;
+  OSD_CropCopied = t.OSD_CropCopied;
+  Context_Crop = t.Context_Crop;
   Checkbox_AlwaysSaveLossless = t.Checkbox_AlwaysSaveLossless;
   Checkbox_AlwaysSaveEdgeAdapted = t.Checkbox_AlwaysSaveEdgeAdapted;
   Checkbox_AlwaysSaveLossy = t.Checkbox_AlwaysSaveLossy;
@@ -5633,6 +5871,8 @@ void Apply(const LanguageTable& t) {
   Context_Edit = t.Context_Edit;
   Context_ShowInExplorer = t.Context_ShowInExplorer;
   Context_OpenFolder = t.Context_OpenFolder;
+  Context_CopyPixels = t.Context_CopyPixels;
+  Context_CopyFile = t.Context_CopyFile;
   Context_CopyImage = t.Context_CopyImage;
   Context_CopyPath = t.Context_CopyPath;
   Context_Print = t.Context_Print;
@@ -5750,7 +5990,11 @@ void Apply(const LanguageTable& t) {
   Settings_Option_LoupeShapeSquare = t.Settings_Option_LoupeShapeSquare;
   Settings_Option_LoupeShapeCircle = t.Settings_Option_LoupeShapeCircle;
   Settings_Tooltip_LoupeHotkey = t.Settings_Tooltip_LoupeHotkey;
+  Settings_Tooltip_CropModeHotkey = t.Settings_Tooltip_CropModeHotkey;
   OSD_Copied = t.OSD_Copied;
+  OSD_PixelsCopied = t.OSD_PixelsCopied;
+  OSD_PixelsExtracting = t.OSD_PixelsExtracting;
+  OSD_FileCopied = t.OSD_FileCopied;
   OSD_CoordinatesCopied = t.OSD_CoordinatesCopied;
   OSD_FilePathCopied = t.OSD_FilePathCopied;
   OSD_Zoom100 = t.OSD_Zoom100;
@@ -5840,7 +6084,6 @@ void Apply(const LanguageTable& t) {
   Settings_Label_CanvasColor = t.Settings_Label_CanvasColor;
   Settings_Label_Overlay = t.Settings_Label_Overlay;
   Settings_Label_ShowGrid = t.Settings_Label_ShowGrid;
-  Settings_Label_CrossFade = t.Settings_Label_CrossFade;
   Settings_Label_AlwaysOnTop = t.Settings_Label_AlwaysOnTop;
   Settings_Label_LockWindow = t.Settings_Label_LockWindow;
   Settings_Tooltip_LockWindow = t.Settings_Tooltip_LockWindow;
@@ -6091,6 +6334,7 @@ void Apply(const LanguageTable& t) {
   Settings_Label_GalleryTriggerAreaHeight = t.Settings_Label_GalleryTriggerAreaHeight;
   Settings_Label_GalleryDwellTime = t.Settings_Label_GalleryDwellTime;
   Settings_Label_GalleryExitDelay = t.Settings_Label_GalleryExitDelay;
+  Settings_Label_GalleryMinSize = t.Settings_Label_GalleryMinSize;
 
   OSD_SlideshowStarted = t.OSD_SlideshowStarted;
   OSD_SlideshowStopped = t.OSD_SlideshowStopped;
@@ -6502,6 +6746,9 @@ std::wstring GetHotkeyActionName(HotkeyAction action) {
     case HotkeyAction::ToggleGallery:
         raw = AppStrings::Context_HUDGallery;
         break;
+    case HotkeyAction::ToggleFilmstrip:
+        raw = AppStrings::Settings_Header_GalleryTrigger;
+        break;
     case HotkeyAction::ToggleInfoPanel:
         raw = AppStrings::Context_LiteInfoPanel;
         break;
@@ -6527,8 +6774,11 @@ std::wstring GetHotkeyActionName(HotkeyAction action) {
     case HotkeyAction::DeleteFile:
         raw = AppStrings::Context_Delete;
         break;
-    case HotkeyAction::CopyImage:
-        raw = AppStrings::Context_CopyImage;
+    case HotkeyAction::CopyPixels:
+        raw = AppStrings::Context_CopyPixels;
+        break;
+    case HotkeyAction::CopyFileItem:
+        raw = AppStrings::Context_CopyFile;
         break;
     case HotkeyAction::CopyPath:
         raw = AppStrings::Context_CopyPath;
@@ -6548,6 +6798,34 @@ std::wstring GetHotkeyActionName(HotkeyAction action) {
     case HotkeyAction::Print:
         raw = AppStrings::Context_Print;
         break;
+    case HotkeyAction::EnterCropMode: {
+        needsCleaning = false;
+        switch (GetActiveLanguage()) {
+        case AppStrings::Language::ChineseSimplified:  raw = L"裁剪模式"; break;
+        case AppStrings::Language::ChineseTraditional: raw = L"裁剪模式"; break;
+        case AppStrings::Language::Japanese:           raw = L"クロップモード"; break;
+        case AppStrings::Language::Russian:            raw = L"Режим кадрирования"; break;
+        case AppStrings::Language::German:             raw = L"Zuschneiden-Modus"; break;
+        case AppStrings::Language::Spanish:            raw = L"Modo de recorte"; break;
+        case AppStrings::Language::French:             raw = L"Mode recadrage"; break;
+        default:                                       raw = L"Crop Mode"; break;
+        }
+        break;
+    }
+    case HotkeyAction::SaveAs: {
+        needsCleaning = false;
+        switch (GetActiveLanguage()) {
+        case AppStrings::Language::ChineseSimplified:  raw = L"另存图片"; break;
+        case AppStrings::Language::ChineseTraditional: raw = L"另存圖片"; break;
+        case AppStrings::Language::Japanese:           raw = L"画像を保存"; break;
+        case AppStrings::Language::Russian:            raw = L"Сохранить изображение"; break;
+        case AppStrings::Language::German:             raw = L"Bild speichern"; break;
+        case AppStrings::Language::Spanish:            raw = L"Guardar imagen"; break;
+        case AppStrings::Language::French:             raw = L"Enregistrer l'image"; break;
+        default:                                       raw = L"Save Image"; break;
+        }
+        break;
+    }
     case HotkeyAction::ToggleOverlay:
         raw = AppStrings::Context_OverlayMode;
         break;
@@ -6584,6 +6862,9 @@ std::wstring GetHotkeyActionName(HotkeyAction action) {
         break;
     case HotkeyAction::Help:
         raw = AppStrings::Settings_Link_Hotkeys;
+        break;
+    case HotkeyAction::ToggleSettings:
+        raw = AppStrings::Context_Settings;
         break;
     case HotkeyAction::Exit:
         raw = AppStrings::Context_Exit;

@@ -7,6 +7,10 @@ cmake_minimum_required(VERSION 3.25)
 # Force-define CXX features to bypass CMake's Clang 22 feature detection bug
 project(QuickView LANGUAGES C CXX RC)
 
+if(WIN32 AND ADAPTIVE_MSVC_INCLUDE_PATHS)
+    include_directories(SYSTEM ${ADAPTIVE_MSVC_INCLUDE_PATHS})
+endif()
+
 set(CMAKE_CXX_COMPILE_FEATURES "cxx_std_11;cxx_std_14;cxx_std_17;cxx_std_20;cxx_std_23;cxx_std_26" CACHE INTERNAL "" FORCE)
 set(CMAKE_CXX98_COMPILE_FEATURES "cxx_template_template_parameters" CACHE INTERNAL "" FORCE)
 set(CMAKE_CXX11_COMPILE_FEATURES "cxx_alias_templates;cxx_alignas;cxx_alignof;cxx_attributes;cxx_auto_type;cxx_constexpr;cxx_decltype;cxx_defaulted_functions;cxx_defaulted_move_initializers;cxx_delegating_constructors;cxx_deleted_functions;cxx_explicit_conversions;cxx_extended_friend_declarations;cxx_extern_templates;cxx_final;cxx_func_identifier;cxx_generalized_initializers;cxx_inheriting_constructors;cxx_inline_namespaces;cxx_lambdas;cxx_local_type_template_args;cxx_long_long_type;cxx_noexcept;cxx_nonstatic_member_init;cxx_nullptr;cxx_override;cxx_range_for;cxx_raw_string_literals;cxx_reference_qualified_functions;cxx_right_angle_brackets;cxx_rvalue_references;cxx_sizeof_member;cxx_static_assert;cxx_strong_enums;cxx_thread_local;cxx_trailing_return_types;cxx_unicode_literals;cxx_uniform_initialization;cxx_unrestricted_unions;cxx_user_literals;cxx_variadic_macros;cxx_variadic_templates" CACHE INTERNAL "" FORCE)
@@ -55,6 +59,8 @@ option(ENABLE_LTO  "Enable Link Time Optimization (ThinLTO)" OFF)
 # ============================================================================
 set(QUICKVIEW_SOURCES
     QuickView/main.cpp
+    QuickView/ImageExporter.cpp
+    QuickView/ExportPanel.cpp
     QuickView/PrintManager.cpp
     QuickView/PrintPreviewUI.cpp
     QuickView/PrintManager.h
@@ -92,6 +98,7 @@ set(QUICKVIEW_SOURCES
     QuickView/PreviewExtractor.cpp
     QuickView/ImageEngine.cpp
     QuickView/CompositionEngine.cpp
+    QuickView/GeekWidgets.cpp
     QuickView/UIRenderer.cpp
     QuickView/HeavyLanePool.cpp
     QuickView/TileMemoryManager.cpp
@@ -106,6 +113,9 @@ set(QUICKVIEW_SOURCES
     QuickView/AvifAnimator.cpp
     QuickView/JxlAnimator.cpp
     QuickView/QuickViewETW.cpp
+    QuickView/OffscreenWebView2.cpp
+    QuickView/WebContentHost.cpp
+    QuickView/WebViewThumbService.cpp
     
     # Third party manually included
     third_party/yyjson/yyjson.c
@@ -125,13 +135,19 @@ add_executable(QuickView WIN32 ${QUICKVIEW_SOURCES})
 set(QUICKVIEW_LINK_FLAGS "/SUBSYSTEM:WINDOWS")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
     set(QUICKVIEW_LINK_FLAGS "${QUICKVIEW_LINK_FLAGS} /machine:ARM64")
+    set(QV_WEBVIEW2_ARCH win-arm64)
 else()
     set(QUICKVIEW_LINK_FLAGS "${QUICKVIEW_LINK_FLAGS} /machine:x64")
+    set(QV_WEBVIEW2_ARCH win-x64)
+endif()
+set(QV_WEBVIEW2_LIB "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/${QV_WEBVIEW2_ARCH}/WebView2LoaderStatic.lib")
+if(NOT EXISTS "${QV_WEBVIEW2_LIB}")
+    message(FATAL_ERROR "WebView2LoaderStatic.lib missing for ${QV_WEBVIEW2_ARCH}: ${QV_WEBVIEW2_LIB}")
 endif()
 set_target_properties(QuickView PROPERTIES LINK_FLAGS "${QUICKVIEW_LINK_FLAGS}")
 
 # Include paths
-target_include_directories(QuickView PRIVATE QuickView third_party/yyjson third_party/unrar-mini)
+target_include_directories(QuickView PRIVATE QuickView third_party/yyjson third_party/unrar-mini third_party/webview2)
 
 # Precompiled Headers (PCH) - CXX only to avoid conflict with C source (yyjson.c)
 target_precompile_headers(QuickView PRIVATE $<$<COMPILE_LANGUAGE:CXX>:pch.h>)
@@ -189,14 +205,11 @@ if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     endif()
 
     if(ENABLE_LTO)
-        message(STATUS "Build Matrix: Enabling Full LTO (Release-LTO Mode)")
-        # Peak performance flags: 
-        # /fp:fast (maximum floating point speed) 
-        # /GS- (disable security checks for raw performance)
-        # /EHs-c- (disable exceptions)
+        message(STATUS "Build Matrix: Enabling Full LTO (Release-LTO Pure Maximum Speed)")
+        # Pure peak performance flags (Pure /O2, no /Oscompromise)
         target_compile_options(QuickView PRIVATE 
-            /O2 /Gw /Zc:inline /GR- /fp:fast /GS- /EHs-c- /Z7
-            /clang:-flto=full /clang:-mllvm /clang:-inline-threshold=250
+            /O2 /Gw /Gy /Zc:inline /GR- /fp:fast /GS- /EHs-c- /Z7
+            /clang:-flto=full
             /clang:-fwhole-program-vtables /clang:-fvirtual-function-elimination
             /clang:-fno-ident)
         target_link_options(QuickView PRIVATE /DEBUG /OPT:REF /OPT:ICF /opt:lldlto=3 "/MAP:${CMAKE_BINARY_DIR}/QuickView.map")
@@ -210,11 +223,32 @@ set_target_properties(QuickView PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 target_compile_definitions(QuickView PRIVATE UNICODE _UNICODE)
+
 # Note: Manifest is handled via QuickView.rc
 
 # ============================================================================
 # Dependencies (vcpkg)
 # ============================================================================
+# Ensure CMAKE_PREFIX_PATH includes vcpkg target triplet paths
+if(VCPKG_TARGET_TRIPLET)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}")
+        list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}")
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vcpkg/installed/${VCPKG_TARGET_TRIPLET}")
+        list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vcpkg/installed/${VCPKG_TARGET_TRIPLET}")
+    endif()
+endif()
+
+# libjpeg-turbo (Must be before libavif so libyuv's internal find_dependency(JPEG) succeeds)
+find_package(libjpeg-turbo CONFIG REQUIRED)
+if(NOT TARGET JPEG::JPEG)
+    if(TARGET libjpeg-turbo::turbojpeg-static)
+        add_library(JPEG::JPEG ALIAS libjpeg-turbo::turbojpeg-static)
+    elseif(TARGET libjpeg-turbo::jpeg-static)
+        add_library(JPEG::JPEG ALIAS libjpeg-turbo::jpeg-static)
+    endif()
+endif()
+
 # libavif
 find_package(libavif CONFIG REQUIRED)
 
@@ -224,14 +258,36 @@ find_package(hwy CONFIG REQUIRED)
 # LibRaw
 find_package(libraw CONFIG REQUIRED)
 
+# Ensure _VCPKG_INSTALLED_DIR fallback
+if(NOT _VCPKG_INSTALLED_DIR)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed")
+        set(_VCPKG_INSTALLED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vcpkg/installed")
+        set(_VCPKG_INSTALLED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vcpkg/installed")
+    endif()
+endif()
+
+set(_VCPKG_SEARCH_PATHS
+    "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vcpkg/installed/${VCPKG_TARGET_TRIPLET}"
+)
+
+# Reset cache entries if previously trapped in -NOTFOUND
+foreach(_VAR JXL_LIB_RELEASE JXL_LIB_DEBUG JXL_THREADS_LIB_RELEASE JXL_THREADS_LIB_DEBUG JXL_CMS_LIB_RELEASE JXL_CMS_LIB_DEBUG BROTLI_COMMON_LIB_RELEASE BROTLI_COMMON_LIB_DEBUG BROTLI_DEC_LIB_RELEASE BROTLI_DEC_LIB_DEBUG DAV1D_LIB_RELEASE DAV1D_LIB_DEBUG)
+    if(${_VAR} MATCHES "-NOTFOUND$")
+        unset(${_VAR} CACHE)
+    endif()
+endforeach()
+
 # libjxl (manual find since vcpkg port lacks config)
-find_library(JXL_LIB_RELEASE NAMES jxl PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib" NO_DEFAULT_PATH)
-find_library(JXL_LIB_DEBUG NAMES jxl PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib" NO_DEFAULT_PATH)
-find_library(JXL_THREADS_LIB_RELEASE NAMES jxl_threads PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib" NO_DEFAULT_PATH)
-find_library(JXL_THREADS_LIB_DEBUG NAMES jxl_threads PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib" NO_DEFAULT_PATH)
-find_library(JXL_CMS_LIB_RELEASE NAMES jxl_cms PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib" NO_DEFAULT_PATH)
-find_library(JXL_CMS_LIB_DEBUG NAMES jxl_cms PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib" NO_DEFAULT_PATH)
-find_path(JXL_INC jxl/decode.h REQUIRED)
+find_library(JXL_LIB_RELEASE NAMES jxl PATH_SUFFIXES "lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(JXL_LIB_DEBUG NAMES jxl PATH_SUFFIXES "debug/lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(JXL_THREADS_LIB_RELEASE NAMES jxl_threads PATH_SUFFIXES "lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(JXL_THREADS_LIB_DEBUG NAMES jxl_threads PATH_SUFFIXES "debug/lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(JXL_CMS_LIB_RELEASE NAMES jxl_cms PATH_SUFFIXES "lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(JXL_CMS_LIB_DEBUG NAMES jxl_cms PATH_SUFFIXES "debug/lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_path(JXL_INC jxl/decode.h PATH_SUFFIXES "include" PATHS ${_VCPKG_SEARCH_PATHS} REQUIRED)
 
 add_library(libjxl::jxl STATIC IMPORTED)
 set_target_properties(libjxl::jxl PROPERTIES
@@ -250,14 +306,14 @@ set_property(TARGET libjxl::jxl_cms PROPERTY IMPORTED_LOCATION_RELEASE "${JXL_CM
 set_property(TARGET libjxl::jxl_cms PROPERTY IMPORTED_LOCATION_DEBUG "${JXL_CMS_LIB_DEBUG}")
 
 # Brotli (required by libjxl)
-find_library(BROTLI_COMMON_LIB_RELEASE NAMES brotlicommon PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib" NO_DEFAULT_PATH)
-find_library(BROTLI_COMMON_LIB_DEBUG NAMES brotlicommon PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib" NO_DEFAULT_PATH)
-find_library(BROTLI_DEC_LIB_RELEASE NAMES brotlidec PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib" NO_DEFAULT_PATH)
-find_library(BROTLI_DEC_LIB_DEBUG NAMES brotlidec PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib" NO_DEFAULT_PATH)
+find_library(BROTLI_COMMON_LIB_RELEASE NAMES brotlicommon PATH_SUFFIXES "lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(BROTLI_COMMON_LIB_DEBUG NAMES brotlicommon PATH_SUFFIXES "debug/lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(BROTLI_DEC_LIB_RELEASE NAMES brotlidec PATH_SUFFIXES "lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(BROTLI_DEC_LIB_DEBUG NAMES brotlidec PATH_SUFFIXES "debug/lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
 
 # dav1d (required by avif)
-find_library(DAV1D_LIB_RELEASE NAMES dav1d PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib" NO_DEFAULT_PATH)
-find_library(DAV1D_LIB_DEBUG NAMES dav1d PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib" NO_DEFAULT_PATH)
+find_library(DAV1D_LIB_RELEASE NAMES dav1d PATH_SUFFIXES "lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_library(DAV1D_LIB_DEBUG NAMES dav1d PATH_SUFFIXES "debug/lib" PATHS ${_VCPKG_SEARCH_PATHS} NO_DEFAULT_PATH)
 
 # lcms2
 find_package(lcms2 CONFIG REQUIRED)
@@ -305,12 +361,18 @@ target_link_libraries(QuickView PRIVATE
     ZLIB::ZLIB
     unrar-mini
     # Windows system libraries
+    d2d1.lib
+    d3d11.lib
+    dxgi.lib
+    ntdll.lib
     imm32.lib
     dwrite.lib
     windowscodecs.lib
     shlwapi.lib
     shell32.lib
     mscms.lib
+    gdiplus.lib
+    ${QV_WEBVIEW2_LIB}
 )
 
 # ============================================================================
@@ -326,6 +388,17 @@ add_executable(QuickViewTests
     tests/StringUtilsTests.cpp
     tests/SupportedExtensionsTests.cpp
     tests/MiniTiffTests.cpp
+    tests/Transform2DTests.cpp
+    tests/SettingsSliderMathTests.cpp
+    tests/SvgNeedsFallbackTests.cpp
+    tests/MetafileCodecTests.cpp
+    tests/GeekWidgetsTests.cpp
+    QuickView/GeekWidgets.cpp
+    QuickView/GeekIconLibrary.cpp
+    QuickView/GeekIconData.cpp
+    QuickView/GeekIconRenderer.cpp
+    QuickView/OffscreenWebView2.cpp
+    QuickView/LosslessTransform.cpp
     QuickView/ImageLoaderSimd.cpp
     QuickView/MiniTiff.cpp
     QuickView/MiniTiffLzw.cpp
@@ -349,8 +422,10 @@ target_link_libraries(QuickViewTests PRIVATE
     shlwapi.lib 
     shell32.lib 
     mscms.lib
+    gdiplus.lib
     unrar-mini
     ZLIB::ZLIB
+    libjpeg-turbo::turbojpeg-static
 )
 target_include_directories(QuickViewTests PRIVATE QuickView third_party/unrar-mini)
 target_compile_definitions(QuickViewTests PRIVATE UNICODE _UNICODE)
@@ -360,6 +435,7 @@ add_test(NAME QuickViewTests COMMAND QuickViewTests)
 # IDE IntelliSense & Build Environment Helper (Inject Adaptive SDK Include Paths)
 # ============================================================================
 if(WIN32 AND ADAPTIVE_MSVC_INCLUDE_PATHS)
+    include_directories(SYSTEM ${ADAPTIVE_MSVC_INCLUDE_PATHS})
     target_include_directories(QuickView SYSTEM PRIVATE ${ADAPTIVE_MSVC_INCLUDE_PATHS})
     if(TARGET QuickViewTests)
         target_include_directories(QuickViewTests SYSTEM PRIVATE ${ADAPTIVE_MSVC_INCLUDE_PATHS})

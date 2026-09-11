@@ -15,6 +15,7 @@
 #include "ImageLoaderSimd.h"
 #include "SettingsOverlay.h"
 #include "PrintPreviewUI.h"
+#include "ExportPanel.h"
 #include <functional> // For std::hash
 
 namespace {
@@ -54,7 +55,6 @@ extern bool g_isNavigatingToTitan; // [Fix] Restrict decode progress bar to Tita
 extern ViewState& g_viewState;  // [v3.2] For Nav Indicators
 extern CImageLoader::ImageMetadata& g_currentMetadata;  // [v3.2] For Info Panel
 extern std::wstring& g_imagePath;  // [v3.2] For Info Panel
-extern bool g_slowMotionMode; // [Debug] Slow-motion crossfade mode
 extern AppConfig g_config;
 extern int g_renderExifOrientation;
 extern int GetCurrentZoomPercent(); // [v3.2.3] For Info Panel Zoom Display
@@ -172,7 +172,7 @@ HRESULT UIRenderer::Initialize(CompositionEngine* compEngine, IDWriteFactory* dw
 }
 
 void UIRenderer::SetUIScale(float scale) {
-    if (scale < 1.0f) scale = 1.0f;
+    if (scale < 0.75f) scale = 0.75f;
     if (scale > 4.0f) scale = 4.0f;
     if (fabsf(m_uiScale - scale) < 0.001f) return;
 
@@ -298,12 +298,25 @@ HitTestResult UIRenderer::HitTest(float x, float y) {
     bool hideInfoPanel = g_settingsOverlay.IsVisible() || g_helpOverlay.IsVisible() || (g_gallery.IsVisible() && !isFilmstripActive);
     bool hideHud = g_settingsOverlay.IsVisible() || g_helpOverlay.IsVisible() || g_gallery.IsVisible() || AppContext::GetInstance().Dialog.IsVisible;
 
-    bool hudVisible = IsCompareModeActive() && g_runtime.ShowCompareInfo && !hideHud && !isHotspotShowing;
+    bool isMouseInPanel = (m_lastInfoPanelRect.right > m_lastInfoPanelRect.left &&
+                           x >= m_lastInfoPanelRect.left && x <= m_lastInfoPanelRect.right &&
+                           y >= m_lastInfoPanelRect.top && y <= m_lastInfoPanelRect.bottom);
+    bool isMouseInHud = (m_lastHUDRect.right > m_lastHUDRect.left &&
+                         x >= m_lastHUDRect.left && x <= m_lastHUDRect.right &&
+                         y >= m_lastHUDRect.top && y <= m_lastHUDRect.bottom);
+
+    bool hudVisible = IsCompareModeActive() && g_runtime.ShowCompareInfo && !hideHud;
+    if (hudVisible) {
+        bool overlapsHotspot = (m_lastHUDRect.top < neckH && m_lastHUDRect.right > cx - neckW && m_lastHUDRect.left < cx + neckW);
+        if (isHotspotShowing && overlapsHotspot && !isMouseInHud) {
+            hudVisible = false;
+        }
+    }
     
     bool infoPanelVisible = g_runtime.ShowInfoPanel && !hideInfoPanel;
     if (infoPanelVisible) {
         bool overlapsHotspot = (m_lastInfoPanelRect.top < neckH && m_lastInfoPanelRect.right > cx - neckW && m_lastInfoPanelRect.left < cx + neckW);
-        if (isHotspotShowing && overlapsHotspot) {
+        if (isHotspotShowing && overlapsHotspot && !isMouseInPanel) {
             infoPanelVisible = false;
         }
     }
@@ -837,10 +850,21 @@ void UIRenderer::RenderStaticLayer(ID2D1DeviceContext* dc, HWND hwnd) {
     // Compare Selected Pane Indicator
     DrawComparePaneIndicator(dc, hwnd);
     
+    // Crop Overlay Layer (Drawn BEFORE Toolbar, ExportPanel, Window Controls so UI sits on top of mask)
+    if (g_cropState.IsActive) {
+        DrawCropOverlay(dc, hwnd);
+    }
+
     // Toolbar (Hidden if full grid gallery, settings, or help is open; remains visible for filmstrip)
     if (g_toolbar.IsVisible() && !isAnyOverlayActive) {
         g_toolbar.SetGeekGlassData(m_bgCommandList.Get(), m_compEngine ? m_compEngine->GetScreenTransform() : D2D1::Matrix3x2F::Identity());
         g_toolbar.Render(dc);
+    }
+
+    // ExportPanel (Save As Panel - Rendered on top of overlay mask and toolbar)
+    if (QuickView::ExportPanel::GetInstance().IsVisible()) {
+        EnsureTextFormats();
+        QuickView::ExportPanel::GetInstance().Render(dc, (float)m_width, (float)m_height, m_panelFormat.Get());
     }
     bool hudVisible = IsCompareModeActive() && g_runtime.ShowCompareInfo;
 
@@ -865,12 +889,13 @@ void UIRenderer::RenderStaticLayer(ID2D1DeviceContext* dc, HWND hwnd) {
         }
     }
     
-    // Border Indicators (disabled in Compare Mode)
-    if (g_config.ShowBorderIndicator != 0 && !isAnyOverlayActive && !IsCompareModeActive()) {
+    // Border Indicators (disabled in Compare Mode and Crop Mode)
+    if (g_config.ShowBorderIndicator != 0 && !isAnyOverlayActive && !IsCompareModeActive() && !g_cropState.IsActive) {
         DrawBorderIndicators(dc);
     }
 
-    if (g_config.ShowNavigator != 2 && !isAnyOverlayActive) {
+    // Minimap / Navigator (disabled in Crop Mode and Overlays)
+    if (!isAnyOverlayActive && !g_cropState.IsActive) {
         DrawNavigator(dc);
     }
 
@@ -1259,8 +1284,8 @@ void UIRenderer::RenderDynamicLayer(ID2D1DeviceContext* dc, HWND hwnd) {
         AppContext::GetInstance().DialogCtrl->Render(dc);
     }
 
-    // Draw Top Gallery Hotspot: Vector Icon + Material Ripple (Fix #1)
-    if (!g_imagePath.empty() && !g_gallery.IsVisible() && !g_settingsOverlay.IsVisible() && !g_helpOverlay.IsVisible() && (g_config.GalleryTriggerMode == 1 || g_config.GalleryTriggerMode == 2) && m_width >= 300.0f * m_uiScale && m_height >= 200.0f * m_uiScale) {
+    // Draw Top Gallery Hotspot: Vector Icon + Material Ripple (Disabled in Crop Mode)
+    if (!g_imagePath.empty() && !g_gallery.IsVisible() && !g_settingsOverlay.IsVisible() && !g_helpOverlay.IsVisible() && !g_cropState.IsActive && (g_config.GalleryTriggerMode == 1 || g_config.GalleryTriggerMode == 2) && m_width >= 300.0f * m_uiScale && m_height >= 200.0f * m_uiScale) {
         float cx = m_width / 2.0f;
         float neckH = 40.0f * m_uiScale;
         float neckW = 200.0f * m_uiScale;
@@ -1380,8 +1405,11 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
             if (!layout) return;
 
             DWRITE_TEXT_METRICS tm; layout->GetMetrics(&tm);
-            float padH = 20.0f * s, padV = 10.0f * s;
-            float tw = tm.width + padH * 2, th = tm.height + padV * 2;
+            float padV = 8.0f * s;
+            float th = tm.height + padV * 2.0f;
+            float pillRadius = th * 0.5f;
+            float padH = std::max(20.0f * s, th * 0.55f);
+            float tw = tm.width + padH * 2.0f;
             D2D1_RECT_F r = D2D1::RectF(centerX - tw/2, centerY - th/2, centerX + tw/2, centerY + th/2);
             
             bool glassDrawn = false;
@@ -1394,7 +1422,7 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
                 QuickView::UI::GeekGlass::GeekGlassConfig config;
                 config.theme = IsLightThemeActive() ? QuickView::UI::GeekGlass::ThemeMode::Light : QuickView::UI::GeekGlass::ThemeMode::Dark;
                 config.panelBounds = r;
-                config.cornerRadius = 6.0f * s;
+                config.cornerRadius = pillRadius;
                 config.enableGeekGlass = g_config.EnableGeekGlass;
                 config.tintProfile = g_config.GlassTintProfile;
                 config.customTintColor = D2D1::ColorF(g_config.GlassCustomTintR, g_config.GlassCustomTintG, g_config.GlassCustomTintB, g_config.GlassTintAlpha);
@@ -1423,7 +1451,7 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
                     float baseAlpha = (g_config.GlassOsdOpacity / 100.0f);
                     D2D1_COLOR_F boosterColor = D2D1::ColorF(fillerBase.r, fillerBase.g, fillerBase.b, baseAlpha);
                     dc->CreateSolidColorBrush(boosterColor, &boosterBrush);
-                    dc->FillRoundedRectangle(D2D1::RoundedRect(r, 6.0f * s, 6.0f * s), boosterBrush.Get());
+                    dc->FillRoundedRectangle(D2D1::RoundedRect(r, pillRadius, pillRadius), boosterBrush.Get());
                     
                     // Draw reflections and borders last
                     geekGlass.DrawGeekGlassToppings(dc, config);
@@ -1432,7 +1460,7 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
             }
 
             if (!glassDrawn) {
-                dc->FillRoundedRectangle(D2D1::RoundedRect(r, 6.0f * s, 6.0f * s), bgBrush.Get());
+                dc->FillRoundedRectangle(D2D1::RoundedRect(r, pillRadius, pillRadius), bgBrush.Get());
             }
             dc->DrawTextLayout(D2D1::Point2F(r.left + padH, r.top + padV), layout.Get(), textBrush.Get());
         };
@@ -1446,7 +1474,6 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
     if (m_osdText.empty()) return;
 
     // Standard OSD Drawing
-    float paddingH = 20.0f * s; (void)paddingH;
     float paddingV = 10.0f * s;
     
     ComPtr<IDWriteTextLayout> textLayout;
@@ -1458,12 +1485,16 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
     }
     
     float toastW = 300.0f * s, toastH = 50.0f * s;
+    float paddingH = 24.0f * s;
     if (textLayout) {
         DWRITE_TEXT_METRICS metrics;
         textLayout->GetMetrics(&metrics);
-        toastW = metrics.width + paddingH * 2;
-        toastH = metrics.height + paddingV * 2;
+        toastH = metrics.height + paddingV * 2.0f;
+        paddingH = std::max(24.0f * s, toastH * 0.55f);
+        toastW = metrics.width + paddingH * 2.0f;
     }
+
+    float pillRadius = toastH * 0.5f;
 
     // Calculate Window Width/Height for alignment
     RECT rc; GetClientRect(hwnd, &rc);
@@ -1490,7 +1521,7 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
         QuickView::UI::GeekGlass::GeekGlassConfig config;
         config.theme = IsLightThemeActive() ? QuickView::UI::GeekGlass::ThemeMode::Light : QuickView::UI::GeekGlass::ThemeMode::Dark;
         config.panelBounds = bgRect;
-        config.cornerRadius = 8.0f * s;
+        config.cornerRadius = pillRadius;
         config.enableGeekGlass = g_config.EnableGeekGlass;
         config.tintProfile = g_config.GlassTintProfile;
         config.customTintColor = D2D1::ColorF(g_config.GlassCustomTintR, g_config.GlassCustomTintG, g_config.GlassCustomTintB, g_config.GlassTintAlpha);
@@ -1519,7 +1550,7 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
             float baseAlpha = (g_config.GlassOsdOpacity / 100.0f);
             D2D1_COLOR_F boosterColor = D2D1::ColorF(fillerBase.r, fillerBase.g, fillerBase.b, baseAlpha);
             dc->CreateSolidColorBrush(boosterColor, &boosterBrush);
-            dc->FillRoundedRectangle(D2D1::RoundedRect(bgRect, 8.0f * s, 8.0f * s), boosterBrush.Get());
+            dc->FillRoundedRectangle(D2D1::RoundedRect(bgRect, pillRadius, pillRadius), boosterBrush.Get());
 
             // Draw reflections and borders last
             geekGlass.DrawGeekGlassToppings(dc, config);
@@ -1528,7 +1559,7 @@ void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
     }
 
     if (!glassDrawnMain) {
-        dc->FillRoundedRectangle(D2D1::RoundedRect(bgRect, 8.0f * s, 8.0f * s), bgBrush.Get());
+        dc->FillRoundedRectangle(D2D1::RoundedRect(bgRect, pillRadius, pillRadius), bgBrush.Get());
     }
     
     if (textLayout && textBrush) {
@@ -1601,6 +1632,7 @@ void UIRenderer::DrawDecodingStatus(ID2D1DeviceContext* dc, HWND hwnd) {
         if (elapsed >= 500) {
             m_decodeFinishTime = 0;
             m_decodeDisplayedProgress = 0.0f;
+            if (hwnd) ::InvalidateRect(hwnd, nullptr, FALSE);
             return;
         }
         finishingMode = true;
@@ -1746,6 +1778,12 @@ void UIRenderer::DrawDecodingStatus(ID2D1DeviceContext* dc, HWND hwnd) {
             dc->CreateSolidColorBrush(headColor, &headBrush);
             dc->FillRectangle(headRect, headBrush.Get());
         }
+    }
+
+    // [Fix] Continuously drive animation frame repaints while decoding is active or during 500ms fade-out phase.
+    // Without this, when decoding completes, no background messages arrive, leaving the UI frozen with the progress bar visible.
+    if ((decodingActive || m_decodeFinishTime != 0) && hwnd) {
+        ::InvalidateRect(hwnd, nullptr, FALSE);
     }
 }
 
@@ -1942,7 +1980,13 @@ void UIRenderer::DrawBorderIndicators(ID2D1DeviceContext* dc) {
     float winW = (float)m_width;
     float winH = (float)m_height;
 
-    float baseFit = std::min(winW / imgSize.width, winH / imgSize.height);
+    // Match SyncDCompState: pin-mode filmstrip reduces effective vertical viewport.
+    float galleryH = (g_gallery.IsPinned() && g_gallery.IsVisible())
+        ? g_gallery.GetVisualHeight(winH) : 0.0f;
+    float effWinH = winH - galleryH;
+    if (effWinH < 1.0f) effWinH = 1.0f;
+
+    float baseFit = std::min(winW / imgSize.width, effWinH / imgSize.height);
 
     // [SVG Lossless] Adjust bounds calculation baseFit just like main.cpp
     if (g_runtime.LockWindowSize) {
@@ -1955,15 +1999,24 @@ void UIRenderer::DrawBorderIndicators(ID2D1DeviceContext* dc) {
         }
     }
 
-    // Use the global g_viewState which is updated synchronously by main.cpp during panning
+    // Prefer live smooth-zoom display values when animating (WebView/DComp path).
+    float panX = g_viewState.PanX;
+    float panY = g_viewState.PanY;
     float targetZoom = baseFit * g_viewState.Zoom;
+    if (AppContext::GetInstance().SmoothZoom.Active) {
+        targetZoom = AppContext::GetInstance().SmoothZoom.CurrentZoom;
+        panX = AppContext::GetInstance().SmoothZoom.CurrentPanX;
+        panY = AppContext::GetInstance().SmoothZoom.CurrentPanY;
+    }
     float scaledW = imgSize.width * targetZoom;
     float scaledH = imgSize.height * targetZoom;
 
-    float imgLeft = (winW * 0.5f) - (scaledW * 0.5f) + g_viewState.PanX;
-    float imgRight = (winW * 0.5f) + (scaledW * 0.5f) + g_viewState.PanX;
-    float imgTop = (winH * 0.5f) - (scaledH * 0.5f) + g_viewState.PanY;
-    float imgBottom = (winH * 0.5f) + (scaledH * 0.5f) + g_viewState.PanY;
+    // Image center is shifted down by galleryH/2 when filmstrip is pinned (SyncDCompState).
+    float centerY = (winH * 0.5f) + galleryH * 0.5f;
+    float imgLeft = (winW * 0.5f) - (scaledW * 0.5f) + panX;
+    float imgRight = (winW * 0.5f) + (scaledW * 0.5f) + panX;
+    float imgTop = centerY - (scaledH * 0.5f) + panY;
+    float imgBottom = centerY + (scaledH * 0.5f) + panY;
 
     // Buffer to avoid flickering at exact edge bounds
     const float edgeBuffer = 1.0f;
@@ -2132,7 +2185,6 @@ void UIRenderer::DrawDebugHUD(ID2D1DeviceContext* dc) {
     
     DrawToggle(L"Fast [Ctl1]", g_runtime.EnableScout);
     DrawToggle(L"Heavy[Ctl2]", g_runtime.EnableHeavy);
-    DrawToggle(L"SlowM[Ctl3]", g_slowMotionMode);
     DrawToggle(L"Grid [Ctl4]", m_showTileGrid);
     DrawToggle(L"HdrSm[Ctl5]", g_runtime.ForceHdrSimulation);
     DrawToggle(L"GPU TM", g_runtime.LastFrameGpuToneMapped);
@@ -2491,9 +2543,16 @@ namespace {
             return displayFname;
         }
         else if (key == L"Size") {
-            if (meta.Width > 0) {
+            const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
+            UINT displayW = meta.Width;
+            UINT displayH = meta.Height;
+            if (editState.HasCrop) {
+                displayW = (UINT)std::round(editState.CropRight - editState.CropLeft);
+                displayH = (UINT)std::round(editState.CropBottom - editState.CropTop);
+            }
+            if (displayW > 0 && displayH > 0) {
                 wchar_t sz[64];
-                swprintf_s(sz, L"%u\u00d7%u", meta.Width, meta.Height);
+                swprintf_s(sz, L"%u\u00d7%u", displayW, displayH);
                 return sz;
             }
             return std::nullopt;
@@ -2781,6 +2840,12 @@ std::wstring UIRenderer::BuildCompactInfoText(float maxFileW) const {
     CombineHash(stateHash, g_currentMetadata.HasSharpness);
     CombineHash(stateHash, g_currentMetadata.HasEntropy);
     CombineHash(stateHash, hasHistR);
+    const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
+    CombineHash(stateHash, editState.HasCrop);
+    if (editState.HasCrop) {
+        CombineHash(stateHash, (int)(editState.CropRight - editState.CropLeft));
+        CombineHash(stateHash, (int)(editState.CropBottom - editState.CropTop));
+    }
 
     if (m_lastCompactInfoStateHash == stateHash && !m_lastCompactInfoText.empty()) {
         return m_lastCompactInfoText;
@@ -2907,11 +2972,18 @@ std::vector<InfoRow> UIRenderer::BuildGridRows(const CImageLoader::ImageMetadata
     }
 
     // Row 2: Dimensions + Megapixels
-    if (metadata.Width > 0) {
-        UINT64 totalPixels = (UINT64)metadata.Width * metadata.Height;
+    const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
+    UINT displayW = metadata.Width;
+    UINT displayH = metadata.Height;
+    if (editState.HasCrop) {
+        displayW = (UINT)std::round(editState.CropRight - editState.CropLeft);
+        displayH = (UINT)std::round(editState.CropBottom - editState.CropTop);
+    }
+    if (displayW > 0 && displayH > 0) {
+        UINT64 totalPixels = (UINT64)displayW * displayH;
         double megapixels = totalPixels / 1000000.0;
         wchar_t dimBuf[64];
-        swprintf_s(dimBuf, L"%u\u00d7%u", metadata.Width, metadata.Height);
+        swprintf_s(dimBuf, L"%u\u00d7%u", displayW, displayH);
         wchar_t mpBuf[48];
         swprintf_s(mpBuf, L"(%.1fMP)@%d%%", megapixels, GetCurrentZoomPercent());
         rows.push_back({L"\U0001F4D0", L"Size", dimBuf, mpBuf, L"", TruncateMode::None, false});
@@ -3436,6 +3508,12 @@ void UIRenderer::BuildInfoGrid() {
     CombineHash(stateHash, g_currentMetadata.HasSharpness);
     CombineHash(stateHash, g_currentMetadata.HasEntropy);
     CombineHash(stateHash, hasHistR);
+    const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
+    CombineHash(stateHash, editState.HasCrop);
+    if (editState.HasCrop) {
+        CombineHash(stateHash, (int)(editState.CropRight - editState.CropLeft));
+        CombineHash(stateHash, (int)(editState.CropBottom - editState.CropTop));
+    }
 
     if (!m_infoGrid.empty() && m_lastInfoStateHash == stateHash) {
         return; // Cache hit
@@ -3843,7 +3921,9 @@ void UIRenderer::DrawCompactInfo(ID2D1DeviceContext* dc) {
                      m_lastMousePos.x >= cx - neckW && m_lastMousePos.x <= cx + neckW);
     bool isHotspotShowing = !g_imagePath.empty() && !g_gallery.IsVisible() && !g_settingsOverlay.IsVisible() && !g_helpOverlay.IsVisible() && (g_config.GalleryTriggerMode == 1 || g_config.GalleryTriggerMode == 2) && (m_width >= 300.0f * s) && (m_height >= 200.0f * s) && isInNeck;
     bool overlapsHotspot = (panelRect.top < neckH && panelRect.right > cx - neckW && panelRect.left < cx + neckW);
-    if (isHotspotShowing && overlapsHotspot) {
+    bool isMouseInPanel = (m_lastMousePos.x >= panelRect.left && m_lastMousePos.x <= panelRect.right && 
+                           m_lastMousePos.y >= panelRect.top && m_lastMousePos.y <= panelRect.bottom);
+    if (isHotspotShowing && overlapsHotspot && !isMouseInPanel) {
         m_lastInfoPanelRect = {};
         return;
     }
@@ -4093,6 +4173,8 @@ D2D1_COLOR_F UIRenderer::LerpColor(const D2D1_COLOR_F& a, const D2D1_COLOR_F& b,
 
 void UIRenderer::DrawInfoPanel(ID2D1DeviceContext* dc) {
     if (!g_runtime.ShowInfoPanel || !m_panelFormat) return;
+    m_panelFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    m_panelFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     const float s = GetInfoPanelScale();
     BuildInfoGrid();  // Populate m_infoGrid from g_currentMetadata before sizing.
     
@@ -4149,7 +4231,9 @@ void UIRenderer::DrawInfoPanel(ID2D1DeviceContext* dc) {
                      m_lastMousePos.x >= cx - neckW && m_lastMousePos.x <= cx + neckW);
     bool isHotspotShowing = !g_imagePath.empty() && !g_gallery.IsVisible() && !g_settingsOverlay.IsVisible() && !g_helpOverlay.IsVisible() && (g_config.GalleryTriggerMode == 1 || g_config.GalleryTriggerMode == 2) && (m_width >= 300.0f * s) && (m_height >= 200.0f * s) && isInNeck;
     bool overlapsHotspot = (panelRect.top < neckH && panelRect.right > cx - neckW && panelRect.left < cx + neckW);
-    if (isHotspotShowing && overlapsHotspot) {
+    bool isMouseInPanel = (m_lastMousePos.x >= panelRect.left && m_lastMousePos.x <= panelRect.right && 
+                           m_lastMousePos.y >= panelRect.top && m_lastMousePos.y <= panelRect.bottom);
+    if (isHotspotShowing && overlapsHotspot && !isMouseInPanel) {
         m_lastInfoPanelRect = {};
         return;
     }
@@ -4614,15 +4698,8 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
         return;
     }
     
-    // Smart Overlap Avoidance: Hide HUD if top gallery filmstrip is visible or triggering hotspot is active
     extern GalleryOverlay g_gallery;
-    float cx = m_width / 2.0f;
-    float neckH = 40.0f * sUI;
-    float neckW = 200.0f * sUI;
-    bool isInNeck = (m_lastMousePos.y >= 0 && m_lastMousePos.y < neckH &&
-                     m_lastMousePos.x >= cx - neckW && m_lastMousePos.x <= cx + neckW);
-    bool isHotspotShowing = !g_imagePath.empty() && !g_gallery.IsVisible() && !g_settingsOverlay.IsVisible() && !g_helpOverlay.IsVisible() && (g_config.GalleryTriggerMode == 1 || g_config.GalleryTriggerMode == 2) && (m_width >= 300.0f * sUI) && (m_height >= 200.0f * sUI) && isInNeck;
-    if (g_gallery.IsVisible() || isHotspotShowing || g_settingsOverlay.IsVisible() || g_helpOverlay.IsVisible() || AppContext::GetInstance().Dialog.IsVisible) {
+    if (g_gallery.IsVisible() || g_settingsOverlay.IsVisible() || g_helpOverlay.IsVisible() || AppContext::GetInstance().Dialog.IsVisible) {
         m_lastHUDRect = {};
         m_hudToggleLiteRect = {};
         m_panelToggleRect = {};
@@ -4772,7 +4849,9 @@ void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
                          m_lastMousePos.x >= cx - neckW && m_lastMousePos.x <= cx + neckW);
         bool isHotspotShowing = !g_imagePath.empty() && !g_gallery.IsVisible() && !g_settingsOverlay.IsVisible() && !g_helpOverlay.IsVisible() && (g_config.GalleryTriggerMode == 1 || g_config.GalleryTriggerMode == 2) && (m_width >= 300.0f * sUI) && (m_height >= 200.0f * sUI) && isInNeck;
         bool overlapsHotspot = (panelRect.top < neckH && panelRect.right > cx - neckW && panelRect.left < cx + neckW);
-        if (isHotspotShowing && overlapsHotspot) {
+        bool isMouseInPanel = (m_lastMousePos.x >= panelRect.left && m_lastMousePos.x <= panelRect.right && 
+                               m_lastMousePos.y >= panelRect.top && m_lastMousePos.y <= panelRect.bottom);
+        if (isHotspotShowing && overlapsHotspot && !isMouseInPanel) {
             m_lastHUDRect = {};
             m_hudToggleLiteRect = {};
             return;
@@ -5779,8 +5858,10 @@ void UIRenderer::DrawWelcomeButton(ID2D1DeviceContext *dc, const D2D1_RECT_F &r,
         btnBgStopsCol.Get(), &btnBgBrush);
   }
 
+  const float pillRadius = (r.bottom - r.top) * 0.5f;
+
   if (btnBgBrush) {
-    dc->FillRoundedRectangle(D2D1::RoundedRect(r, 6.0f * s, 6.0f * s),
+    dc->FillRoundedRectangle(D2D1::RoundedRect(r, pillRadius, pillRadius),
                              btnBgBrush.Get());
   } else {
     ComPtr<ID2D1SolidColorBrush> fallbackBrush;
@@ -5792,7 +5873,7 @@ void UIRenderer::DrawWelcomeButton(ID2D1DeviceContext *dc, const D2D1_RECT_F &r,
                           ? D2D1::ColorF(0.2f, 0.6f, 1.0f, 0.2f)
                           : D2D1::ColorF(0.2f, 0.6f, 1.0f, 0.35f);
     dc->CreateSolidColorBrush(fallbackColor, &fallbackBrush);
-    dc->FillRoundedRectangle(D2D1::RoundedRect(r, 6.0f * s, 6.0f * s),
+    dc->FillRoundedRectangle(D2D1::RoundedRect(r, pillRadius, pillRadius),
                              fallbackBrush.Get());
   }
 
@@ -5805,7 +5886,7 @@ void UIRenderer::DrawWelcomeButton(ID2D1DeviceContext *dc, const D2D1_RECT_F &r,
   }
   ComPtr<ID2D1SolidColorBrush> borderBrush;
   dc->CreateSolidColorBrush(btnBorderColor, &borderBrush);
-  dc->DrawRoundedRectangle(D2D1::RoundedRect(r, 6.0f * s, 6.0f * s),
+  dc->DrawRoundedRectangle(D2D1::RoundedRect(r, pillRadius, pillRadius),
                            borderBrush.Get(), 1.0f);
 
   // Interactive Micro-displacement (0-overhead elastic touch)
@@ -6033,7 +6114,14 @@ void UIRenderer::DrawNavigator(ID2D1DeviceContext* dc) {
         float minimapCenterX = (minimap.innerRect.left + minimap.innerRect.right) * 0.5f;
         float minimapCenterY = (minimap.innerRect.top + minimap.innerRect.bottom) * 0.5f;
         
-        if (pane.resource.isSvg && pane.resource.svgDoc) {
+        // Thumb content: prefer bitmap (includes WebView2 CapturePreview).
+        // Native SVG may use svgDoc; complex WebView SVG often has no usable D2D svgDoc.
+        if (pane.resource.isWebView && pane.resource.bitmap) {
+            D2D1_RECT_F dest = D2D1::RectF(geo.imgDrawX, geo.imgDrawY,
+                                           geo.imgDrawX + geo.drawW, geo.imgDrawY + geo.drawH);
+            dc->DrawBitmap(pane.resource.bitmap.Get(), &dest, 1.0f,
+                           D2D1_INTERPOLATION_MODE_LINEAR);
+        } else if (pane.resource.svgDoc && (pane.resource.isSvg || pane.resource.isWebView)) {
             ComPtr<ID2D1DeviceContext5> ctx5;
             if (SUCCEEDED(dc->QueryInterface(IID_PPV_ARGS(&ctx5)))) {
                 D2D1::Matrix3x2F m = D2D1::Matrix3x2F::Scale(geo.fitScale, geo.fitScale) *
@@ -6130,5 +6218,179 @@ void UIRenderer::DrawNavigator(ID2D1DeviceContext* dc) {
         
         dc->DrawRoundedRectangle(roundedRect, borderShadowBrush.Get(), 3.0f * s);
         dc->DrawRoundedRectangle(roundedRect, borderBrush.Get(), 1.5f * s);
+    }
+}
+
+// ============================================================================
+// Crop Overlay Layer
+void UIRenderer::DrawCropOverlay(ID2D1DeviceContext* dc, HWND hwnd) {
+    if (!g_cropState.IsActive) return;
+    // Hide crop overlay when Ctrl is held down while not dragging, providing clean raw image view before drawing new region
+    if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 && !g_cropState.IsDragging) return;
+
+    auto& pane = GetPaneContext(PaneSlot::Primary);
+    if (!pane.resource) return;
+
+    int baseExif = g_renderExifOrientation;
+    int exifOrientation = GetEffectiveExifOrientation(baseExif, pane.editState);
+    D2D1_SIZE_F orientedSize = GetOrientedSize(pane.resource, exifOrientation);
+    if (orientedSize.width <= 0.0f || orientedSize.height <= 0.0f) return;
+
+    RECT rc; GetClientRect(hwnd, &rc);
+    float vpW = (float)(rc.right - rc.left);
+    float vpH = (float)(rc.bottom - rc.top);
+    
+    float fitScale = std::min(vpW / orientedSize.width, vpH / orientedSize.height);
+    if (orientedSize.width < 200.0f && orientedSize.height < 200.0f && fitScale > 1.0f) {
+        fitScale = 1.0f;
+    }
+    const float clampedZoom = (std::max)(0.02f, pane.view.Zoom);
+    const float totalScale = fitScale * clampedZoom;
+    
+    float imgDrawX = vpW * 0.5f + pane.view.PanX - (orientedSize.width * 0.5f * totalScale);
+    float imgDrawY = vpH * 0.5f + pane.view.PanY - (orientedSize.height * 0.5f * totalScale);
+    
+    float sLeft = g_cropState.CropLeft * totalScale + imgDrawX;
+    float sTop = g_cropState.CropTop * totalScale + imgDrawY;
+    float sRight = g_cropState.CropRight * totalScale + imgDrawX;
+    float sBottom = g_cropState.CropBottom * totalScale + imgDrawY;
+    
+    D2D1_RECT_F cropRect = D2D1::RectF(sLeft, sTop, sRight, sBottom);
+
+    // 1. Darken outside
+    dc->FillRectangle(D2D1::RectF(0, 0, vpW, sTop), m_blackBrush.Get());
+    dc->FillRectangle(D2D1::RectF(0, sBottom, vpW, vpH), m_blackBrush.Get());
+    dc->FillRectangle(D2D1::RectF(0, sTop, sLeft, sBottom), m_blackBrush.Get());
+    dc->FillRectangle(D2D1::RectF(sRight, sTop, vpW, sBottom), m_blackBrush.Get());
+
+    // 2. White border
+    dc->DrawRectangle(cropRect, m_whiteBrush.Get(), 1.5f * m_uiScale);
+
+    // 3. Rule of Thirds
+    float cw = (sRight - sLeft) / 3.0f;
+    float ch = (sBottom - sTop) / 3.0f;
+    ComPtr<ID2D1SolidColorBrush> gridBrush;
+    dc->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.4f), &gridBrush);
+    
+    dc->DrawLine(D2D1::Point2F(sLeft + cw, sTop), D2D1::Point2F(sLeft + cw, sBottom), gridBrush.Get(), 1.0f * m_uiScale);
+    dc->DrawLine(D2D1::Point2F(sLeft + 2*cw, sTop), D2D1::Point2F(sLeft + 2*cw, sBottom), gridBrush.Get(), 1.0f * m_uiScale);
+    dc->DrawLine(D2D1::Point2F(sLeft, sTop + ch), D2D1::Point2F(sRight, sTop + ch), gridBrush.Get(), 1.0f * m_uiScale);
+    dc->DrawLine(D2D1::Point2F(sLeft, sTop + 2*ch), D2D1::Point2F(sRight, sTop + 2*ch), gridBrush.Get(), 1.0f * m_uiScale);
+
+    // 4. Handles
+    auto drawHandle = [&](float hx, float hy, int handleId) {
+        float hSize = 5.0f * m_uiScale;
+        D2D1_RECT_F hr = D2D1::RectF(hx - hSize, hy - hSize, hx + hSize, hy + hSize);
+        ID2D1SolidColorBrush* b = (g_cropState.ActiveHandle == handleId) ? m_accentBrush.Get() : m_whiteBrush.Get();
+        dc->FillRectangle(hr, b);
+        dc->DrawRectangle(hr, m_blackBrush.Get(), 1.0f);
+    };
+    drawHandle(sLeft, sTop, 0); // TopLeft
+    drawHandle(sRight, sTop, 1); // TopRight
+    drawHandle(sLeft, sBottom, 2); // BottomLeft
+    drawHandle(sRight, sBottom, 3); // BottomRight
+
+    // Edge handles
+    drawHandle(sLeft + cw * 1.5f, sTop, 5); // Top
+    drawHandle(sLeft + cw * 1.5f, sBottom, 6); // Bottom
+    drawHandle(sLeft, sTop + ch * 1.5f, 7); // Left
+    drawHandle(sRight, sTop + ch * 1.5f, 8); // Right
+
+    // 5. Dimension Label Input Badge (Interactive Width & Height Capsules)
+    int cropW = (int)std::round(g_cropState.CropRight - g_cropState.CropLeft);
+    int cropH = (int)std::round(g_cropState.CropBottom - g_cropState.CropTop);
+    
+    uint64_t ms = GetTickCount64();
+    bool showCaret = ((ms / 500) % 2 == 0);
+
+    wchar_t wStr[32], hStr[32];
+    if (g_cropState.FocusedField == CropState::InputField::Width) {
+        swprintf_s(wStr, L"%s%s", g_cropState.InputBuffer, showCaret ? L"|" : L"");
+    } else {
+        swprintf_s(wStr, L"%d", cropW);
+    }
+    
+    if (g_cropState.FocusedField == CropState::InputField::Height) {
+        swprintf_s(hStr, L"%s%s", g_cropState.InputBuffer, showCaret ? L"|" : L"");
+    } else {
+        swprintf_s(hStr, L"%d", cropH);
+    }
+
+    ComPtr<IDWriteTextLayout> wLayout, hLayout, timesLayout, unitLayout;
+    m_dwriteFactory->CreateTextLayout(wStr, (UINT32)wcslen(wStr), m_osdFormat.Get(), 200.0f * m_uiScale, 30.0f * m_uiScale, &wLayout);
+    m_dwriteFactory->CreateTextLayout(hStr, (UINT32)wcslen(hStr), m_osdFormat.Get(), 200.0f * m_uiScale, 30.0f * m_uiScale, &hLayout);
+    m_dwriteFactory->CreateTextLayout(L"×", 1, m_osdFormat.Get(), 50.0f * m_uiScale, 30.0f * m_uiScale, &timesLayout);
+    m_dwriteFactory->CreateTextLayout(L"px", 2, m_osdFormat.Get(), 50.0f * m_uiScale, 30.0f * m_uiScale, &unitLayout);
+
+    if (wLayout && hLayout) {
+        DWRITE_TEXT_METRICS wTm{}, hTm{}, xTm{}, uTm{};
+        wLayout->GetMetrics(&wTm);
+        hLayout->GetMetrics(&hTm);
+        if (timesLayout) timesLayout->GetMetrics(&xTm);
+        if (unitLayout) unitLayout->GetMetrics(&uTm);
+
+        float padH = 8.0f * m_uiScale;
+        float capH = 26.0f * m_uiScale;
+
+        float wCapWidth = (std::max)(36.0f * m_uiScale, wTm.width + padH * 2.0f);
+        float hCapWidth = (std::max)(36.0f * m_uiScale, hTm.width + padH * 2.0f);
+        float timesWidth = xTm.width + 8.0f * m_uiScale;
+        float unitWidth = uTm.width + 8.0f * m_uiScale;
+
+        float startX = sLeft;
+        float startY = sTop - capH - 8.0f * m_uiScale;
+        if (startY < 6.0f * m_uiScale) {
+            startY = sTop + 8.0f * m_uiScale; // Move inside crop box top-left if too close to window top
+        }
+
+        D2D1_RECT_F wRect = D2D1::RectF(startX, startY, startX + wCapWidth, startY + capH);
+        D2D1_RECT_F xRect = D2D1::RectF(wRect.right, startY, wRect.right + timesWidth, startY + capH);
+        D2D1_RECT_F hRect = D2D1::RectF(xRect.right, startY, xRect.right + hCapWidth, startY + capH);
+        D2D1_RECT_F uRect = D2D1::RectF(hRect.right, startY, hRect.right + unitWidth, startY + capH);
+
+        // Store interactive hit test rects in g_cropState
+        g_cropState.WidthCapsuleRect = wRect;
+        g_cropState.HeightCapsuleRect = hRect;
+
+        ComPtr<ID2D1SolidColorBrush> capBgBrush, redBrush;
+        dc->CreateSolidColorBrush(D2D1::ColorF(0.12f, 0.12f, 0.14f, 0.92f), &capBgBrush);
+        dc->CreateSolidColorBrush(D2D1::ColorF(1.0f, 0.25f, 0.25f, 1.0f), &redBrush);
+
+        // 1. Draw Width Capsule
+        D2D1_ROUNDED_RECT wCap = D2D1::RoundedRect(wRect, 4.0f * m_uiScale, 4.0f * m_uiScale);
+        bool wFocused = (g_cropState.FocusedField == CropState::InputField::Width);
+        bool wHovered = (g_cropState.HoverField == CropState::InputField::Width);
+        bool wInvalid = wFocused && g_cropState.IsInputInvalid;
+
+        dc->FillRoundedRectangle(wCap, capBgBrush.Get());
+        ID2D1SolidColorBrush* wBorderBrush = wInvalid ? redBrush.Get() : (wFocused ? m_accentBrush.Get() : (wHovered ? m_whiteBrush.Get() : m_blackBrush.Get()));
+        float wBorderThick = (wInvalid || wFocused || wHovered) ? 1.5f * m_uiScale : 1.0f * m_uiScale;
+        dc->DrawRoundedRectangle(wCap, wBorderBrush, wBorderThick);
+
+        float textY = startY + (capH - wTm.height) * 0.5f;
+        dc->DrawTextLayout(D2D1::Point2F(wRect.left + (wCapWidth - wTm.width) * 0.5f, textY), wLayout.Get(), m_whiteBrush.Get());
+
+        // 2. Draw "×"
+        if (timesLayout) {
+            dc->DrawTextLayout(D2D1::Point2F(xRect.left + 4.0f * m_uiScale, startY + (capH - xTm.height) * 0.5f), timesLayout.Get(), m_whiteBrush.Get());
+        }
+
+        // 3. Draw Height Capsule
+        D2D1_ROUNDED_RECT hCap = D2D1::RoundedRect(hRect, 4.0f * m_uiScale, 4.0f * m_uiScale);
+        bool hFocused = (g_cropState.FocusedField == CropState::InputField::Height);
+        bool hHovered = (g_cropState.HoverField == CropState::InputField::Height);
+        bool hInvalid = hFocused && g_cropState.IsInputInvalid;
+
+        dc->FillRoundedRectangle(hCap, capBgBrush.Get());
+        ID2D1SolidColorBrush* hBorderBrush = hInvalid ? redBrush.Get() : (hFocused ? m_accentBrush.Get() : (hHovered ? m_whiteBrush.Get() : m_blackBrush.Get()));
+        float hBorderThick = (hInvalid || hFocused || hHovered) ? 1.5f * m_uiScale : 1.0f * m_uiScale;
+        dc->DrawRoundedRectangle(hCap, hBorderBrush, hBorderThick);
+
+        dc->DrawTextLayout(D2D1::Point2F(hRect.left + (hCapWidth - hTm.width) * 0.5f, textY), hLayout.Get(), m_whiteBrush.Get());
+
+        // 4. Draw "px"
+        if (unitLayout) {
+            dc->DrawTextLayout(D2D1::Point2F(uRect.left + 4.0f * m_uiScale, startY + (capH - uTm.height) * 0.5f), unitLayout.Get(), m_whiteBrush.Get());
+        }
     }
 }

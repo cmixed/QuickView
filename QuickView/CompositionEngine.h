@@ -50,10 +50,11 @@ public:
     ID2D1DeviceContext* BeginPendingUpdate(UINT width, UINT height, bool isTitan = false, UINT fullWidth = 0, UINT fullHeight = 0, bool allowOversizedStandard = false, DXGI_FORMAT surfaceFormatOverride = DXGI_FORMAT_UNKNOWN, bool hasAlpha = true);
     HRESULT EndPendingUpdate();
     
-    // PlayPingPongCrossFade: Animate transition from Active to Pending.
-    // Caller is responsible for the final Commit after any transform/state sync.
-    // isTransparent: If true, cross-fade both layers. If false, only fade out old.
-    HRESULT PlayPingPongCrossFade(float durationMs);
+    // SwapLayers: Instantly swap Active and Pending layers (0ms GPU layer swap, zero crossfade latency).
+    HRESULT SwapLayers();
+    
+    // HideActiveImage: Instantly set all image layer opacities to 0.0f and commit, used during transitions.
+    HRESULT HideActiveImage();
     
     // [Infinity Engine] Cascade Rendering
     // Draws visible tiles into the context, falling back to lower LODs if needed.
@@ -90,6 +91,22 @@ public:
     ID2D1DeviceContext* BeginImageOverlayUpdate(UINT sourceWidth, UINT sourceHeight, UINT maskWidth, UINT maskHeight);
     HRESULT EndImageOverlayUpdate(bool visible);
     HRESULT ClearImageOverlay();
+    
+    // [WebView2 DComp] Mount/Unmount external WebView2 visual into ImageContainer
+    // The mounted visual inherits all hardware transforms (scale/translate/rotate)
+    HRESULT MountWebViewVisual(IDCompositionVisual2* webviewVisual);
+    HRESULT UnmountWebViewVisual();
+    // Remove from the tree without leaving WebView mode (idle rebase cover).
+    HRESULT DetachWebViewVisual();
+    
+    // [WebView2 DComp] Toggle between bitmap mode and WebView mode
+    // In WebView mode: image layers hidden, WebView visual visible
+    // In Bitmap mode: image layers visible, WebView visual hidden
+    HRESULT SetWebViewMode(bool enabled);
+    bool IsWebViewMode() const { return m_webviewModeActive; }
+    
+    // [Feature] Set proxy layer opacity explicitly
+    void SetWebViewProxyOpacity(float opacity);
     
     // Background management
     HRESULT UpdateBackground(float width, float height, const D2D1_COLOR_F& bgColor, bool showGrid);
@@ -229,6 +246,10 @@ private:
     POINT m_imageOverlayDrawOffset = {};
     UINT m_imageOverlayMaskWidth = 0;
     UINT m_imageOverlayMaskHeight = 0;
+    
+    // [WebView2 DComp] External WebView visual mounted in ImageContainer
+    IDCompositionVisual2* m_webviewVisual = nullptr; // Non-owning, lifecycle managed by WebContentHost
+    bool m_webviewModeActive = false;
     
     // Hardware Transforms (applied to m_imageContainer)
     ComPtr<IDCompositionScaleTransform> m_scaleTransform;

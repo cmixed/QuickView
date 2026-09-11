@@ -2,6 +2,8 @@
 #include "Toolbar.h"
 #include "AppStrings.h"
 #include "EditState.h"
+#include "PaneContext.h"
+#include "AppContext.h"
 #include "GeekIconRenderer.h"
 #include "FileNavigator.h"
 #include "GalleryOverlay.h"
@@ -59,6 +61,11 @@ Toolbar::Toolbar() {
       // Slideshow mode buttons
       {ToolbarButtonID::SlideshowImmersiveToggle, Icons::Eye, {}, true, false},
       {ToolbarButtonID::SlideshowExit,            Icons::ExitToolbar, {}, true, false},
+      // Crop mode buttons
+      {ToolbarButtonID::CropCopy,   Icons::Copy,        {}, true, false},
+      {ToolbarButtonID::CropSave,   Icons::Save,        {}, true, false},
+      {ToolbarButtonID::CropApply,  Icons::Check,       {}, true, false},
+      {ToolbarButtonID::CropCancel, Icons::ExitToolbar, {}, true, false},
       // Pin at the very end
       {ToolbarButtonID::Pin, Icons::Pin, {}, true, false},
   };
@@ -67,8 +74,8 @@ Toolbar::Toolbar() {
 Toolbar::~Toolbar() {}
 
 void Toolbar::SetUIScale(float scale) {
-  if (scale < 1.0f)
-    scale = 1.0f;
+  if (scale < 0.75f)
+    scale = 0.75f;
   if (scale > 4.0f)
     scale = 4.0f;
   if (fabsf(m_uiScale - scale) < 0.001f)
@@ -91,6 +98,10 @@ void Toolbar::CreateResources(ID2D1RenderTarget *pRT) {
                                &m_brushWarning); // Red for warning
     pRT->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.1f),
                                &m_brushHover); // Hover highlight
+    pRT->CreateSolidColorBrush(D2D1::ColorF(0.2f, 0.85f, 0.4f, 1.0f),
+                               &m_brushGreen); // Green for Apply/Confirm
+    pRT->CreateSolidColorBrush(D2D1::ColorF(1.0f, 0.3f, 0.3f, 1.0f),
+                               &m_brushRed);   // Red for Cancel/Close
 
     // Font
     DWriteCreateFactory(
@@ -168,7 +179,15 @@ void Toolbar::UpdateLayout(float winW, float winH) {
     return false;
   };
 
-
+  auto isCropButton = [](ToolbarButtonID id) {
+    return id == ToolbarButtonID::RotateL ||
+           id == ToolbarButtonID::RotateR ||
+           id == ToolbarButtonID::FlipH ||
+           id == ToolbarButtonID::CropCopy ||
+           id == ToolbarButtonID::CropSave ||
+           id == ToolbarButtonID::CropApply ||
+           id == ToolbarButtonID::CropCancel;
+  };
 
   [[maybe_unused]] auto isNormalButton = [&](ToolbarButtonID id) {
     return !isCompareButton(id) && id != ToolbarButtonID::AnimPlayPause && id != ToolbarButtonID::AnimPrevFrame && id != ToolbarButtonID::AnimNextFrame && id != ToolbarButtonID::AnimDirtyRect && !isAlwaysVisible(id);
@@ -177,6 +196,13 @@ void Toolbar::UpdateLayout(float winW, float winH) {
   // --- Responsive Hide Priority Tables (per mode) ---
   // Each table lists groups of buttons to hide in order of decreasing priority.
   // The LAST group in each table is the "core" group — if it can't fit, hide the entire toolbar.
+  static constexpr ResponsiveHideGroup kCropHideOrder[] = {
+      {ToolbarButtonID::FlipH},
+      {ToolbarButtonID::RotateL, ToolbarButtonID::RotateR},
+      {ToolbarButtonID::CropCopy},
+      {ToolbarButtonID::CropSave},
+      {ToolbarButtonID::CropApply, ToolbarButtonID::CropCancel},
+  };
   static constexpr ResponsiveHideGroup kNormalHideOrder[] = {
       {ToolbarButtonID::Pin},
       {ToolbarButtonID::FlipH},
@@ -241,7 +267,10 @@ void Toolbar::UpdateLayout(float winW, float winH) {
   // Select the appropriate hide table for the current mode
   const ResponsiveHideGroup* hideOrder = kNormalHideOrder;
   int hideOrderCount = (int)std::size(kNormalHideOrder);
-  if (m_overlayMode) {
+  if (m_cropMode) {
+      hideOrder = kCropHideOrder;
+      hideOrderCount = (int)std::size(kCropHideOrder);
+  } else if (m_overlayMode) {
       hideOrder = kOverlayHideOrder;
       hideOrderCount = (int)std::size(kOverlayHideOrder);
   } else if (m_slideshowMode) {
@@ -265,6 +294,9 @@ void Toolbar::UpdateLayout(float winW, float winH) {
   };
 
   auto isVisibleButton = [&](const ToolbarButton &btn) {
+    if (m_cropMode) {
+      return isCropButton(btn.id);
+    }
     // Responsive hide check (applied on top of mode-based visibility)
     if (isResponsiveHidden(btn.id)) return false;
 
@@ -325,6 +357,12 @@ void Toolbar::UpdateLayout(float winW, float winH) {
 
     if (isCompareButton(btn.id) || isAnimButton(btn.id) || isOverlayButton(btn.id))
       return false;
+    if (btn.id == ToolbarButtonID::CropApply || btn.id == ToolbarButtonID::CropCopy || btn.id == ToolbarButtonID::CropCancel)
+      return false;
+    if (btn.id == ToolbarButtonID::CropSave) {
+      // In normal mode, only show Save button when image has unsaved edits/crop
+      return GetPaneContext(PaneSlot::Primary).editState.IsDirty;
+    }
     if (btn.id == ToolbarButtonID::RawToggle && !btn.isEnabled)
       return false;
     if (btn.id == ToolbarButtonID::CompareRawToggle && !btn.isWarning)
@@ -564,6 +602,14 @@ const wchar_t *GetTooltipText(const ToolbarButton &btn) {
     return btn.isToggled ? AppStrings::Toolbar_Tooltip_OverlayPassthroughOff : AppStrings::Toolbar_Tooltip_OverlayPassthroughOn;
   case ToolbarButtonID::OverlayExit:
     return AppStrings::Toolbar_Tooltip_OverlayExit;
+  case ToolbarButtonID::CropCopy:
+    return AppStrings::Toolbar_Tooltip_CropCopy;
+  case ToolbarButtonID::CropSave:
+    return AppStrings::Toolbar_Tooltip_CropSave;
+  case ToolbarButtonID::CropApply:
+    return AppStrings::Toolbar_Tooltip_CropApply;
+  case ToolbarButtonID::CropCancel:
+    return AppStrings::Toolbar_Tooltip_CropCancel;
   default:
     return nullptr;
   }
@@ -587,7 +633,14 @@ void Toolbar::Render(ID2D1RenderTarget *pRT) {
   bool isLight = IsLightThemeActive();
   m_brushBg->SetColor(isLight ? D2D1::ColorF(0.95f, 0.95f, 0.97f, 1.0f) : D2D1::ColorF(0.08f, 0.08f, 0.10f, 1.0f));
   m_brushIcon->SetColor(isLight ? D2D1::ColorF(D2D1::ColorF::Black) : D2D1::ColorF(D2D1::ColorF::White));
-  m_brushIconActive->SetColor(D2D1::ColorF(0.4f, 0.6f, 1.0f, 1.0f));
+  
+  D2D1_COLOR_F accentClr;
+  if (g_config.ThemeMode == 3) {
+      accentClr = D2D1::ColorF(g_config.ThemeCustomAccentR, g_config.ThemeCustomAccentG, g_config.ThemeCustomAccentB, 1.0f);
+  } else {
+      accentClr = isLight ? D2D1::ColorF(0.0f, 0.478f, 1.0f, 1.0f) : D2D1::ColorF(0.35f, 0.65f, 1.0f, 1.0f);
+  }
+  m_brushIconActive->SetColor(accentClr);
   m_brushIconDisabled->SetColor(isLight ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.3f) : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.3f));
   m_brushWarning->SetColor(D2D1::ColorF(1.0f, 0.3f, 0.3f, 1.0f));
   m_brushHover->SetColor(isLight ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.05f) : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.1f));
@@ -773,6 +826,12 @@ void Toolbar::Render(ID2D1RenderTarget *pRT) {
         pBrush = m_brushIconActive.Get();
       if (btn.id == ToolbarButtonID::AnimDirtyRect && m_animDirtyRect)
         pBrush = m_brushIconActive.Get();
+      if (btn.id == ToolbarButtonID::CropSave)
+        pBrush = m_brushIconActive.Get();
+      if (btn.id == ToolbarButtonID::CropApply && m_brushGreen)
+        pBrush = m_brushGreen.Get();
+      if (btn.id == ToolbarButtonID::CropCancel && m_brushRed)
+        pBrush = m_brushRed.Get();
 
       // Scale down the vector icon to match original font sizes
       float targetSize = (btn.id == ToolbarButtonID::CompareExit) ? 14.0f * m_uiScale : 16.0f * m_uiScale;
@@ -1118,7 +1177,14 @@ bool Toolbar::HitTest(float x, float y) {
   return false;
 }
 
-void Toolbar::SetVisible(bool visible) { m_targetVisible = visible; }
+void Toolbar::SetVisible(bool visible) {
+  if (m_cropMode) {
+    m_targetVisible = true;
+    m_opacity = 1.0f;
+    return;
+  }
+  m_targetVisible = visible;
+}
 
 bool Toolbar::UpdateAnimation() {
   if (!g_config.GlassUIAnimations) {
@@ -1243,6 +1309,14 @@ void Toolbar::SetAnimationMode(bool enabled, bool playing, bool dirtyRect, bool 
       btn.isToggled = dirtyRect;
       btn.isEnabled = supportsDirtyRect;
     }
+  }
+}
+
+void Toolbar::SetCropMode(bool enabled) {
+  m_cropMode = enabled;
+  if (enabled) {
+    m_targetVisible = true;
+    m_opacity = 1.0f;
   }
 }
 
