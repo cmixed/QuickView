@@ -207,6 +207,7 @@ public:
     std::wstring format; // JPEG/PNG/WEBP/RAW/JXL/AVIF
     int width = 0;
     int height = 0;
+    int exifOrientation = 1;
     uintmax_t fileSize = 0;
     bool hasEmbeddedThumb = false;
     ImageType type = ImageType::Invalid;
@@ -398,6 +399,7 @@ public:
   struct ImageInfo {
     uint32_t width = 0;
     uint32_t height = 0;
+    int exifOrientation = 1;
     uint64_t fileSize = 0;
     std::wstring format; // "JPEG", "PNG", "WebP", "AVIF", "JXL", "RAW", etc.
     std::wstring colorSpace; // Optional: "sRGB", "Display P3", etc.

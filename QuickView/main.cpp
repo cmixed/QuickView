@@ -154,11 +154,12 @@ void ScheduleDebouncedSuperResolution(HWND hwnd);
 #define WM_ROUTED_OPEN   (WM_APP + 10)  // [Phase 0] Reserved for pipe-routed file open
 #define WM_SR_COMPLETED  (WM_APP + 60)  // [QVX-SR] Background Neural Super-Resolution finished
 #define WM_SR_ANIMATION_COMPLETED (WM_APP + 61) // [QVX-SR] Background Full-Sequence Animation SR finished
+#define WM_DEFERRED_BOOT_HYDRATE (WM_APP + 25)
 // WebContentHost::kCommitMessage (WM_APP+55) — document ready, need DComp Commit
 constexpr UINT_PTR TIMER_ID_STARTUP_SHOW = 992;
 constexpr UINT_PTR TIMER_ID_SR_DEBOUNCE = 3001;
 
-
+bool g_isBootingWithImage = false;
 
 static const wchar_t* g_szClassName = L"QuickViewClass";
 static const wchar_t* g_szWindowTitle = L"QuickView";
@@ -6179,7 +6180,7 @@ void AdjustWindowToImage(HWND hwnd) {
     WINDOWPLACEMENT wp{}; wp.length = sizeof(wp);
     if (GetWindowPlacement(hwnd, &wp)) {
         wp.flags = 0;
-        wp.showCmd = SW_SHOWNORMAL;
+        wp.showCmd = IsWindowVisible(hwnd) ? SW_SHOWNORMAL : SW_HIDE;
         
         // [Fix] Convert Screen Coordinates (newLeft/newTop) to Workspace Coordinates
         // rcNormalPosition expects coordinates relative to the primary monitor's work area.
@@ -6200,7 +6201,7 @@ void AdjustWindowToImage(HWND hwnd) {
         
         SetWindowPlacement(hwnd, &wp);
     } else {
-        ShowWindow(hwnd, SW_RESTORE);
+        if (IsWindowVisible(hwnd)) ShowWindow(hwnd, SW_RESTORE);
         SetWindowPos(hwnd, nullptr, newLeft, newTop, windowW, windowH, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
@@ -7690,6 +7691,84 @@ static void TryCleanupOldVersion(int argc, LPWSTR* argv) {
 HCURSOR g_currentCursor = nullptr;
 int g_initialCmdShow = SW_SHOW;
 
+struct InitialWindowMetrics {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
+static InitialWindowMetrics CalculateInitialWindowMetrics(int imgWidth, int imgHeight, float initScale, const RECT& workArea) {
+    InitialWindowMetrics metrics;
+    
+    float maxSizePercent = g_config.WindowMaxSizePercent / 100.0f;
+    if (maxSizePercent <= 0.0f) maxSizePercent = 0.9f;
+    const int boundsW = workArea.right - workArea.left;
+    const int boundsH = workArea.bottom - workArea.top;
+    const int maxWinW = (std::max)(100, (int)(boundsW * maxSizePercent));
+    const int maxWinH = (std::max)(100, (int)(boundsH * maxSizePercent));
+    
+    int windowW = static_cast<int>(imgWidth);
+    int windowH = static_cast<int>(imgHeight);
+    
+    if (windowW > maxWinW || windowH > maxWinH) {
+        float ratio = std::min((float)maxWinW / windowW, (float)maxWinH / windowH);
+        windowW = (int)(windowW * ratio);
+        windowH = (int)(windowH * ratio);
+    }
+    
+    float defaultMin = 4.0f * 38.0f * initScale;
+    float minLimit = (std::max)(defaultMin, g_config.WindowMinSize);
+    int minW = (int)std::lround(minLimit);
+    int minH = (int)std::lround(minLimit);
+    
+    if (imgWidth < minW && imgHeight < minH) {
+        if (windowW < minW) windowW = minW;
+        if (windowH < minH) windowH = minH;
+    } else if (windowW < minW || windowH < minH) {
+        float scaleW = (float)minW / (float)windowW;
+        float scaleH = (float)minH / (float)windowH;
+        float scaleUp = (std::max)(scaleW, scaleH);
+        windowW = (int)(windowW * scaleUp);
+        windowH = (int)(windowH * scaleUp);
+    }
+    
+    windowW = (std::min)(windowW, boundsW);
+    windowH = (std::min)(windowH, boundsH);
+    
+    metrics.width = windowW;
+    metrics.height = windowH;
+    metrics.x = workArea.left + (boundsW - windowW) / 2;
+    metrics.y = workArea.top + (boundsH - windowH) / 2;
+    return metrics;
+}
+
+static bool g_bootHydrated = false;
+static void EnsureBootHydrated(HWND hwnd) {
+    if (g_bootHydrated) return;
+    g_bootHydrated = true;
+    
+    if (g_imageLoader) {
+        g_thumbMgr.Initialize(hwnd, g_imageLoader.get());
+        g_ratingStore.Initialize(hwnd);
+        FileNavigator::SetSelfWriteProbe(&RatingStore::WasSelfWriteJustNow);
+        g_gallery.Initialize(&g_thumbMgr, &GetPaneContext(PaneSlot::Primary).navigator);
+    }
+    if (g_renderEngine) {
+        g_settingsOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
+        g_helpOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
+    }
+    
+    UpdateManager::Get().Init(GetAppVersionUTF8());
+    UpdateManager::Get().SetCallback([](bool found, [[maybe_unused]] const VersionInfo& info, void* context) {
+        HWND h = static_cast<HWND>(context);
+        PostMessage(h, WM_UPDATE_FOUND, (WPARAM)found, 0); 
+    }, hwnd);
+    if (g_config.CheckUpdates) {
+        UpdateManager::Get().StartBackgroundCheck();
+    }
+}
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCmdLine, int nCmdShow) {
     // Early capture of foreground window state before any QuickView initialization/window creation
     HWND hCmdFg = QuickView::ProcessRouter::ParseFgCaller();
@@ -7790,6 +7869,44 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     if (initScale > 4.0f) initScale = 4.0f;
     g_uiScale = initScale;
 
+    std::wstring initialImagePath = QuickView::ProcessRouter::ParseImagePath();
+    bool hasInitialImage = false;
+    if (!initialImagePath.empty()) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(std::filesystem::path(initialImagePath), ec)) {
+            hasInitialImage = true;
+        }
+    }
+    g_isBootingWithImage = hasInitialImage;
+
+    POINT ptCursor;
+    GetCursorPos(&ptCursor);
+    HMONITOR hMonCursor = MonitorFromPoint(ptCursor, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO miWork{}; miWork.cbSize = sizeof(miWork);
+    RECT workArea = { 0, 0, screenW, screenH };
+    if (GetMonitorInfoW(hMonCursor, &miWork)) {
+        workArea = miWork.rcWork;
+    }
+
+    int peekW = 0, peekH = 0;
+    if (hasInitialImage) {
+        CImageLoader preLoader;
+        CImageLoader::ImageHeaderInfo info = preLoader.PeekHeader(initialImagePath.c_str());
+        if (info.width <= 0 || info.height <= 0 || info.format == L"Unknown") {
+            CImageLoader::ImageInfo fastInfo{};
+            if (SUCCEEDED(preLoader.GetImageInfoFast(initialImagePath.c_str(), &fastInfo))) {
+                if (info.width <= 0 && fastInfo.width > 0) info.width = (int)fastInfo.width;
+                if (info.height <= 0 && fastInfo.height > 0) info.height = (int)fastInfo.height;
+                if (info.exifOrientation <= 1 && fastInfo.exifOrientation > 1) info.exifOrientation = fastInfo.exifOrientation;
+            }
+        }
+        peekW = info.width;
+        peekH = info.height;
+        if (g_config.AutoRotate && (info.exifOrientation == 5 || info.exifOrientation == 6 || info.exifOrientation == 7 || info.exifOrientation == 8)) {
+            std::swap(peekW, peekH);
+        }
+    }
+
     int defaultW = (int)std::lround(800.0f * initScale);
     int defaultH = (int)std::lround(600.0f * initScale);
     if (defaultW > (int)(screenW * 0.9f)) defaultW = (int)(screenW * 0.9f);
@@ -7799,6 +7916,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     int winH = defaultH;
     int xPos = (screenW - winW) / 2;
     int yPos = (screenH - winH) / 2;
+
+    if (hasInitialImage && peekW > 0 && peekH > 0) {
+        InitialWindowMetrics metrics = CalculateInitialWindowMetrics(peekW, peekH, initScale, workArea);
+        winW = metrics.width;
+        winH = metrics.height;
+        xPos = metrics.x;
+        yPos = metrics.y;
+    } else if (hasInitialImage) {
+        float defaultMin = 4.0f * 38.0f * initScale;
+        float minLimit = (std::max)(defaultMin, g_config.WindowMinSize);
+        int fallbackSize = (int)std::lround(minLimit);
+        winW = fallbackSize;
+        winH = fallbackSize;
+        xPos = workArea.left + ((workArea.right - workArea.left) - winW) / 2;
+        yPos = workArea.top + ((workArea.bottom - workArea.top) - winH) / 2;
+    }
 
     bool startFullscreen = false;
     bool startMaximized = false;
@@ -7949,8 +8082,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     // the original path so the first frame is sized against a stable window.
     g_initialCmdShow = nCmdShow;
     bool startedInitialLoadEarly = false;
-    bool deferStartupShow = false;
-    std::wstring initialImagePath = QuickView::ProcessRouter::ParseImagePath();
+    // initialImagePath was already parsed and peeked during early geometry calculation
     if (!initialImagePath.empty()) {
       std::error_code ec;
       if (!std::filesystem::is_directory(
@@ -7993,7 +8125,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
           GetPaneContext(PaneSlot::Primary).navigator.Initialize(initialImagePath, hwnd, true);
           LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).navigator.GetResolvedPath(initialImagePath).c_str());
           startedInitialLoadEarly = true;
-          deferStartupShow = true;
         }
       }
     }
@@ -8026,14 +8157,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     g_uiRenderer->Initialize(g_compEngine, g_renderEngine->GetDWriteFactory());
     g_uiRenderer->SetUIScale(g_uiScale);
     
-    // Init Gallery
-    g_thumbMgr.Initialize(hwnd, g_imageLoader.get());
-    g_ratingStore.Initialize(hwnd);
-    // Let the directory watcher recognise the echo of our own sidecar writes.
-    FileNavigator::SetSelfWriteProbe(&RatingStore::WasSelfWriteJustNow);
-    g_gallery.Initialize(&g_thumbMgr, &GetPaneContext(PaneSlot::Primary).navigator);
-    g_settingsOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
-    g_helpOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
+    // Init Gallery / Deferred Hydration
+    if (!g_isBootingWithImage) {
+        EnsureBootHydrated(hwnd);
+    }
     ApplyUIScale(g_uiScale);
     DragAcceptFiles(hwnd, TRUE);
     
@@ -8047,10 +8174,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     g_toolbar.SetExifState(g_runtime.ShowInfoPanel);
     g_toolbar.SetPinned(g_config.LockBottomToolbar); // Lock toolbar from config
     
-    if (deferStartupShow) {
-        SetTimer(hwnd, TIMER_ID_STARTUP_SHOW, 150, nullptr);
+    if (g_isBootingWithImage) {
+        SetTimer(hwnd, TIMER_ID_STARTUP_SHOW, 1500, nullptr); // Safe 1500ms failsafe timeout for huge/RAW images
     } else {
-        ShowWindow(hwnd, nCmdShow); UpdateWindow(hwnd);
+        int showMode = (nCmdShow == SW_HIDE || nCmdShow == 0) ? SW_SHOWNORMAL : nCmdShow;
+        ShowWindow(hwnd, showMode); UpdateWindow(hwnd);
         ForceForegroundWindow(hwnd); // Ensure window takes focus
     }
     
@@ -8058,8 +8186,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     {
         RECT rc; GetClientRect(hwnd, &rc);
         g_toolbar.UpdateLayout((float)rc.right, (float)rc.bottom);
-        // Force initial render of all UI layers
-        RequestRepaint(PaintLayer::All);
+        // Force initial render of all UI layers only when no initial image
+        if (!g_isBootingWithImage) {
+            RequestRepaint(PaintLayer::All);
+        }
     }
 
 
@@ -8068,6 +8198,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
       if (std::filesystem::is_directory(std::filesystem::path(initialImagePath),
                                         ec)) {
         // Directory: Open it now that UI is fully initialized
+        EnsureBootHydrated(hwnd);
         OpenPathOrDirectory(hwnd, initialImagePath);
       } else if (startedInitialLoadEarly) {
         // File: Already kicked off above. Force event queue check just in case
@@ -8083,17 +8214,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     } else {
         // No file specified - stay on welcome screen and request repaint
         RequestRepaint(PaintLayer::All);
-    }
-    
-    // --- Auto Update Integration ---
-    UpdateManager::Get().Init(GetAppVersionUTF8());
-    UpdateManager::Get().SetCallback([](bool found, [[maybe_unused]] const VersionInfo& info, void* context) {
-        // Post status (found = 1, not found = 0)
-        HWND h = static_cast<HWND>(context);
-        PostMessage(h, WM_UPDATE_FOUND, (WPARAM)found, 0); 
-    }, hwnd);
-    if (g_config.CheckUpdates) {
-        UpdateManager::Get().StartBackgroundCheck();
     }
 
     MSG msg;
@@ -9053,7 +9173,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
+    case WM_DEFERRED_BOOT_HYDRATE:
+        EnsureBootHydrated(hwnd);
+        return 0;
+
     case WM_HOTKEY: {
+        EnsureBootHydrated(hwnd);
         if (wParam == HOTKEY_ID_EXIT_PASSTHROUGH) {
             ExitPassthroughMode(hwnd);
             RequestRepaint(PaintLayer::All);
@@ -9086,9 +9211,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         if (wParam == TIMER_ID_STARTUP_SHOW) {
             KillTimer(hwnd, TIMER_ID_STARTUP_SHOW);
             if (!IsWindowVisible(hwnd)) {
+                // Ensure configured background (e.g. checkerboard grid) is committed to DComp
+                // so the window never reveals default OS grey/white blank background while waiting for large image.
+                RECT rc{}; GetClientRect(hwnd, &rc);
+                if (g_compEngine && g_compEngine->IsInitialized()) {
+                    SyncDCompState(hwnd, (float)rc.right, (float)rc.bottom);
+                }
+                if (g_uiRenderer) {
+                    g_toolbar.UpdateLayout((float)rc.right, (float)rc.bottom);
+                    g_uiRenderer->Render(hwnd, 0.016f);
+                }
+                if (g_compEngine) {
+                    g_compEngine->Commit();
+                }
                 ShowWindow(hwnd, g_initialCmdShow);
                 UpdateWindow(hwnd);
                 ForceForegroundWindow(hwnd);
+            }
+            if (g_isBootingWithImage) {
+                g_isBootingWithImage = false;
+                EnsureBootHydrated(hwnd);
             }
             return 0;
         }
@@ -12474,6 +12616,7 @@ SKIP_EDGE_NAV:;
 
     case WM_SYSKEYDOWN:
     case WM_KEYDOWN: {
+        EnsureBootHydrated(hwnd);
         if (wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL) {
             if (g_cropState.IsActive) {
                 RequestRepaint(PaintLayer::All);
@@ -12790,6 +12933,7 @@ SKIP_EDGE_NAV:;
     }
     
     case WM_RBUTTONUP: {
+        EnsureBootHydrated(hwnd);
         if (g_settingsOverlay.IsVisible()) {
             return 0;
         }
@@ -12901,6 +13045,7 @@ SKIP_EDGE_NAV:;
     }
 
     case WM_COMMAND: {
+        EnsureBootHydrated(hwnd);
         UINT cmdId = LOWORD(wParam);
         UINT wmId = cmdId;
 
@@ -14880,10 +15025,22 @@ void ProcessEngineEvents(HWND hwnd) {
                 }
 
                 if (!IsWindowVisible(hwnd)) {
+                    if (g_uiRenderer) {
+                        RECT rcUi{}; GetClientRect(hwnd, &rcUi);
+                        g_toolbar.UpdateLayout((float)rcUi.right, (float)rcUi.bottom);
+                        g_uiRenderer->Render(hwnd, 0.016f);
+                    }
+                    if (g_compEngine) {
+                        g_compEngine->Commit();
+                    }
                     ShowWindow(hwnd, g_initialCmdShow);
                     UpdateWindow(hwnd);
                     ForceForegroundWindow(hwnd);
                     KillTimer(hwnd, TIMER_ID_STARTUP_SHOW);
+                }
+                if (g_isBootingWithImage) {
+                    g_isBootingWithImage = false;
+                    PostMessageW(hwnd, WM_DEFERRED_BOOT_HYDRATE, 0, 0);
                 }
 
                 // Cleanup

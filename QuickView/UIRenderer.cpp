@@ -843,26 +843,29 @@ void UIRenderer::RenderStaticLayer(ID2D1DeviceContext* dc, HWND hwnd) {
 
     // Welcome Screen (If no image loaded and gallery not active)
     if (g_imagePath.empty() && !g_gallery.IsVisible()) {
-      DrawWelcomeScreen(dc);
+      extern bool g_isBootingWithImage;
+      if (!g_isBootingWithImage) {
+        DrawWelcomeScreen(dc);
 
-      // Render overlays even on welcome screen if visible
-      if (g_settingsOverlay.IsVisible()) {
-        g_settingsOverlay.SetGeekGlassData(
-            m_bgCommandList.Get(), m_compEngine
-                                       ? m_compEngine->GetScreenTransform()
-                                       : D2D1::Matrix3x2F::Identity());
-        g_settingsOverlay.Render(dc, (float)m_width, (float)m_height);
+        // Render overlays even on welcome screen if visible
+        if (g_settingsOverlay.IsVisible()) {
+          g_settingsOverlay.SetGeekGlassData(
+              m_bgCommandList.Get(), m_compEngine
+                                         ? m_compEngine->GetScreenTransform()
+                                         : D2D1::Matrix3x2F::Identity());
+          g_settingsOverlay.Render(dc, (float)m_width, (float)m_height);
+        }
+        if (g_helpOverlay.IsVisible()) {
+          g_helpOverlay.SetGeekGlassData(m_bgCommandList.Get(),
+                                         m_compEngine
+                                             ? m_compEngine->GetScreenTransform()
+                                             : D2D1::Matrix3x2F::Identity());
+          g_helpOverlay.Render(dc, (float)m_width, (float)m_height);
+        }
+        
+        // [Topmost Guarantee] Window Controls drawn last on welcome screen
+        DrawWindowControls(dc, hwnd);
       }
-      if (g_helpOverlay.IsVisible()) {
-        g_helpOverlay.SetGeekGlassData(m_bgCommandList.Get(),
-                                       m_compEngine
-                                           ? m_compEngine->GetScreenTransform()
-                                           : D2D1::Matrix3x2F::Identity());
-        g_helpOverlay.Render(dc, (float)m_width, (float)m_height);
-      }
-      
-      // [Topmost Guarantee] Window Controls drawn last on welcome screen
-      DrawWindowControls(dc, hwnd);
       return;
     }
 

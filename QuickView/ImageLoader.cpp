@@ -9742,6 +9742,7 @@ HRESULT CImageLoader::GetImageInfoFast(LPCWSTR filePath, ImageInfo *pInfo) {
       if (w > 0 && h > 0) {
         pInfo->width = w;
         pInfo->height = h;
+        pInfo->exifOrientation = ReadJpegExifOrientation(data, size);
         int subsamp = tj3Get(tj, TJPARAM_SUBSAMP);
         pInfo->channels = (subsamp == TJSAMP_GRAY) ? 1 : 3;
         pInfo->bitDepth = 8;
@@ -13399,6 +13400,7 @@ CImageLoader::ImageHeaderInfo CImageLoader::PeekHeader(LPCWSTR filePath) {
   if (SUCCEEDED(GetImageInfoFast(filePath, &info))) {
     result.width = info.width;
     result.height = info.height;
+    result.exifOrientation = info.exifOrientation;
   }
 
   // [v6.6 Fix] AVIF/HEIC: Try to get real dimensions using libavif (for AVIF)

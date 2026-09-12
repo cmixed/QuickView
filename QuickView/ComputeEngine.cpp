@@ -660,173 +660,56 @@ HRESULT ComputeEngine::Initialize(ID3D11Device* pDevice) {
     if (!pDevice) return E_INVALIDARG;
     m_d3dDevice = pDevice;
     m_d3dDevice->GetImmediateContext(&m_d3dContext);
-    
-    HRESULT hr = CompileShaders();
-    if (SUCCEEDED(hr)) {
-        m_valid = true;
-    }
-    return hr;
+    m_valid = true;
+    return S_OK;
 }
 
-HRESULT ComputeEngine::CompileShaders() {
+HRESULT ComputeEngine::EnsureComputeShader(ComPtr<ID3D11ComputeShader>& shader, const char* hlslSource, const char* entryPoint, const char* debugName) {
+    if (shader) return S_OK;
+    if (!m_d3dDevice) return E_FAIL;
+
     ComPtr<ID3DBlob> blob;
     ComPtr<ID3DBlob> errorBlob;
-    
-    // 1. Format Convert
-    HRESULT hr = D3DCompile(HLSL_FormatConvert, strlen(HLSL_FormatConvert), nullptr, nullptr, nullptr, "CSMain", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
+    HRESULT hr = D3DCompile(hlslSource, strlen(hlslSource), nullptr, nullptr, nullptr, entryPoint, "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
     if (FAILED(hr)) {
         if (errorBlob) {
             const char* msg = (const char*)errorBlob->GetBufferPointer();
-            OutputDebugStringA("[ComputeEngine] Shader Error (FormatConvert):\n");
+            OutputDebugStringA("[ComputeEngine] Shader Error: ");
+            OutputDebugStringA(debugName ? debugName : "Unknown");
+            OutputDebugStringA("\n");
             OutputDebugStringA(msg);
-            QV_LOG("Shader_Error", TraceLoggingString(msg, "Message"));
+            QV_LOG("Shader_Error", TraceLoggingString(msg, "Message"), TraceLoggingString(debugName ? debugName : "Unknown", "Shader"));
         }
         return hr;
     }
-    hr = m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &m_csFormatConvert);
-    if (FAILED(hr)) return hr;
+    return m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &shader);
+}
 
-    // 2. Generate Mips
-    blob.Reset(); errorBlob.Reset();
-    hr = D3DCompile(HLSL_GenerateMips, strlen(HLSL_GenerateMips), nullptr, nullptr, nullptr, "CSGenMips", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
-    if (FAILED(hr)) return hr;
-    hr = m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &m_csGenMips);
-    if (FAILED(hr)) return hr;
+HRESULT ComputeEngine::EnsureSamplers() {
+    if (m_linearSampler && m_pointSampler) return S_OK;
+    if (!m_d3dDevice) return E_FAIL;
 
-    // 3. HDR Float -> SDR BGRA8 tone mapping
-    blob.Reset(); errorBlob.Reset();
-    hr = D3DCompile(HLSL_ToneMapHdrToSdr, strlen(HLSL_ToneMapHdrToSdr), nullptr, nullptr, nullptr, "CSToneMap", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
-    if (FAILED(hr)) {
-        if (errorBlob) {
-            const char* msg = (const char*)errorBlob->GetBufferPointer();
-            OutputDebugStringA("[ComputeEngine] Shader Error (HdrToSdr):\n");
-            OutputDebugStringA(msg);
-            QV_LOG("Shader_Error", TraceLoggingString(msg, "Message"));
-        }
-        return hr;
-    }
-    hr = m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &m_csToneMapHdrToSdr);
-    if (FAILED(hr)) return hr;
-
-    // 4. HDR to HDR roll-off mapping
-    blob.Reset(); errorBlob.Reset();
-    hr = D3DCompile(HLSL_ToneMapHdrToHdr, strlen(HLSL_ToneMapHdrToHdr), nullptr, nullptr, nullptr, "CSToneMapHDR", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
-    if (FAILED(hr)) {
-        if (errorBlob) {
-            const char* msg = (const char*)errorBlob->GetBufferPointer();
-            OutputDebugStringA("[ComputeEngine] Shader Error (HdrToHdr):\n");
-            OutputDebugStringA(msg);
-            QV_LOG("Shader_Error", TraceLoggingString(msg, "Message"));
-        }
-        return hr;
-    }
-    hr = m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &m_csToneMapHdrToHdr);
-    if (FAILED(hr)) return hr;
-
-    // 5. Gain Map Composition (ISO 21496-1)
-    blob.Reset(); errorBlob.Reset();
-    hr = D3DCompile(HLSL_ComposeGainMap, strlen(HLSL_ComposeGainMap), nullptr, nullptr, nullptr, "CSComposeGainMap", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
-    if (FAILED(hr)) {
-        if (errorBlob) {
-            QV_LOG("Shader_Error", TraceLoggingString((char*)errorBlob->GetBufferPointer(), "Message"));
-        }
-        return hr;
-    }
-    hr = m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &m_csComposeGainMap);
-    if (FAILED(hr)) return hr;
-
-    // 7. Gamut LUT dispatch
-    blob.Reset(); errorBlob.Reset();
-    hr = D3DCompile(HLSL_GamutLut, strlen(HLSL_GamutLut), nullptr, nullptr, nullptr, "CSGamutLut", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
-    if (FAILED(hr)) {
-        if (errorBlob) {
-            QV_LOG("Shader_Error", TraceLoggingString((char*)errorBlob->GetBufferPointer(), "Message"));
-        }
-        return hr;
-    }
-    hr = m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &m_csGamutLut);
-    if (FAILED(hr)) return hr;
-
-    // 8. AMD FSR 1.0 (EASU & RCAS)
-    blob.Reset(); errorBlob.Reset();
-    hr = D3DCompile(HLSL_FSR_EASU, strlen(HLSL_FSR_EASU), nullptr, nullptr, nullptr, "CSFSR_EASU", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
-    if (FAILED(hr)) {
-        if (errorBlob) {
-            QV_LOG("Shader_Error", TraceLoggingString((char*)errorBlob->GetBufferPointer(), "Message"));
-        }
-        return hr;
-    }
-    hr = m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &m_csFsrEasu);
-    if (FAILED(hr)) return hr;
-
-    blob.Reset(); errorBlob.Reset();
-    hr = D3DCompile(HLSL_FSR_RCAS, strlen(HLSL_FSR_RCAS), nullptr, nullptr, nullptr, "CSFSR_RCAS", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
-    if (FAILED(hr)) {
-        if (errorBlob) {
-            QV_LOG("Shader_Error", TraceLoggingString((char*)errorBlob->GetBufferPointer(), "Message"));
-        }
-        return hr;
-    }
-    hr = m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &m_csFsrRcas);
-    if (FAILED(hr)) return hr;
-
-    // Constant Buffers
-    D3D11_BUFFER_DESC cbDesc = {};
-    cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    cbDesc.ByteWidth = sizeof(ToneMapSettings);
-    cbDesc.Usage = D3D11_USAGE_DYNAMIC;
-    cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_toneMapConstantBuffer);
-    if (FAILED(hr)) return hr;
-
-    // Gain Map CB (sizeof GpuShaderPayload, must be 16-byte aligned)
-    cbDesc.ByteWidth = sizeof(GpuShaderPayload);
-    hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_gainMapConstantBuffer);
-    if (FAILED(hr)) return hr;
-
-    cbDesc.ByteWidth = 16;
-    hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_gamutLutConstantBuffer);
-    if (FAILED(hr)) return hr;
-
-    cbDesc.ByteWidth = 32; // sizeof(FsrEasuConstants)
-    hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_fsrEasuConstantBuffer);
-    if (FAILED(hr)) return hr;
-
-    cbDesc.ByteWidth = 16; // sizeof(FsrRcasConstants)
-    hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_fsrRcasConstantBuffer);
-    if (FAILED(hr)) return hr;
-
-    // GPU atomic counter for gamut overflow reduction (RWStructuredBuffer<uint>)
-    {
-        D3D11_BUFFER_DESC counterDesc = {};
-        counterDesc.ByteWidth = sizeof(uint32_t);
-        counterDesc.Usage = D3D11_USAGE_DEFAULT;
-        counterDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
-        counterDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        counterDesc.StructureByteStride = sizeof(uint32_t);
-        hr = m_d3dDevice->CreateBuffer(&counterDesc, nullptr, &m_gamutCounterBuffer);
-        if (FAILED(hr)) return hr;
-
-        D3D11_BUFFER_DESC stagingDesc = {};
-        stagingDesc.ByteWidth = sizeof(uint32_t);
-        stagingDesc.Usage = D3D11_USAGE_STAGING;
-        stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        hr = m_d3dDevice->CreateBuffer(&stagingDesc, nullptr, &m_gamutCounterStaging);
+    if (!m_linearSampler) {
+        D3D11_SAMPLER_DESC sampDesc = {};
+        sampDesc.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+        sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        HRESULT hr = m_d3dDevice->CreateSamplerState(&sampDesc, &m_linearSampler);
         if (FAILED(hr)) return hr;
     }
 
-    // Linear sampler for bilinear gamut/gain map interpolation
-    D3D11_SAMPLER_DESC sampDesc = {};
-    sampDesc.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
-    sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    hr = m_d3dDevice->CreateSamplerState(&sampDesc, &m_linearSampler);
-    if (FAILED(hr)) return hr;
+    if (!m_pointSampler) {
+        D3D11_SAMPLER_DESC sampDesc = {};
+        sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+        sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        HRESULT hr = m_d3dDevice->CreateSamplerState(&sampDesc, &m_pointSampler);
+        if (FAILED(hr)) return hr;
+    }
 
-    sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    hr = m_d3dDevice->CreateSamplerState(&sampDesc, &m_pointSampler);
-    return hr;
+    return S_OK;
 }
 
 HRESULT ComputeEngine::UploadAndConvert(const uint8_t* srcPixels, int width, int height, int stride, PixelFormat srcFormat, ID3D11Texture2D** outTexture) {
@@ -885,6 +768,9 @@ HRESULT ComputeEngine::UploadAndConvert(const uint8_t* srcPixels, int width, int
     if (FAILED(hr)) return hr;
 
     // 3. Dispatch
+    hr = EnsureComputeShader(m_csFormatConvert, HLSL_FormatConvert, "CSMain", "FormatConvert");
+    if (FAILED(hr)) return hr;
+
     ComPtr<ID3D11ShaderResourceView> pSRV;
     ComPtr<ID3D11UnorderedAccessView> pUAV;
     m_d3dDevice->CreateShaderResourceView(pSrc.Get(), nullptr, &pSRV);
@@ -913,6 +799,9 @@ HRESULT ComputeEngine::GenerateMips(ID3D11Texture2D* pTexture) {
     D3D11_TEXTURE2D_DESC desc;
     pTexture->GetDesc(&desc);
     if (desc.MipLevels <= 1) return S_FALSE;
+
+    HRESULT hr = EnsureComputeShader(m_csGenMips, HLSL_GenerateMips, "CSGenMips", "GenerateMips");
+    if (FAILED(hr)) return hr;
 
     m_d3dContext->CSSetShader(m_csGenMips.Get(), nullptr, 0);
 
@@ -1107,6 +996,39 @@ HRESULT ComputeEngine::DispatchGamutMaskLut(
         uint32_t lutEdge;
     } params = { epsilon, srcDesc.Width, srcDesc.Height, static_cast<uint32_t>(lutEdge) };
 
+    hr = EnsureComputeShader(m_csGamutLut, HLSL_GamutLut, "CSGamutLut", "GamutLut");
+    if (FAILED(hr)) return hr;
+    hr = EnsureSamplers();
+    if (FAILED(hr)) return hr;
+
+    if (!m_gamutLutConstantBuffer) {
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cbDesc.ByteWidth = 16;
+        cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+        cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_gamutLutConstantBuffer);
+        if (FAILED(hr)) return hr;
+    }
+
+    if (!m_gamutCounterBuffer) {
+        D3D11_BUFFER_DESC counterDesc = {};
+        counterDesc.ByteWidth = sizeof(uint32_t);
+        counterDesc.Usage = D3D11_USAGE_DEFAULT;
+        counterDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+        counterDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+        counterDesc.StructureByteStride = sizeof(uint32_t);
+        hr = m_d3dDevice->CreateBuffer(&counterDesc, nullptr, &m_gamutCounterBuffer);
+        if (FAILED(hr)) return hr;
+
+        D3D11_BUFFER_DESC stagingDesc = {};
+        stagingDesc.ByteWidth = sizeof(uint32_t);
+        stagingDesc.Usage = D3D11_USAGE_STAGING;
+        stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        hr = m_d3dDevice->CreateBuffer(&stagingDesc, nullptr, &m_gamutCounterStaging);
+        if (FAILED(hr)) return hr;
+    }
+
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     hr = m_d3dContext->Map(m_gamutLutConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     if (FAILED(hr)) return hr;
@@ -1210,6 +1132,19 @@ HRESULT ComputeEngine::ToneMapHdrToSdr(const uint8_t* srcPixels, int width, int 
     hr = m_d3dDevice->CreateUnorderedAccessView(pDst.Get(), nullptr, &pUAV);
     if (FAILED(hr)) return hr;
 
+    hr = EnsureComputeShader(m_csToneMapHdrToSdr, HLSL_ToneMapHdrToSdr, "CSToneMap", "ToneMapHdrToSdr");
+    if (FAILED(hr)) return hr;
+
+    if (!m_toneMapConstantBuffer) {
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cbDesc.ByteWidth = sizeof(ToneMapSettings);
+        cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+        cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_toneMapConstantBuffer);
+        if (FAILED(hr)) return hr;
+    }
+
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     hr = m_d3dContext->Map(m_toneMapConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     if (FAILED(hr)) return hr;
@@ -1281,6 +1216,19 @@ HRESULT ComputeEngine::ToneMapHdrToHdr(const uint8_t* srcPixels, int width, int 
     if (FAILED(hr)) return hr;
     hr = m_d3dDevice->CreateUnorderedAccessView(pDst.Get(), nullptr, &pUAV);
     if (FAILED(hr)) return hr;
+
+    hr = EnsureComputeShader(m_csToneMapHdrToHdr, HLSL_ToneMapHdrToHdr, "CSToneMapHDR", "ToneMapHdrToHdr");
+    if (FAILED(hr)) return hr;
+
+    if (!m_toneMapConstantBuffer) {
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cbDesc.ByteWidth = sizeof(ToneMapSettings);
+        cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+        cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_toneMapConstantBuffer);
+        if (FAILED(hr)) return hr;
+    }
 
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     hr = m_d3dContext->Map(m_toneMapConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
@@ -1385,6 +1333,17 @@ HRESULT ComputeEngine::ToneMapHdrTextureToHdr(ID3D11Texture2D* srcTexture,
                                               const ToneMapSettings& settings,
                                               ID3D11Texture2D** outTexture) {
     if (!m_valid) return E_FAIL;
+    HRESULT hr = EnsureComputeShader(m_csToneMapHdrToHdr, HLSL_ToneMapHdrToHdr, "CSToneMapHDR", "ToneMapHdrToHdr");
+    if (FAILED(hr)) return hr;
+    if (!m_toneMapConstantBuffer) {
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cbDesc.ByteWidth = sizeof(ToneMapSettings);
+        cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+        cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_toneMapConstantBuffer);
+        if (FAILED(hr)) return hr;
+    }
     return ToneMapTextureCommon(m_d3dDevice.Get(), m_d3dContext.Get(),
                                 m_csToneMapHdrToHdr.Get(),
                                 m_toneMapConstantBuffer.Get(), srcTexture,
@@ -1396,6 +1355,17 @@ HRESULT ComputeEngine::ToneMapHdrTextureToSdr(ID3D11Texture2D* srcTexture,
                                               const ToneMapSettings& settings,
                                               ID3D11Texture2D** outTexture) {
     if (!m_valid) return E_FAIL;
+    HRESULT hr = EnsureComputeShader(m_csToneMapHdrToSdr, HLSL_ToneMapHdrToSdr, "CSToneMap", "ToneMapHdrToSdr");
+    if (FAILED(hr)) return hr;
+    if (!m_toneMapConstantBuffer) {
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cbDesc.ByteWidth = sizeof(ToneMapSettings);
+        cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+        cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_toneMapConstantBuffer);
+        if (FAILED(hr)) return hr;
+    }
     return ToneMapTextureCommon(m_d3dDevice.Get(), m_d3dContext.Get(),
                                 m_csToneMapHdrToSdr.Get(),
                                 m_toneMapConstantBuffer.Get(), srcTexture,
@@ -1513,6 +1483,21 @@ HRESULT QuickView::ComputeEngine::ComposeGainMap(
     m_d3dDevice->CreateUnorderedAccessView(pDst.Get(), nullptr, &pDstUAV);
 
     // 3. Upload constant buffer
+    hr = EnsureComputeShader(m_csComposeGainMap, HLSL_ComposeGainMap, "CSComposeGainMap", "ComposeGainMap");
+    if (FAILED(hr)) return hr;
+    hr = EnsureSamplers();
+    if (FAILED(hr)) return hr;
+
+    if (!m_gainMapConstantBuffer) {
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cbDesc.ByteWidth = sizeof(GpuShaderPayload);
+        cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+        cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_gainMapConstantBuffer);
+        if (FAILED(hr)) return hr;
+    }
+
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     if (SUCCEEDED(m_d3dContext->Map(m_gainMapConstantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
         GpuShaderPayload safePayload = payload;
@@ -1556,7 +1541,30 @@ HRESULT QuickView::ComputeEngine::ExecuteFsr1Upscale(
     ID3D11Texture2D** outTexture)
 {
     if (!m_valid || !srcTexture || !outTexture || srcW == 0 || srcH == 0 || dstW == 0 || dstH == 0) return E_INVALIDARG;
-    if (!m_csFsrEasu || !m_csFsrRcas || !m_fsrEasuConstantBuffer || !m_fsrRcasConstantBuffer) return E_FAIL;
+
+    HRESULT hr = EnsureComputeShader(m_csFsrEasu, HLSL_FSR_EASU, "CSFSR_EASU", "FSR_EASU");
+    if (FAILED(hr)) return hr;
+    hr = EnsureComputeShader(m_csFsrRcas, HLSL_FSR_RCAS, "CSFSR_RCAS", "FSR_RCAS");
+    if (FAILED(hr)) return hr;
+
+    if (!m_fsrEasuConstantBuffer) {
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cbDesc.ByteWidth = 32;
+        cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+        cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_fsrEasuConstantBuffer);
+        if (FAILED(hr)) return hr;
+    }
+    if (!m_fsrRcasConstantBuffer) {
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cbDesc.ByteWidth = 16;
+        cbDesc.Usage = D3D11_USAGE_DYNAMIC;
+        cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, &m_fsrRcasConstantBuffer);
+        if (FAILED(hr)) return hr;
+    }
 
     // 1. Create intermediate texture for EASU output (dstW x dstH, RGBA8)
     D3D11_TEXTURE2D_DESC easuDstDesc = {};
@@ -1570,7 +1578,7 @@ HRESULT QuickView::ComputeEngine::ExecuteFsr1Upscale(
     easuDstDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
 
     ComPtr<ID3D11Texture2D> pEasuTex;
-    HRESULT hr = m_d3dDevice->CreateTexture2D(&easuDstDesc, nullptr, &pEasuTex);
+    hr = m_d3dDevice->CreateTexture2D(&easuDstDesc, nullptr, &pEasuTex);
     if (FAILED(hr)) return hr;
 
     // 2. Create final texture for RCAS output (dstW x dstH)
