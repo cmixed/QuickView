@@ -1301,8 +1301,11 @@ static DCOMPOSITION_BITMAP_INTERPOLATION_MODE GetOptimalDCompInterpolationMode(f
         return DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
     }
 
-    [[maybe_unused]] int mode = (totalScale >= 1.0f) ? g_config.ZoomModeIn : g_config.ZoomModeOut;
-    // DComp lacks cubic, fallback to linear for mode 3
+    int mode = (totalScale >= 1.0f) ? g_config.ZoomModeIn : g_config.ZoomModeOut;
+    if (mode == 2) {
+        return DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
+    }
+    // DComp lacks cubic, fallback to linear for dynamic interactive track
     return DCOMPOSITION_BITMAP_INTERPOLATION_MODE_LINEAR;
 }
 
@@ -1416,7 +1419,9 @@ static void RefreshWindowDpi(HWND hwnd, UINT dpiHint = 0) {
 }
 
 // [DComp] Render bitmap to DComp Pending Surface and trigger cross-fade
+bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade, bool allowDownsampling, float downsampleScale); // fwd decl
 bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade = false); // fwd decl
+static float GetCurrentRealScale(HWND hwnd); // fwd decl
 static bool FileExists(LPCWSTR path); // fwd decl
 
 // RenderDebugHUD moved to UIRenderer
@@ -2430,7 +2435,7 @@ static void RefreshSvgSurfaceAfterZoom(HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-static D2D1_SIZE_U ComputeDesiredBitmapSurfaceSize(UINT winW, UINT winH, const ImageResource& res) {
+static D2D1_SIZE_U ComputeDesiredBitmapSurfaceSize(UINT winW, UINT winH, const ImageResource& res, bool allowDownsampling = false, float downsampleScale = 1.0f) {
     if (!res.bitmap || res.isSvg) return D2D1::SizeU(0, 0);
     if (winW == 0 || winH == 0) return D2D1::SizeU(0, 0);
     if (GetPaneContext(PaneSlot::Primary).metadata.Width > 8192 || GetPaneContext(PaneSlot::Primary).metadata.Height > 8192) return D2D1::SizeU(0, 0);
@@ -2439,8 +2444,12 @@ static D2D1_SIZE_U ComputeDesiredBitmapSurfaceSize(UINT winW, UINT winH, const I
     float originalH = 0.0f;
     const auto& editState = GetPaneContext(PaneSlot::Primary).editState;
     if (editState.HasCrop) {
-        originalW = (float)(editState.CropRight - editState.CropLeft);
-        originalH = (float)(editState.CropBottom - editState.CropTop);
+        float cw = (float)(editState.CropRight - editState.CropLeft);
+        float ch = (float)(editState.CropBottom - editState.CropTop);
+        if (cw > 0.0f && ch > 0.0f) {
+            originalW = cw;
+            originalH = ch;
+        }
     } else if (GetPaneContext(PaneSlot::Primary).metadata.Width > 0 && GetPaneContext(PaneSlot::Primary).metadata.Height > 0) {
         originalW = (float)GetPaneContext(PaneSlot::Primary).metadata.Width;
         originalH = (float)GetPaneContext(PaneSlot::Primary).metadata.Height;
@@ -2466,15 +2475,14 @@ static D2D1_SIZE_U ComputeDesiredBitmapSurfaceSize(UINT winW, UINT winH, const I
         }
     }
 
-    // [Screen-Max Surface Pool Architecture]
-    // For standard images (<= 4096px, e.g. 1080p/2K/4K photos), allocate 1:1 native resolution
-    // immediately on load. DComp handles GPU scaling with zero overhead. This eliminates all
-    // dynamic surface recreation and SwapLayers flicker when zooming across 100%.
-    // For extreme oversized images (e.g. 48MP/100MP photos > 4096px), cap the initial surface to 4K
-    // virtual screen resolution (3840x2160) so VRAM consumption is strictly bounded (<32MB instead of 200MB+).
+    // [Screen-Max Surface Pool Architecture with Adaptive Downsampling]
+    // For standard images, allocate 1:1 native resolution on load/zoom-in.
+    // For downsampling under Auto (0) or HQ Cubic (3), allocate the target viewport scale to enable true D2D bicubic anti-aliasing.
     float desiredScale = 1.0f;
     if (res.srScale > 1.01f) {
         desiredScale = res.srScale;
+    } else if (allowDownsampling && downsampleScale > 0.001f && downsampleScale < 0.999f) {
+        desiredScale = downsampleScale;
     }
 
     if (!(desiredScale > 0.0f)) return D2D1::SizeU(0, 0);
@@ -2509,7 +2517,8 @@ static bool ShouldUpgradeBitmapSurface(const D2D1_SIZE_U& desired) {
     if (g_lastSurfaceSize.width <= 0.0f || g_lastSurfaceSize.height <= 0.0f) return true;
     const float curW = g_lastSurfaceSize.width;
     const float curH = g_lastSurfaceSize.height;
-    return (desired.width > curW + 4.0f || desired.height > curH + 4.0f);
+    return (std::abs(static_cast<int>(desired.width) - static_cast<int>(curW)) > 4 ||
+            std::abs(static_cast<int>(desired.height) - static_cast<int>(curH)) > 4);
 }
 
 
@@ -2523,16 +2532,30 @@ static void TryUpgradeBitmapSurface(HWND hwnd) {
     RECT rc; GetClientRect(hwnd, &rc);
     if (rc.right <= 0 || rc.bottom <= 0) return;
 
-    D2D1_SIZE_U desired = ComputeDesiredBitmapSurfaceSize((UINT)rc.right, (UINT)rc.bottom, GetPaneContext(PaneSlot::Primary).resource);
+    float realScale = GetCurrentRealScale(hwnd);
+    D2D1_SIZE_F visualSize = GetVisualImageSize();
+    const auto& meta = GetPaneContext(PaneSlot::Primary).metadata;
+    bool isPixelArt = IsEffectivelyPixelArtMode(realScale, visualSize.width, visualSize.height, meta.Entropy, meta.HasEntropy);
+
+    // Auto (0) or HQ Cubic (3) enables downsampling refinement when zoomed below 100%
+    bool allowDownsampling = (realScale < 0.999f) && (g_config.ZoomModeOut == 0 || g_config.ZoomModeOut == 3) && !isPixelArt;
+
+    D2D1_SIZE_U desired = ComputeDesiredBitmapSurfaceSize((UINT)rc.right, (UINT)rc.bottom, GetPaneContext(PaneSlot::Primary).resource, allowDownsampling, realScale);
     if (!ShouldUpgradeBitmapSurface(desired)) return;
 
-    RenderImageToDComp(hwnd, GetPaneContext(PaneSlot::Primary).resource, true);
+    RenderImageToDComp(hwnd, GetPaneContext(PaneSlot::Primary).resource, true, allowDownsampling, realScale);
 }
 
 // [DComp] Render content (Bitmap or SVG) to DComp Pending Surface
 // For SVG: Uses Direct2D Native path with real-time transform (Lossless Zoom)
 // For Bitmap: Uses existing logic
-bool RenderImageToDComp(HWND hwnd, ImageResource& res, [[maybe_unused]] bool isFastUpgrade) {
+bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade, bool allowDownsampling, float downsampleScale);
+
+bool RenderImageToDComp(HWND hwnd, ImageResource& res, bool isFastUpgrade) {
+    return RenderImageToDComp(hwnd, res, isFastUpgrade, false, 1.0f);
+}
+
+bool RenderImageToDComp(HWND hwnd, ImageResource& res, [[maybe_unused]] bool isFastUpgrade, bool allowDownsampling, float downsampleScale) {
     if (!g_compEngine || !g_compEngine->IsInitialized()) return false;
     
     RECT rc; GetClientRect(hwnd, &rc);
@@ -2635,7 +2658,7 @@ bool RenderImageToDComp(HWND hwnd, ImageResource& res, [[maybe_unused]] bool isF
     }
 
     if (!res.isSvg && !isTitan) {
-        D2D1_SIZE_U desired = ComputeDesiredBitmapSurfaceSize(winW, winH, res);
+        D2D1_SIZE_U desired = ComputeDesiredBitmapSurfaceSize(winW, winH, res, allowDownsampling, downsampleScale);
         if (desired.width > 0 && desired.height > 0) {
             surfW = desired.width;
             surfH = desired.height;
@@ -2735,8 +2758,8 @@ bool RenderImageToDComp(HWND hwnd, ImageResource& res, [[maybe_unused]] bool isF
         float drawW = cropW * drawScale;
         float drawH = cropH * drawScale;
         
-        float x = (surfW - drawW) / 2.0f;
-        float y = (surfH - drawH) / 2.0f;
+        float x = std::round((surfW - drawW) / 2.0f);
+        float y = std::round((surfH - drawH) / 2.0f);
         
         D2D1_RECT_F destRect = D2D1::RectF(x, y, x + drawW, y + drawH);
 
@@ -2782,6 +2805,57 @@ bool RenderImageToDComp(HWND hwnd, ImageResource& res, [[maybe_unused]] bool isF
                     }
                 }
             }
+            // [HQ Cubic Downsampling] True D2D bicubic anti-aliased pre-filtering for Auto (0) and HQ Cubic (3)
+            // Combined with adaptive Bicubic Sharper (Unsharp Mask) to restore razor-sharp text edge contrast
+            // while strictly maintaining stroke topology (strokes will never merge or clump).
+            bool isDownscaleHqCubic = (drawScale < 0.999f) && (g_config.ZoomModeOut == 0 || g_config.ZoomModeOut == 3) && !isPixelArt;
+            if (isDownscaleHqCubic) {
+                ComPtr<ID2D1Effect> cropEffect;
+                if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Crop, &cropEffect))) {
+                    cropEffect->SetInput(0, res.bitmap.Get());
+                    cropEffect->SetValue(D2D1_CROP_PROP_RECT, src);
+
+                    ComPtr<ID2D1Effect> scaleEffect;
+                    if (SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Scale, &scaleEffect))) {
+                        float sx = (dst.right - dst.left) / (src.right - src.left);
+                        float sy = (dst.bottom - dst.top) / (src.bottom - src.top);
+                        scaleEffect->SetInputEffect(0, cropEffect.Get());
+                        scaleEffect->SetValue(D2D1_SCALE_PROP_SCALE, D2D1::Vector2F(sx, sy));
+                        scaleEffect->SetValue(D2D1_SCALE_PROP_INTERPOLATION_MODE, D2D1_SCALE_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
+
+                        // Align target offset to nearest physical pixel to prevent subpixel blurring
+                        float rawOffsetX = dst.left - src.left * sx;
+                        float rawOffsetY = dst.top - src.top * sy;
+                        D2D1_POINT_2F targetOffset = D2D1::Point2F(std::round(rawOffsetX), std::round(rawOffsetY));
+
+                        // Bicubic Sharper: High-quality cubic downsampling applies anti-aliased prefiltering
+                        // which preserves delicate stroke topology, but slightly softens step edges.
+                        // We apply a finely-tuned adaptive Unsharp Mask to restore crisp text contrast.
+                        float minScale = std::min(sx, sy);
+                        float downscaleSharpness = std::clamp((1.0f - minScale) * 1.0f, 0.0f, 0.65f);
+
+                        // Content-Aware Noise Guard: if image is high ISO / grainy, suppress downscale sharpness
+                        if (hasMetrics && meta.Sharpness >= 800.0 && meta.Entropy >= 7.3) {
+                            downscaleSharpness *= 0.35f;
+                        }
+
+                        ComPtr<ID2D1Effect> sharpenEffect;
+                        if (downscaleSharpness > 0.05f && SUCCEEDED(ctx->CreateEffect(CLSID_D2D1Sharpen, &sharpenEffect))) {
+                            sharpenEffect->SetInputEffect(0, scaleEffect.Get());
+                            sharpenEffect->SetValue(D2D1_SHARPEN_PROP_SHARPNESS, downscaleSharpness);
+                            // 2.5% deadband threshold: filters out smooth gradients, skin tones, and low-level sensor noise,
+                            // while allowing high-contrast text and UI edges (typically 30%~100% delta) to be fully sharpened.
+                            sharpenEffect->SetValue(D2D1_SHARPEN_PROP_THRESHOLD, 0.025f);
+                            ctx->DrawImage(sharpenEffect.Get(), &targetOffset);
+                            return;
+                        }
+
+                        ctx->DrawImage(scaleEffect.Get(), &targetOffset);
+                        return;
+                    }
+                }
+            }
+
             ctx->DrawBitmap(res.bitmap.Get(), &dst, 1.0f, mode, &src);
         };
 
@@ -9063,6 +9137,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     SyncDCompState(hwnd, (float)rcIdle.right, (float)rcIdle.bottom, false);
                 }
                 ScheduleDebouncedSuperResolution(hwnd);
+                TryUpgradeBitmapSurface(hwnd);
             }
             // Keep minimap + edge overflow indicators in sync while DComp zoom animates.
             RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
