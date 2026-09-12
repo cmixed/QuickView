@@ -300,7 +300,6 @@ static bool g_isBlurry = false; // For Motion Blur (Ghost)
 
 // [v10.5] Animation Control
 static bool g_animPlaying = true;
-static int g_animInspectorFrame = -1; // -1 means playing normally
 static bool g_showAnimDirtyRect = false; // [v10.5] Dirty rect debug overlay
 OSDState g_osd; // Removed static, explicitly Global
 QuickView::PendingClipboardSnapshot g_pendingClipboard;
@@ -16934,7 +16933,6 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
         } else if (GetPaneContext(PaneSlot::Primary).resource.animator) {
             g_animPlaying = !g_animPlaying;
             if (g_animPlaying) {
-                g_animInspectorFrame = -1;
                 uint32_t delayMs = GetPaneContext(PaneSlot::Primary).resource.frameMeta.delayMs;
                 if (delayMs < 10) delayMs = 100;
                 SetTimer(hwnd, IDT_ANIMATION, delayMs, NULL);
