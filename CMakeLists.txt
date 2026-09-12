@@ -59,6 +59,7 @@ option(ENABLE_LTO  "Enable Link Time Optimization (ThinLTO)" OFF)
 # ============================================================================
 set(QUICKVIEW_SOURCES
     QuickView/main.cpp
+    QuickView/BootPreloader.cpp
     QuickView/ImageExporter.cpp
     QuickView/ExportPanel.cpp
     QuickView/PrintManager.cpp

@@ -166,6 +166,7 @@ public:
     size_t GetCacheMemoryUsage() const;
     int GetCacheItemCount() const;
     std::shared_ptr<QuickView::RawImageFrame> GetCachedImage(const std::wstring& path);
+    void PutCachedImage(const std::wstring& path, std::shared_ptr<QuickView::RawImageFrame> frame, int index = 0);
 
     
     // === Debug/Instrumentation API ===

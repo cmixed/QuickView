@@ -1420,6 +1420,19 @@ std::shared_ptr<QuickView::RawImageFrame> ImageEngine::GetCachedImage(const std:
     return nullptr;
 }
 
+void ImageEngine::PutCachedImage(const std::wstring& path, std::shared_ptr<QuickView::RawImageFrame> frame, int index) {
+    if (path.empty() || !frame || !frame->IsValid()) return;
+    std::lock_guard lock(m_cacheMutex);
+    size_t newSize = frame->GetBufferSize();
+    CacheEntry entry;
+    entry.frame = frame;
+    entry.sourceIndex = index;
+    entry.sizeBytes = newSize;
+    m_cache[path] = std::move(entry);
+    m_lruOrder.push_front(path);
+    m_currentCacheBytes += newSize;
+}
+
 void ImageEngine::UpdateView(int currentIndex, QuickView::BrowseDirection dir) {
     m_currentViewIndex.store(currentIndex);
     // [v8.15] Store direction as int for atomic access

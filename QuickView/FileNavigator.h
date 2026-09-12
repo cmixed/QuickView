@@ -61,6 +61,13 @@ public:
     // tests, folder gallery) leave this false.
     void Initialize(const std::wstring& currentPath, HWND hwnd = nullptr, bool deferFolderScan = false);
 
+    // Ultra-fast single-file seed for cold boot.
+    // Skips all Explorer COM bindings, directory watchers, and pairing threads
+    // so the initial image can be presented on screen with zero blocking.
+    // Call HydrateBootNavigator() after the first frame is displayed.
+    void InitializeForBoot(const std::wstring& currentPath, HWND hwnd = nullptr);
+    void HydrateBootNavigator();
+
     // If `path` is already in the current playlist (or is a RAW folded
     // behind a rendered sibling), retarget the index and return true.
     // Used to open another file in the same folder without re-listing.
@@ -280,6 +287,7 @@ private:
     std::thread m_watcherThread;
     std::mutex m_scanResultMutex;
     std::optional<DirectoryScanResult> m_pendingScanResult;
+    bool m_bootDeferredHydration = false;
 
 public:
     std::wstring m_archivePath;

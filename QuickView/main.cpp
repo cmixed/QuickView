@@ -10,6 +10,7 @@ static constexpr const char* CURRENT_MODULE = "Main";
 #include "ImageLoader.h"
 #include "ImageEngine.h"
 #include "MappedFile.h"
+#include "BootPreloader.h"
 #include "UIRenderer.h"
 #include "OffscreenWebView2.h"
 #include "WebContentHost.h"
@@ -7748,6 +7749,8 @@ static void EnsureBootHydrated(HWND hwnd) {
     if (g_bootHydrated) return;
     g_bootHydrated = true;
     
+    GetPaneContext(PaneSlot::Primary).navigator.HydrateBootNavigator();
+    
     if (g_imageLoader) {
         g_thumbMgr.Initialize(hwnd, g_imageLoader.get());
         g_ratingStore.Initialize(hwnd);
@@ -7875,6 +7878,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
         std::error_code ec;
         if (!std::filesystem::is_directory(std::filesystem::path(initialImagePath), ec)) {
             hasInitialImage = true;
+            // [Boot Architecture] Kick off overlapped decoding pipeline at T=0ms immediately
+            QuickView::BootPreloader::Instance().Start(initialImagePath);
         }
     }
     g_isBootingWithImage = hasInitialImage;
@@ -7890,14 +7895,18 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
 
     int peekW = 0, peekH = 0;
     if (hasInitialImage) {
-        CImageLoader preLoader;
-        CImageLoader::ImageHeaderInfo info = preLoader.PeekHeader(initialImagePath.c_str());
-        if (info.width <= 0 || info.height <= 0 || info.format == L"Unknown") {
-            CImageLoader::ImageInfo fastInfo{};
-            if (SUCCEEDED(preLoader.GetImageInfoFast(initialImagePath.c_str(), &fastInfo))) {
-                if (info.width <= 0 && fastInfo.width > 0) info.width = (int)fastInfo.width;
-                if (info.height <= 0 && fastInfo.height > 0) info.height = (int)fastInfo.height;
-                if (info.exifOrientation <= 1 && fastInfo.exifOrientation > 1) info.exifOrientation = fastInfo.exifOrientation;
+        CImageLoader::ImageHeaderInfo info{};
+        // Query preloader header first (typically < 1ms from MMF), with sync fallback
+        if (!QuickView::BootPreloader::Instance().GetHeader(info, 20)) {
+            CImageLoader preLoader;
+            info = preLoader.PeekHeader(initialImagePath.c_str());
+            if (info.width <= 0 || info.height <= 0 || info.format == L"Unknown") {
+                CImageLoader::ImageInfo fastInfo{};
+                if (SUCCEEDED(preLoader.GetImageInfoFast(initialImagePath.c_str(), &fastInfo))) {
+                    if (info.width <= 0 && fastInfo.width > 0) info.width = (int)fastInfo.width;
+                    if (info.height <= 0 && fastInfo.height > 0) info.height = (int)fastInfo.height;
+                    if (info.exifOrientation <= 1 && fastInfo.exifOrientation > 1) info.exifOrientation = fastInfo.exifOrientation;
+                }
             }
         }
         peekW = info.width;
@@ -8078,54 +8087,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     }
 
     // --- [v10.5] Fast-Lane Boot Integration ---
-    // Start decoding immediately for normal images, but keep Titan startup on
-    // the original path so the first frame is sized against a stable window.
-    g_initialCmdShow = nCmdShow;
-    bool startedInitialLoadEarly = false;
-    // initialImagePath was already parsed and peeked during early geometry calculation
+    g_initialCmdShow = (nCmdShow == SW_HIDE || nCmdShow == 0) ? SW_SHOWNORMAL : nCmdShow;
     if (!initialImagePath.empty()) {
       std::error_code ec;
-      if (!std::filesystem::is_directory(
-              std::filesystem::path(initialImagePath), ec)) {
-        // It's a file! Kick off decoding immediately
-        bool isTitanCandidate = false;
-        if (g_imageLoader) {
-          CImageLoader::ImageHeaderInfo info =
-              g_imageLoader->PeekHeader(initialImagePath.c_str());
-          if (info.width <= 0 || info.height <= 0 ||
-              info.format == L"Unknown") {
-            CImageLoader::ImageInfo fastInfo{};
-            if (SUCCEEDED(g_imageLoader->GetImageInfoFast(
-                    initialImagePath.c_str(), &fastInfo))) {
-              if (info.width <= 0 && fastInfo.width > 0)
-                info.width = (int)fastInfo.width;
-              if (info.height <= 0 && fastInfo.height > 0)
-                info.height = (int)fastInfo.height;
-              if (info.format == L"Unknown" && !fastInfo.format.empty())
-                info.format = fastInfo.format;
-            }
-          }
-
-          std::wstring fmtUpper = info.format;
-          std::transform(fmtUpper.begin(), fmtUpper.end(), fmtUpper.begin(),
-                         ::towupper);
-          const bool isSupportedFormat =
-              (fmtUpper == L"JPEG" || fmtUpper == L"JPG" ||
-               fmtUpper == L"WEBP" || fmtUpper == L"PNG" ||
-               fmtUpper == L"JXL" || fmtUpper == L"TIF" ||
-               fmtUpper == L"TIFF" || fmtUpper == L"AVIF" ||
-               fmtUpper == L"HEIC" || fmtUpper == L"HIF");
-          const bool sizeTrigger = (info.width > 8192 || info.height > 8192);
-          const size_t pixelCount = (size_t)(std::max)(0, info.width) *
-                                    (size_t)(std::max)(0, info.height);
-          const bool pixelTrigger = (pixelCount > 50000000);
-          isTitanCandidate = isSupportedFormat && (sizeTrigger || pixelTrigger);
-        }
-        if (!isTitanCandidate) {
-          GetPaneContext(PaneSlot::Primary).navigator.Initialize(initialImagePath, hwnd, true);
-          LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).navigator.GetResolvedPath(initialImagePath).c_str());
-          startedInitialLoadEarly = true;
-        }
+      if (!std::filesystem::is_directory(std::filesystem::path(initialImagePath), ec)) {
+        // [Fast Seed] Skip synchronous Explorer COM enumeration & directory watcher thread during boot!
+        GetPaneContext(PaneSlot::Primary).navigator.InitializeForBoot(initialImagePath, hwnd);
       }
     }
 
@@ -8177,8 +8144,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     if (g_isBootingWithImage) {
         SetTimer(hwnd, TIMER_ID_STARTUP_SHOW, 1500, nullptr); // Safe 1500ms failsafe timeout for huge/RAW images
     } else {
-        int showMode = (nCmdShow == SW_HIDE || nCmdShow == 0) ? SW_SHOWNORMAL : nCmdShow;
-        ShowWindow(hwnd, showMode); UpdateWindow(hwnd);
+        ShowWindow(hwnd, g_initialCmdShow); UpdateWindow(hwnd);
         ForceForegroundWindow(hwnd); // Ensure window takes focus
     }
     
@@ -8192,6 +8158,68 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
         }
     }
 
+    bool bootFramePresented = false;
+    if (g_isBootingWithImage && !initialImagePath.empty()) {
+        CImageLoader::ImageMetadata preloadedMeta;
+        std::wstring preloadedLoaderName;
+        std::shared_ptr<QuickView::MappedFile> preloadedMmf;
+        // Hot-Path Instant Presentation: Wait up to 50ms for non-Titan images
+        DWORD timeoutMs = QuickView::BootPreloader::Instance().IsTitan() ? 0 : 50;
+        auto preloadedFrame = QuickView::BootPreloader::Instance().TakeFrame(
+            &preloadedMeta, &preloadedLoaderName, &preloadedMmf, timeoutMs);
+
+        if (preloadedFrame && preloadedFrame->IsValid()) {
+            ComPtr<ID2D1Bitmap> bootBitmap;
+            if (SUCCEEDED(g_renderEngine->UploadRawFrameToGPU(*preloadedFrame, &bootBitmap)) && bootBitmap) {
+                auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+                primaryPane.resource.Reset();
+                primaryPane.resource.bitmap = bootBitmap;
+                primaryPane.path = initialImagePath;
+                primaryPane.metadata = preloadedMeta;
+                primaryPane.metadata.LoaderName = preloadedLoaderName;
+                if (primaryPane.metadata.Width == 0) primaryPane.metadata.Width = preloadedFrame->width;
+                if (primaryPane.metadata.Height == 0) primaryPane.metadata.Height = preloadedFrame->height;
+                primaryPane.metadata.ExifOrientation = preloadedFrame->exifOrientation;
+                primaryPane.view.ExifOrientation = g_config.AutoRotate ? preloadedFrame->exifOrientation : 1;
+                primaryPane.currentFrame = preloadedFrame;
+
+                if (g_imageEngine) {
+                    g_imageEngine->PutCachedImage(initialImagePath, preloadedFrame);
+                }
+
+                // [Fix] Render image bitmap onto DComp Image Surface before presentation!
+                RenderImageToDComp(hwnd, primaryPane.resource, false);
+
+                AdjustWindowToImage(hwnd);
+
+                RECT rcClient{}; GetClientRect(hwnd, &rcClient);
+                SyncDCompState(hwnd, (float)rcClient.right, (float)rcClient.bottom, false);
+                if (g_uiRenderer) {
+                    g_toolbar.UpdateLayout((float)rcClient.right, (float)rcClient.bottom);
+                    g_uiRenderer->Render(hwnd, 0.016f);
+                }
+                g_compEngine->Commit();
+
+                wchar_t titleBuf[2048];
+                std::wstring titleName = initialImagePath.substr(initialImagePath.find_last_of(L"\\/") + 1);
+                swprintf_s(titleBuf, L"%s - %s", titleName.c_str(), g_szWindowTitle);
+                SetWindowTextW(hwnd, titleBuf);
+
+                g_isBlurry = false;
+                g_imageQualityLevel = 2;
+                g_isLoading = false;
+                KillTimer(hwnd, TIMER_ID_STARTUP_SHOW);
+
+                ShowWindow(hwnd, g_initialCmdShow);
+                UpdateWindow(hwnd);
+                ForceForegroundWindow(hwnd);
+
+                g_isBootingWithImage = false;
+                bootFramePresented = true;
+                PostMessageW(hwnd, WM_DEFERRED_BOOT_HYDRATE, 0, 0);
+            }
+        }
+    }
 
     if (!initialImagePath.empty()) {
       std::error_code ec;
@@ -8200,13 +8228,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
         // Directory: Open it now that UI is fully initialized
         EnsureBootHydrated(hwnd);
         OpenPathOrDirectory(hwnd, initialImagePath);
-      } else if (startedInitialLoadEarly) {
-        // File: Already kicked off above. Force event queue check just in case
-        // it finished insanely fast.
-        PostMessageW(hwnd, WM_ENGINE_EVENT, 0, 0);
-      } else {
-        // Titan startup falls back to the original open-after-show path so the
-        // first transform uses the real client size.
+      } else if (!bootFramePresented) {
+        // Fallback for Titan or large images: route to normal async pipeline
         if (OpenPathOrDirectory(hwnd, initialImagePath)) {
           PostMessageW(hwnd, WM_ENGINE_EVENT, 0, 0);
         }
@@ -9224,7 +9247,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 if (g_compEngine) {
                     g_compEngine->Commit();
                 }
-                ShowWindow(hwnd, g_initialCmdShow);
+                int showMode = (g_initialCmdShow == SW_HIDE || g_initialCmdShow == 0) ? SW_SHOWNORMAL : g_initialCmdShow;
+                ShowWindow(hwnd, showMode);
                 UpdateWindow(hwnd);
                 ForceForegroundWindow(hwnd);
             }
@@ -9234,6 +9258,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             }
             return 0;
         }
+
 
         if (wParam == TIMER_ID_SR_DEBOUNCE) {
             KillTimer(hwnd, TIMER_ID_SR_DEBOUNCE);
@@ -15033,7 +15058,8 @@ void ProcessEngineEvents(HWND hwnd) {
                     if (g_compEngine) {
                         g_compEngine->Commit();
                     }
-                    ShowWindow(hwnd, g_initialCmdShow);
+                    int showMode = (g_initialCmdShow == SW_HIDE || g_initialCmdShow == 0) ? SW_SHOWNORMAL : g_initialCmdShow;
+                    ShowWindow(hwnd, showMode);
                     UpdateWindow(hwnd);
                     ForceForegroundWindow(hwnd);
                     KillTimer(hwnd, TIMER_ID_STARTUP_SHOW);

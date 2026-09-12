@@ -829,6 +829,17 @@ void HeavyLanePool::ResumeDeferredJobs(ImageID imageId, int lod) {
 }
 
 void HeavyLanePool::WorkerLoop(int workerId, std::stop_token st) {
+    // Initialize COM for background codecs (WIC for HEIC/TIFF etc.)
+    struct ComInitScope {
+        bool succeeded = false;
+        ComInitScope() {
+            succeeded = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
+        }
+        ~ComInitScope() {
+            if (succeeded) CoUninitialize();
+        }
+    } comScope;
+
     Worker& self = m_workers[workerId];
     
     QV_LOG("Worker_Lifecycle",

@@ -465,6 +465,62 @@ void FileNavigator::Initialize(const std::wstring& currentPath, HWND hwnd, bool 
     StartPairVerification();
 }
 
+void FileNavigator::InitializeForBoot(const std::wstring& currentPath, HWND hwnd) {
+    if (hwnd) m_hwnd = hwnd;
+    namespace fs = std::filesystem;
+
+    std::wstring archivePart;
+    size_t vfsIndex = (size_t)-1;
+    bool isVfsInput = ParseVirtualPath(currentPath, archivePart, vfsIndex);
+
+    fs::path p = isVfsInput ? fs::path(archivePart) : fs::path(currentPath);
+    if (!fs::exists(p) || fs::is_directory(p)) return;
+
+    fs::path dir = p.parent_path();
+    if (dir.empty()) return;
+
+    std::wstring pExt = p.extension().wstring();
+    std::transform(pExt.begin(), pExt.end(), pExt.begin(), [](wchar_t c){ return std::towlower(c); });
+    if (QuickView::IsArchiveExtension(pExt)) {
+        Initialize(currentPath, hwnd, false);
+        return;
+    }
+
+    StopPairVerification();
+    StopDirectoryWatcher();
+
+    m_archive.reset();
+    m_archivePath.clear();
+    m_files.clear();
+    m_sizes.clear();
+    m_ids.clear();
+    m_pairedRaws.clear();
+    m_currentIndex = -1;
+    m_playlistReady = false;
+    ClearExplorerCursor();
+
+    const std::wstring dirStr = dir.wstring();
+    m_watchedDir = dirStr;
+
+    // Fast zero-cost in-memory seed (skips all Explorer COM bindings and disk scans)
+    SeedOpenedFile(isVfsInput ? currentPath : p.wstring());
+    m_needInitialScan = true;
+    m_bootDeferredHydration = true;
+}
+
+void FileNavigator::HydrateBootNavigator() {
+    if (!m_bootDeferredHydration) return;
+    m_bootDeferredHydration = false;
+
+    if (m_watchedDir.empty()) return;
+
+    const bool bound = (g_runtime.SortOrder == 0)
+        && TryBindExplorer(m_watchedDir, CurrentVisiblePath());
+    m_needInitialScan = !bound;
+    StartDirectoryWatcher(m_watchedDir);
+    StartPairVerification();
+}
+
 std::wstring FileNavigator::Next(bool /*unused*/) {
     if (g_runtime.SortOrder == 0) SyncExplorerCursor(true);
     if (UsingExplorerCursor()) {
