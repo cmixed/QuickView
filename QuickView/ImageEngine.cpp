@@ -1317,7 +1317,10 @@ void ImageEngine::FastLane::QueueWorker() {
                 // but info.format from PeekHeader is sufficient for Scout mismatch check.
                 
                 // [Fix] Propagate EXIF Orientation from Decoder to Metadata (Critical for AutoRotate)
-                e.metadata.ExifOrientation = rawFrame.exifOrientation;
+                int effectiveExif = (rawFrame.exifOrientation > 1) ? rawFrame.exifOrientation : info.exifOrientation;
+                if (effectiveExif < 1 || effectiveExif > 8) effectiveExif = 1;
+                e.metadata.ExifOrientation = effectiveExif;
+                safeFrame->exifOrientation = effectiveExif;
                 
                 // [v5.3 Lazy] Reverted Sync ReadMetadata. 
                 // Metadata will be populated only when InfoPanel requests it.

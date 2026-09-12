@@ -128,6 +128,12 @@ void BootPreloader::Start(const std::wstring& imagePath) {
         }
 
         if (SUCCEEDED(hr) && frame->IsValid() && !st.stop_requested()) {
+            if (frame->exifOrientation <= 1 && data->headerInfo.exifOrientation > 1) {
+                frame->exifOrientation = data->headerInfo.exifOrientation;
+            }
+            if (meta.ExifOrientation <= 1 && frame->exifOrientation > 1) {
+                meta.ExifOrientation = frame->exifOrientation;
+            }
             data->rawFrame = std::move(frame);
             data->metadata = std::move(meta);
             data->loaderName = std::move(ldr);

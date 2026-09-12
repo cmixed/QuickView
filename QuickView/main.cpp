@@ -1553,6 +1553,7 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
 void DiscardChanges();
 std::wstring ShowRenameDialog(HWND hParent, const std::wstring& oldName);
 static void RestoreCurrentExifOrientation();
+static void HandleExifPreRotation(const EngineEvent& evt);
 
 
 
@@ -8179,9 +8180,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
                 primaryPane.metadata.LoaderName = preloadedLoaderName;
                 if (primaryPane.metadata.Width == 0) primaryPane.metadata.Width = preloadedFrame->width;
                 if (primaryPane.metadata.Height == 0) primaryPane.metadata.Height = preloadedFrame->height;
-                primaryPane.metadata.ExifOrientation = preloadedFrame->exifOrientation;
-                primaryPane.view.ExifOrientation = g_config.AutoRotate ? preloadedFrame->exifOrientation : 1;
+                int frameExif = preloadedFrame->exifOrientation;
+                if (frameExif <= 1 && preloadedMeta.ExifOrientation > 1) {
+                    frameExif = preloadedMeta.ExifOrientation;
+                }
+                primaryPane.metadata.ExifOrientation = frameExif;
+                preloadedFrame->exifOrientation = frameExif;
+                primaryPane.view.ExifOrientation = g_config.AutoRotate ? frameExif : 1;
                 primaryPane.currentFrame = preloadedFrame;
+
+                // [Detect Pre-Rotation]
+                EngineEvent bootEvt;
+                bootEvt.rawFrame = preloadedFrame;
+                bootEvt.metadata = primaryPane.metadata;
+                HandleExifPreRotation(bootEvt);
 
                 if (g_imageEngine) {
                     g_imageEngine->PutCachedImage(initialImagePath, preloadedFrame);
@@ -14951,6 +14963,13 @@ void ProcessEngineEvents(HWND hwnd) {
                 RECT rc; GetClientRect(hwnd, &rc);
                 g_toolbar.UpdateLayout((float)rc.right, (float)rc.bottom);
 
+                // [Atomic View Transition] Reset interaction and edit state on new image presentation,
+                // deferred from StartNavigation to eliminate rotation flicker while decoding.
+                if (!g_preserveViewStateOnNextLoad) {
+                    GetPaneContext(PaneSlot::Primary).editState.Reset();
+                    GetPaneContext(PaneSlot::Primary).view.Reset();
+                }
+
                 // [v5.3] Set EXIF Orientation based on AutoRotate config
                 if (g_config.AutoRotate) {
                      // Trust the metadata.
@@ -15007,9 +15026,6 @@ void ProcessEngineEvents(HWND hwnd) {
                         AppContext::GetInstance().Compare.pendingSnap = false;
                     }
                 } else {
-                    // Update DComp Visual (Base Preview for Titan, or full image for standard)
-                    RenderImageToDComp(hwnd, GetPaneContext(PaneSlot::Primary).resource, false);
-                    
                     // [Strategy] Visual Continuity for Soft-Refresh (e.g. Color Space/RAW Switch)
                     // When the user toggles a rendering parameter, we want the image to appear to 
                     // stay exactly where it was. AdjustWindowToImage() would reset the window 
@@ -15025,14 +15041,20 @@ void ProcessEngineEvents(HWND hwnd) {
 
                         g_preserveViewStateOnNextLoad = false; // One-time consume
                     } else {
-                        // Standard Loading Path: Auto-size window to image and apply default zoom policies
+                        // Standard Loading Path: Auto-size window to image before presentation
+                        // Suppress premature WM_SIZE OnPaint/Commit while adjusting geometry
+                        g_deferProgrammaticZoomResizeSync = true;
                         AdjustWindowToImage(hwnd);
 
                         // [Feature] Apply Fullscreen Zoom Mode if active (usually resets to 1.0 or Fit)
                         if (g_isFullScreen || IsZoomed(hwnd)) {
                             ApplyFullScreenZoomMode(hwnd);
                         }
+                        g_deferProgrammaticZoomResizeSync = false;
                     }
+
+                    // Update DComp Visual using the correct, up-to-date window dimensions
+                    RenderImageToDComp(hwnd, GetPaneContext(PaneSlot::Primary).resource, false);
 
                     // [Fix] Explicitly Sync DComp State immediately after Window Adjustment
                     // This covers the case where the Window Size DOES NOT CHANGE (e.g. Locked or Maximized),
@@ -15482,6 +15504,9 @@ static bool ApplyPhase1PlaceholderFrame(
 
     GetPaneContext(PaneSlot::Primary).resource.Reset();
     GetPaneContext(PaneSlot::Primary).resource.bitmap = bitmap;
+    if (!g_preserveViewStateOnNextLoad) {
+        GetPaneContext(PaneSlot::Primary).view.Reset();
+    }
     g_isBlurry = true;
     g_isImageScaled = true;
     g_imageQualityLevel = std::max(g_imageQualityLevel, 1);
@@ -15853,16 +15878,10 @@ void StartNavigation(HWND hwnd, std::wstring path, [[maybe_unused]] bool showOSD
     
     g_isBlurry = true; // Reset for new image
     g_imageQualityLevel = 0; // [v3.1] Reset Quality Level
-    g_lastSurfaceSize = {0, 0}; // [Fix] Clear stale surface size to prevents layout bugs
-
-// [v3.1] Global Quality Level (0=Default/Bilinear, 1=Bicubic, 2=Nearest)
-    // [v5.5 Fix] Reset global metadata to prevent stale data merging
-    // Crucial for the Race Fix in FullReady to work correctly!
+    // [Visual Continuity] Keep old image's view orientation and metadata intact during background decode
+    // to prevent rotation flicker/snapping before the new image arrives.
     if (!g_preserveViewStateOnNextLoad) {
-        GetPaneContext(PaneSlot::Primary).metadata = {};
         g_runtime.ShowHdrDetailsExpanded = false;
-        GetPaneContext(PaneSlot::Primary).metadata.IsFullMetadataLoaded = false;
-        GetPaneContext(PaneSlot::Primary).view.Reset();
         g_webViewReproject = {}; // [Reprojection] Reset WebView state on new image
     }
     ClearGamutWarningState(hwnd);
@@ -16137,7 +16156,6 @@ void NavigateEdge(HWND hwnd, bool toLast) {
     }
 
     if (!path.empty()) {
-        GetPaneContext(PaneSlot::Primary).editState.Reset();
         QuickView::BrowseDirection browseDir = toLast
             ? QuickView::BrowseDirection::FORWARD
             : QuickView::BrowseDirection::BACKWARD;
@@ -16333,8 +16351,9 @@ void Navigate(HWND hwnd, int direction) {
     }
 
     if (!path.empty()) {
-        GetPaneContext(PaneSlot::Primary).editState.Reset();
-        GetPaneContext(PaneSlot::Primary).view.Reset();
+        // [Visual Continuity] Do NOT reset editState or view here.
+        // View and edit state are atomically reset in ProcessEngineEvents upon new image presentation,
+        // preventing the resident image from snapping/flipping orientation while background decode runs.
         
         // [Fix Race Condition] 
         // Call UpdateView FIRST to clear old queue and set direction.

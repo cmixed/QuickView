@@ -1254,6 +1254,8 @@ HRESULT LoadBufferUnified(const uint8_t *mappedData, size_t mappedSize,
 
 } // namespace
 
+static int ReadJpegExifOrientation(const uint8_t *data, size_t size);
+
 // Unified in-memory frame loading entry for MMF/Titan paths.
 HRESULT CImageLoader::LoadToFrameFromMemory(const uint8_t *data, size_t size,
                                             QuickView::RawImageFrame *outFrame,
@@ -1463,6 +1465,13 @@ HRESULT CImageLoader::LoadToFrameFromMemory(const uint8_t *data, size_t size,
       }
 
       tj3Free(iccBuf);
+    }
+
+    // [EXIF Orientation] Extract Tag 0x0112 from JPEG binary payload
+    int exifOri = ReadJpegExifOrientation(data, size);
+    outFrame->exifOrientation = exifOri;
+    if (pMetadata) {
+      pMetadata->ExifOrientation = exifOri;
     }
 
     return S_OK;
