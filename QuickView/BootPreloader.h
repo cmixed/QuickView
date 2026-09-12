@@ -10,6 +10,9 @@
 
 namespace QuickView {
 
+// Direct presentation notification posted to main window upon boot predecode completion
+constexpr UINT WM_BOOT_FRAME_READY = WM_APP + 26;
+
 class MappedFile;
 struct RawImageFrame;
 
@@ -20,7 +23,7 @@ struct BootPreloadData {
     CImageLoader::ImageMetadata metadata{};
     std::shared_ptr<RawImageFrame> rawFrame;
     std::wstring loaderName;
-    bool isTitan = false;
+    std::atomic<bool> isTitan{false};
     bool decodeSuccess = false;
     std::atomic<bool> headerReady{false};
     std::atomic<bool> frameReady{false};
@@ -35,6 +38,9 @@ public:
 
     // Start asynchronous pre-decoding pipeline immediately upon discovering image path
     void Start(const std::wstring& imagePath);
+
+    // Bind window handle for direct event-driven presentation
+    void SetNotifyHwnd(HWND hwnd);
 
     // Query or await header information for instant window sizing
     bool GetHeader(CImageLoader::ImageHeaderInfo& outInfo, DWORD timeoutMs = 20);
@@ -51,6 +57,12 @@ public:
     // True if decoding is complete (success or failure)
     bool IsFrameReady() const;
 
+    // True if preloader is currently active
+    bool IsActive() const;
+
+    // Get the target image path
+    std::wstring GetPath() const;
+
     // Cancel or reset state
     void Cancel();
 
@@ -66,6 +78,7 @@ private:
     std::condition_variable m_cvHeader;
     std::condition_variable m_cvFrame;
     std::atomic<bool> m_active{false};
+    std::atomic<HWND> m_hwnd{nullptr};
 };
 
 } // namespace QuickView

@@ -414,6 +414,7 @@ public:
   /// Only reads first ~64KB of file, uses format-specific optimized parsers.
   /// </summary>
   HRESULT GetImageInfoFast(LPCWSTR filePath, ImageInfo *pInfo);
+  HRESULT GetImageInfoFastFromMemory(const uint8_t *data, size_t size, ImageInfo *pInfo, LPCWSTR filePath = nullptr);
 
   /// <summary>
   /// Get image size without full decode (Legacy, uses WIC)

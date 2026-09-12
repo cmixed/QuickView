@@ -2419,6 +2419,7 @@ CRenderEngine::UploadRawFrameToGPU(const QuickView::RawImageFrame &frame,
                   
                   if (SUCCEEDED(hrToneMap) && pMapped) {
                       pBaked = pMapped;
+                      g_runtime.LastFrameGpuToneMapped = true;
                   }
               }
 

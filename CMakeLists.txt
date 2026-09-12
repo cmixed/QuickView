@@ -483,7 +483,6 @@ target_link_libraries(QuickViewTests PRIVATE
     windowscodecs.lib 
     dxgi.lib 
     d3d11.lib 
-    d3dcompiler.lib
     shlwapi.lib 
     shell32.lib 
     mscms.lib

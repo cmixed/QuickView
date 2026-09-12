@@ -9695,10 +9695,20 @@ HRESULT CImageLoader::GetImageInfoFast(LPCWSTR filePath, ImageInfo *pInfo) {
 
   if (bytesRead < 12)
     return E_FAIL;
-  header.resize(bytesRead); // Clamp to actual read
 
-  const uint8_t *data = header.data();
-  size_t size = header.size();
+  uint64_t savedFileSize = pInfo->fileSize;
+  HRESULT hr = GetImageInfoFastFromMemory(header.data(), bytesRead, pInfo, filePath);
+  if (SUCCEEDED(hr)) {
+    pInfo->fileSize = savedFileSize;
+  }
+  return hr;
+}
+
+HRESULT CImageLoader::GetImageInfoFastFromMemory(const uint8_t *data, size_t size, ImageInfo *pInfo, LPCWSTR filePath) {
+  if (!data || size < 12 || !pInfo)
+    return E_INVALIDARG;
+  *pInfo = ImageInfo{};
+  pInfo->fileSize = size;
 
   // 3. Detect format and parse header
 
@@ -9822,14 +9832,14 @@ HRESULT CImageLoader::GetImageInfoFast(LPCWSTR filePath, ImageInfo *pInfo) {
       // Try robust file-based box parsing first. It handles cases where 64KB
       // head is insufficient.
       uint32_t boxW = 0, boxH = 0;
-      if (isAvif && GetAVIFDimensions(filePath, &boxW, &boxH)) {
+      if (filePath && isAvif && GetAVIFDimensions(filePath, &boxW, &boxH)) {
         pInfo->width = boxW;
         pInfo->height = boxH;
         pInfo->bitDepth =
             10; // Conservative default; exact value may require full decode.
         return S_OK;
       }
-      if (GetISOBMFFDimensions(filePath, &boxW, &boxH)) {
+      if (filePath && GetISOBMFFDimensions(filePath, &boxW, &boxH)) {
         pInfo->width = boxW;
         pInfo->height = boxH;
         pInfo->bitDepth = 10;
@@ -10216,7 +10226,7 @@ HRESULT CImageLoader::GetImageInfoFast(LPCWSTR filePath, ImageInfo *pInfo) {
       } else {
         // IFD is outside the 64KB chunk. We must open the file and read it.
         FILE* f = nullptr;
-        if (_wfopen_s(&f, filePath, L"rb") == 0 && f != nullptr) {
+        if (filePath && _wfopen_s(&f, filePath, L"rb") == 0 && f != nullptr) {
           _fseeki64(f, ifdOffset, SEEK_SET);
           uint8_t countBuf[2];
           if (fread(countBuf, 1, 2, f) == 2) {
@@ -10365,7 +10375,7 @@ HRESULT CImageLoader::GetImageInfoFast(LPCWSTR filePath, ImageInfo *pInfo) {
   };
 
   bool isSvgExt = false;
-  std::wstring pathStr = filePath;
+  std::wstring pathStr = filePath ? filePath : L"";
   if (pathStr.length() > 4) {
     std::wstring ext = pathStr.substr(pathStr.length() - 4);
     if (_wcsicmp(ext.c_str(), L".svg") == 0)

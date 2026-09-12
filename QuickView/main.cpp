@@ -156,6 +156,7 @@ void ScheduleDebouncedSuperResolution(HWND hwnd);
 #define WM_SR_COMPLETED  (WM_APP + 60)  // [QVX-SR] Background Neural Super-Resolution finished
 #define WM_SR_ANIMATION_COMPLETED (WM_APP + 61) // [QVX-SR] Background Full-Sequence Animation SR finished
 #define WM_DEFERRED_BOOT_HYDRATE (WM_APP + 25)
+#define WM_BOOT_FRAME_READY      (WM_APP + 26)
 // WebContentHost::kCommitMessage (WM_APP+55) — document ready, need DComp Commit
 constexpr UINT_PTR TIMER_ID_STARTUP_SHOW = 992;
 constexpr UINT_PTR TIMER_ID_SR_DEBOUNCE = 3001;
@@ -7745,6 +7746,98 @@ static InitialWindowMetrics CalculateInitialWindowMetrics(int imgWidth, int imgH
     return metrics;
 }
 
+static bool TryPresentBootPreloadedFrame(HWND hwnd, const std::wstring& initialImagePath) {
+    if (initialImagePath.empty() || !g_renderEngine || !g_compEngine) return false;
+
+    CImageLoader::ImageMetadata preloadedMeta;
+    std::wstring preloadedLoaderName;
+    std::shared_ptr<QuickView::MappedFile> preloadedMmf;
+    
+    // Take preloaded frame with zero wait (if already completed)
+    auto preloadedFrame = QuickView::BootPreloader::Instance().TakeFrame(
+        &preloadedMeta, &preloadedLoaderName, &preloadedMmf, 0);
+
+    if (!preloadedFrame || !preloadedFrame->IsValid()) {
+        return false;
+    }
+
+    ComPtr<ID2D1Bitmap> bootBitmap;
+    if (FAILED(g_renderEngine->UploadRawFrameToGPU(*preloadedFrame, &bootBitmap)) || !bootBitmap) {
+        return false;
+    }
+
+    auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+    primaryPane.resource.Reset();
+    primaryPane.resource.bitmap = bootBitmap;
+    primaryPane.path = initialImagePath;
+    primaryPane.metadata = preloadedMeta;
+    primaryPane.metadata.LoaderName = preloadedLoaderName;
+    if (primaryPane.metadata.Width == 0) primaryPane.metadata.Width = preloadedFrame->width;
+    if (primaryPane.metadata.Height == 0) primaryPane.metadata.Height = preloadedFrame->height;
+    int frameExif = preloadedFrame->exifOrientation;
+    if (frameExif <= 1 && preloadedMeta.ExifOrientation > 1) {
+        frameExif = preloadedMeta.ExifOrientation;
+    }
+    primaryPane.metadata.ExifOrientation = frameExif;
+    preloadedFrame->exifOrientation = frameExif;
+    primaryPane.view.ExifOrientation = g_config.AutoRotate ? frameExif : 1;
+    primaryPane.currentFrame = preloadedFrame;
+
+    // [Detect Pre-Rotation]
+    EngineEvent bootEvt;
+    bootEvt.rawFrame = preloadedFrame;
+    bootEvt.metadata = primaryPane.metadata;
+    HandleExifPreRotation(bootEvt);
+
+    if (g_imageEngine) {
+        g_imageEngine->PutCachedImage(initialImagePath, preloadedFrame);
+    }
+
+    // [Presentation Pipeline Alignment]
+    // Suppress premature WM_SIZE OnPaint/Commit while adjusting geometry
+    g_deferProgrammaticZoomResizeSync = true;
+    AdjustWindowToImage(hwnd);
+
+    if (g_isFullScreen || IsZoomed(hwnd)) {
+        ApplyFullScreenZoomMode(hwnd);
+    }
+    g_deferProgrammaticZoomResizeSync = false;
+
+    // Update DComp Visual using the correct, up-to-date window dimensions
+    RenderImageToDComp(hwnd, primaryPane.resource, false);
+
+    RECT rcClient{}; GetClientRect(hwnd, &rcClient);
+    SyncDCompState(hwnd, (float)rcClient.right, (float)rcClient.bottom, false);
+    if (g_uiRenderer) {
+        g_toolbar.UpdateLayout((float)rcClient.right, (float)rcClient.bottom);
+        g_uiRenderer->Render(hwnd, 0.016f);
+    }
+    g_compEngine->Commit();
+
+    wchar_t titleBuf[2048];
+    std::wstring titleName = initialImagePath.substr(initialImagePath.find_last_of(L"\\/") + 1);
+    swprintf_s(titleBuf, L"%s - %s", titleName.c_str(), g_szWindowTitle);
+    SetWindowTextW(hwnd, titleBuf);
+
+    g_imagePath = initialImagePath;
+    if (primaryPane.metadata.hdrMetadata.hasGainMap) {
+        LoadImageAsync(hwnd, initialImagePath.c_str());
+    }
+
+    g_isBlurry = false;
+    g_imageQualityLevel = 2;
+    g_isLoading = false;
+    KillTimer(hwnd, TIMER_ID_STARTUP_SHOW);
+
+    ShowWindow(hwnd, g_initialCmdShow);
+    UpdateWindow(hwnd);
+    ForceForegroundWindow(hwnd);
+
+    g_isBootingWithImage = false;
+    PostMessageW(hwnd, WM_DEFERRED_BOOT_HYDRATE, 0, 0);
+    return true;
+}
+
 static bool g_bootHydrated = false;
 static void EnsureBootHydrated(HWND hwnd) {
     if (g_bootHydrated) return;
@@ -7830,6 +7923,19 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
         g_isMasterProcess = (routeResult == QuickView::ProcessRouter::RouteResult::BecameMaster);
     }
 
+    std::wstring initialImagePath = QuickView::ProcessRouter::ParseImagePath();
+    bool hasInitialImage = false;
+    if (!initialImagePath.empty()) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(std::filesystem::path(initialImagePath), ec)) {
+            hasInitialImage = true;
+            g_imagePath = initialImagePath;
+            // [Boot Architecture] Kick off overlapped decoding pipeline at T=0ms immediately
+            QuickView::BootPreloader::Instance().Start(initialImagePath);
+        }
+    }
+    g_isBootingWithImage = hasInitialImage;
+
     // [The Golden Path] Smart Lazy Registration: Check and self-repair file associations
     // Bypass logic: Skip if Portable Mode OR if already registered for this version and path.
     if (!g_config.PortableMode) {
@@ -7872,18 +7978,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     if (initScale < 0.75f) initScale = 0.75f;
     if (initScale > 4.0f) initScale = 4.0f;
     g_uiScale = initScale;
-
-    std::wstring initialImagePath = QuickView::ProcessRouter::ParseImagePath();
-    bool hasInitialImage = false;
-    if (!initialImagePath.empty()) {
-        std::error_code ec;
-        if (!std::filesystem::is_directory(std::filesystem::path(initialImagePath), ec)) {
-            hasInitialImage = true;
-            // [Boot Architecture] Kick off overlapped decoding pipeline at T=0ms immediately
-            QuickView::BootPreloader::Instance().Start(initialImagePath);
-        }
-    }
-    g_isBootingWithImage = hasInitialImage;
 
     POINT ptCursor;
     GetCursorPos(&ptCursor);
@@ -8090,6 +8184,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
     // --- [v10.5] Fast-Lane Boot Integration ---
     g_initialCmdShow = (nCmdShow == SW_HIDE || nCmdShow == 0) ? SW_SHOWNORMAL : nCmdShow;
     if (!initialImagePath.empty()) {
+      g_imagePath = initialImagePath;
       std::error_code ec;
       if (!std::filesystem::is_directory(std::filesystem::path(initialImagePath), ec)) {
         // [Fast Seed] Skip synchronous Explorer COM enumeration & directory watcher thread during boot!
@@ -8114,10 +8209,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
         return 0;
     }
 
-    g_compEngine->RefreshDisplayColorState(g_runtime.ForceHdrSimulation);
-    g_compEngine->SetAdvancedColorEnabled(g_config.IsAdvancedColorEnabled(g_compEngine->GetDisplayColorState().advancedColorActive));
-    g_renderEngine->SetAdvancedColorMode(g_compEngine->IsAdvancedColor());
-    g_renderEngine->SetDisplayColorState(g_compEngine->GetDisplayColorState());
+    RefreshDisplayColorPipeline(hwnd, false);
     // Pure DComp architecture: Surfaces are managed by CompositionEngine
     
     // Initialize UI Renderer (renders to independent DComp Surface)
@@ -8161,76 +8253,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
 
     bool bootFramePresented = false;
     if (g_isBootingWithImage && !initialImagePath.empty()) {
-        CImageLoader::ImageMetadata preloadedMeta;
-        std::wstring preloadedLoaderName;
-        std::shared_ptr<QuickView::MappedFile> preloadedMmf;
-        // Hot-Path Instant Presentation: Wait up to 50ms for non-Titan images
-        DWORD timeoutMs = QuickView::BootPreloader::Instance().IsTitan() ? 0 : 50;
-        auto preloadedFrame = QuickView::BootPreloader::Instance().TakeFrame(
-            &preloadedMeta, &preloadedLoaderName, &preloadedMmf, timeoutMs);
-
-        if (preloadedFrame && preloadedFrame->IsValid()) {
-            ComPtr<ID2D1Bitmap> bootBitmap;
-            if (SUCCEEDED(g_renderEngine->UploadRawFrameToGPU(*preloadedFrame, &bootBitmap)) && bootBitmap) {
-                auto& primaryPane = GetPaneContext(PaneSlot::Primary);
-                primaryPane.resource.Reset();
-                primaryPane.resource.bitmap = bootBitmap;
-                primaryPane.path = initialImagePath;
-                primaryPane.metadata = preloadedMeta;
-                primaryPane.metadata.LoaderName = preloadedLoaderName;
-                if (primaryPane.metadata.Width == 0) primaryPane.metadata.Width = preloadedFrame->width;
-                if (primaryPane.metadata.Height == 0) primaryPane.metadata.Height = preloadedFrame->height;
-                int frameExif = preloadedFrame->exifOrientation;
-                if (frameExif <= 1 && preloadedMeta.ExifOrientation > 1) {
-                    frameExif = preloadedMeta.ExifOrientation;
-                }
-                primaryPane.metadata.ExifOrientation = frameExif;
-                preloadedFrame->exifOrientation = frameExif;
-                primaryPane.view.ExifOrientation = g_config.AutoRotate ? frameExif : 1;
-                primaryPane.currentFrame = preloadedFrame;
-
-                // [Detect Pre-Rotation]
-                EngineEvent bootEvt;
-                bootEvt.rawFrame = preloadedFrame;
-                bootEvt.metadata = primaryPane.metadata;
-                HandleExifPreRotation(bootEvt);
-
-                if (g_imageEngine) {
-                    g_imageEngine->PutCachedImage(initialImagePath, preloadedFrame);
-                }
-
-                // [Fix] Render image bitmap onto DComp Image Surface before presentation!
-                RenderImageToDComp(hwnd, primaryPane.resource, false);
-
-                AdjustWindowToImage(hwnd);
-
-                RECT rcClient{}; GetClientRect(hwnd, &rcClient);
-                SyncDCompState(hwnd, (float)rcClient.right, (float)rcClient.bottom, false);
-                if (g_uiRenderer) {
-                    g_toolbar.UpdateLayout((float)rcClient.right, (float)rcClient.bottom);
-                    g_uiRenderer->Render(hwnd, 0.016f);
-                }
-                g_compEngine->Commit();
-
-                wchar_t titleBuf[2048];
-                std::wstring titleName = initialImagePath.substr(initialImagePath.find_last_of(L"\\/") + 1);
-                swprintf_s(titleBuf, L"%s - %s", titleName.c_str(), g_szWindowTitle);
-                SetWindowTextW(hwnd, titleBuf);
-
-                g_isBlurry = false;
-                g_imageQualityLevel = 2;
-                g_isLoading = false;
-                KillTimer(hwnd, TIMER_ID_STARTUP_SHOW);
-
-                ShowWindow(hwnd, g_initialCmdShow);
-                UpdateWindow(hwnd);
-                ForceForegroundWindow(hwnd);
-
-                g_isBootingWithImage = false;
-                bootFramePresented = true;
-                PostMessageW(hwnd, WM_DEFERRED_BOOT_HYDRATE, 0, 0);
-            }
-        }
+        QuickView::BootPreloader::Instance().SetNotifyHwnd(hwnd);
+        // Instant presentation check: if frame is already decoded, present now
+        bootFramePresented = TryPresentBootPreloadedFrame(hwnd, initialImagePath);
     }
 
     if (!initialImagePath.empty()) {
@@ -8241,10 +8266,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCm
         EnsureBootHydrated(hwnd);
         OpenPathOrDirectory(hwnd, initialImagePath);
       } else if (!bootFramePresented) {
-        // Fallback for Titan or large images: route to normal async pipeline
-        if (OpenPathOrDirectory(hwnd, initialImagePath)) {
-          PostMessageW(hwnd, WM_ENGINE_EVENT, 0, 0);
+        // Fallback ONLY when BootPreloader has failed or is Titan candidate
+        if (QuickView::BootPreloader::Instance().IsTitan() ||
+            (QuickView::BootPreloader::Instance().IsFrameReady() && !bootFramePresented)) {
+            QuickView::BootPreloader::Instance().Cancel();
+            if (OpenPathOrDirectory(hwnd, initialImagePath)) {
+                PostMessageW(hwnd, WM_ENGINE_EVENT, 0, 0);
+            }
         }
+        // Otherwise: BootPreloader is actively decoding in background!
+        // Do NOT start redundant ImageEngine decoder.
+        // It will post WM_BOOT_FRAME_READY to hwnd upon completion.
       }
     } else {
         // No file specified - stay on welcome screen and request repaint
@@ -9211,6 +9243,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_DEFERRED_BOOT_HYDRATE:
         EnsureBootHydrated(hwnd);
         return 0;
+
+    case WM_BOOT_FRAME_READY: {
+        if (g_isBootingWithImage && !IsWindowVisible(hwnd)) {
+            std::wstring targetPath = g_imagePath;
+            if (targetPath.empty()) {
+                targetPath = QuickView::BootPreloader::Instance().GetPath();
+            }
+            if (!targetPath.empty()) {
+                if (!TryPresentBootPreloadedFrame(hwnd, targetPath)) {
+                    // If presentation failed or image was Titan, fallback to standard pipeline
+                    QuickView::BootPreloader::Instance().Cancel();
+                    if (OpenPathOrDirectory(hwnd, targetPath)) {
+                        PostMessageW(hwnd, WM_ENGINE_EVENT, 0, 0);
+                    }
+                }
+            }
+        }
+        return 0;
+    }
 
     case WM_HOTKEY: {
         EnsureBootHydrated(hwnd);
@@ -11100,6 +11151,7 @@ SKIP_EDGE_NAV:;
     }
     
     case WM_XBUTTONDOWN: {
+        EnsureBootHydrated(hwnd);
         int button = GET_XBUTTON_WPARAM(wParam);
         uint16_t vk = (button == XBUTTON1) ? VK_XBUTTON1 : VK_XBUTTON2;
 
@@ -12258,6 +12310,7 @@ SKIP_EDGE_NAV:;
     }
 
     case WM_MOUSEWHEEL: {
+        EnsureBootHydrated(hwnd);
         if (QuickView::PrintPreviewUI::GetInstance().IsVisible()) {
             return 0;
         }

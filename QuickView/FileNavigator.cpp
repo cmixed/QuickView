@@ -522,6 +522,9 @@ void FileNavigator::HydrateBootNavigator() {
 }
 
 std::wstring FileNavigator::Next(bool /*unused*/) {
+    if (m_bootDeferredHydration) {
+        HydrateBootNavigator();
+    }
     if (g_runtime.SortOrder == 0) SyncExplorerCursor(true);
     if (UsingExplorerCursor()) {
         std::wstring path = ExplorerStep(+1);
@@ -563,13 +566,12 @@ std::wstring FileNavigator::Next(bool /*unused*/) {
                 if (fs::is_directory(nextSibling)) {
                     isContainer = true;
                 } else {
-                    std::wstring nextExt = fs::path(nextSibling).extension().wstring();
-                    std::transform(nextExt.begin(), nextExt.end(), nextExt.begin(), [](wchar_t c){ return std::towlower(c); });
-                    if (nextExt == L".cbz" || nextExt == L".zip" || nextExt == L".cbr" || nextExt == L".rar") {
+                    std::wstring ext = fs::path(nextSibling).extension().wstring();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), [](wchar_t c){ return std::towlower(c); });
+                    if (QuickView::IsArchiveExtension(ext)) {
                         isContainer = true;
                     }
                 }
-                
                 if (isContainer) {
                     shouldTraverse = true;
                 }
@@ -585,23 +587,23 @@ std::wstring FileNavigator::Next(bool /*unused*/) {
         }
     }
 
-    if (m_currentIndex >= (int)m_files.size() - 1) {
+    // Wrap around or stop at end
+    if (m_currentIndex + 1 >= (int)m_files.size()) {
         if (g_runtime.NavLoop) {
-            m_hitEnd = true; // Signal OSD
             m_currentIndex = 0;
-            return m_files[m_currentIndex];
-        } else {
-            m_hitEnd = true;
-            return L"";
+            return m_files[0];
         }
+        return L"";
     }
 
-    m_hitEnd = false;
     m_currentIndex++;
     return m_files[m_currentIndex];
 }
 
 std::wstring FileNavigator::Previous(bool /*unused*/) {
+    if (m_bootDeferredHydration) {
+        HydrateBootNavigator();
+    }
     if (g_runtime.SortOrder == 0) SyncExplorerCursor(true);
     if (UsingExplorerCursor()) {
         std::wstring path = ExplorerStep(-1);
@@ -1200,6 +1202,9 @@ void FileNavigator::RefreshExplorerCount() {
 }
 
 void FileNavigator::EnsureMaterialized() {
+    if (m_bootDeferredHydration) {
+        HydrateBootNavigator();
+    }
     if (m_playlistReady || m_archive) return;
     // Auto + live Explorer view: keep the cursor. Materializing would freeze
     // the playlist to one snapshot and ignore later Explorer sort changes.

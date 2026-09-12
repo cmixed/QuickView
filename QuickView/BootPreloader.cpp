@@ -12,12 +12,25 @@ BootPreloader::~BootPreloader() {
 
 void BootPreloader::Cancel() {
     m_active.store(false, std::memory_order_release);
+    m_hwnd.store(nullptr, std::memory_order_release);
     if (m_thread.joinable()) {
         m_thread.request_stop();
         m_thread.join();
     }
     std::lock_guard lock(m_mutex);
     m_data.reset();
+}
+
+void BootPreloader::SetNotifyHwnd(HWND hwnd) {
+    m_hwnd.store(hwnd, std::memory_order_release);
+    std::shared_ptr<BootPreloadData> data;
+    {
+        std::lock_guard lock(m_mutex);
+        data = m_data;
+    }
+    if (data && data->frameReady.load(std::memory_order_acquire) && hwnd) {
+        PostMessageW(hwnd, WM_BOOT_FRAME_READY, 0, 0);
+    }
 }
 
 void BootPreloader::Start(const std::wstring& imagePath) {
@@ -59,25 +72,42 @@ void BootPreloader::Start(const std::wstring& imagePath) {
         data->mmf = std::make_shared<MappedFile>(data->path);
         if (st.stop_requested()) return;
 
-        // 2. Peek Header & Orientation
-        data->headerInfo = loader.PeekHeader(data->path.c_str());
-        if (data->headerInfo.width <= 0 || data->headerInfo.height <= 0 || data->headerInfo.format == L"Unknown") {
-            CImageLoader::ImageInfo fastInfo{};
-            if (SUCCEEDED(loader.GetImageInfoFast(data->path.c_str(), &fastInfo))) {
-                if (data->headerInfo.width <= 0 && fastInfo.width > 0)
-                    data->headerInfo.width = static_cast<int>(fastInfo.width);
-                if (data->headerInfo.height <= 0 && fastInfo.height > 0)
-                    data->headerInfo.height = static_cast<int>(fastInfo.height);
-                if (data->headerInfo.exifOrientation <= 1 && fastInfo.exifOrientation > 1)
-                    data->headerInfo.exifOrientation = fastInfo.exifOrientation;
-                if (data->headerInfo.format == L"Unknown" && !fastInfo.format.empty())
-                    data->headerInfo.format = fastInfo.format;
+        // 2. Peek Header & Orientation (First try Zero-Copy memory peek from MMF)
+        bool peekedFromMem = false;
+        if (data->mmf && data->mmf->IsValid() && data->mmf->size() >= 12) {
+            CImageLoader::ImageInfo memInfo{};
+            if (SUCCEEDED(loader.GetImageInfoFastFromMemory(data->mmf->data(), data->mmf->size(), &memInfo, data->path.c_str()))) {
+                data->headerInfo.width = static_cast<int>(memInfo.width);
+                data->headerInfo.height = static_cast<int>(memInfo.height);
+                data->headerInfo.exifOrientation = memInfo.exifOrientation;
+                data->headerInfo.format = memInfo.format;
+                data->headerInfo.fileSize = data->mmf->size();
+                if (data->headerInfo.width > 0 && data->headerInfo.height > 0) {
+                    peekedFromMem = true;
+                }
             }
-            if (data->headerInfo.width <= 0 || data->headerInfo.height <= 0) {
-                UINT w = 0, h = 0;
-                if (SUCCEEDED(loader.GetImageSize(data->path.c_str(), &w, &h))) {
-                    data->headerInfo.width = static_cast<int>(w);
-                    data->headerInfo.height = static_cast<int>(h);
+        }
+
+        if (!peekedFromMem) {
+            data->headerInfo = loader.PeekHeader(data->path.c_str());
+            if (data->headerInfo.width <= 0 || data->headerInfo.height <= 0 || data->headerInfo.format == L"Unknown") {
+                CImageLoader::ImageInfo fastInfo{};
+                if (SUCCEEDED(loader.GetImageInfoFast(data->path.c_str(), &fastInfo))) {
+                    if (data->headerInfo.width <= 0 && fastInfo.width > 0)
+                        data->headerInfo.width = static_cast<int>(fastInfo.width);
+                    if (data->headerInfo.height <= 0 && fastInfo.height > 0)
+                        data->headerInfo.height = static_cast<int>(fastInfo.height);
+                    if (data->headerInfo.exifOrientation <= 1 && fastInfo.exifOrientation > 1)
+                        data->headerInfo.exifOrientation = fastInfo.exifOrientation;
+                    if (data->headerInfo.format == L"Unknown" && !fastInfo.format.empty())
+                        data->headerInfo.format = fastInfo.format;
+                }
+                if (data->headerInfo.width <= 0 || data->headerInfo.height <= 0) {
+                    UINT w = 0, h = 0;
+                    if (SUCCEEDED(loader.GetImageSize(data->path.c_str(), &w, &h))) {
+                        data->headerInfo.width = static_cast<int>(w);
+                        data->headerInfo.height = static_cast<int>(h);
+                    }
                 }
             }
         }
@@ -97,7 +127,7 @@ void BootPreloader::Start(const std::wstring& imagePath) {
 
         if (sizeTrigger || pixelTrigger) {
             // Leave Titan images to the multi-threaded pyramid tile scheduler
-            data->isTitan = true;
+            data->isTitan.store(true, std::memory_order_release);
             data->frameReady.store(true, std::memory_order_release);
             m_cvFrame.notify_all();
             return;
@@ -142,6 +172,11 @@ void BootPreloader::Start(const std::wstring& imagePath) {
 
         data->frameReady.store(true, std::memory_order_release);
         m_cvFrame.notify_all();
+
+        HWND hNotify = m_hwnd.load(std::memory_order_acquire);
+        if (hNotify) {
+            PostMessageW(hNotify, WM_BOOT_FRAME_READY, 0, 0);
+        }
     });
 }
 
@@ -219,7 +254,7 @@ bool BootPreloader::IsTitan() const {
         std::lock_guard lock(const_cast<std::mutex&>(m_mutex));
         data = m_data;
     }
-    return data ? data->isTitan : false;
+    return data ? data->isTitan.load(std::memory_order_acquire) : false;
 }
 
 bool BootPreloader::IsFrameReady() const {
@@ -229,6 +264,19 @@ bool BootPreloader::IsFrameReady() const {
         data = m_data;
     }
     return data ? data->frameReady.load(std::memory_order_acquire) : false;
+}
+
+bool BootPreloader::IsActive() const {
+    return m_active.load(std::memory_order_acquire);
+}
+
+std::wstring BootPreloader::GetPath() const {
+    std::shared_ptr<BootPreloadData> data;
+    {
+        std::lock_guard lock(const_cast<std::mutex&>(m_mutex));
+        data = m_data;
+    }
+    return data ? data->path : std::wstring();
 }
 
 } // namespace QuickView

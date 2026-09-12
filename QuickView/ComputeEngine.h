@@ -207,8 +207,8 @@ private:
     ComPtr<ID3D11SamplerState> m_linearSampler;
     ComPtr<ID3D11SamplerState> m_pointSampler;
 
-    // Helpers: Lazy On-Demand Shader & Resource Compilation
-    HRESULT EnsureComputeShader(ComPtr<ID3D11ComputeShader>& shader, const char* hlslSource, const char* entryPoint, const char* debugName);
+    // Helpers: Fast Direct Bytecode Shader & Resource Creation
+    HRESULT EnsureComputeShader(ComPtr<ID3D11ComputeShader>& shader, const uint8_t* bytecode, size_t bytecodeSize, const char* debugName);
     HRESULT EnsureSamplers();
     HRESULT ReadbackMaskTexture(ID3D11Texture2D* maskTexture, GamutMaskReadback* outReadback);
 };

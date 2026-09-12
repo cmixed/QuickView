@@ -3,658 +3,11 @@
 static constexpr const char* CURRENT_MODULE = "ComputeEngine";
 
 #include "ComputeEngine.h"
+#include "CompiledComputeShaders.h"
 #include "Plugin/PluginHost.h"
-#include <d3dcompiler.h>
 #include <algorithm>
 
-#pragma comment(lib, "d3dcompiler.lib")
-
 namespace QuickView {
-
-// ============================================================================
-// Embedded Shaders (HLSL)
-// ============================================================================
-
-static const char* HLSL_FormatConvert = R"(
-Texture2D<float4> SrcTex : register(t0);
-RWTexture2D<float4> DstTex : register(u0);
-
-[numthreads(8, 8, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID)
-{
-    float4 color = SrcTex[id.xy];
-    // Direct passthrough — D3D11 R8G8B8A8 UAV uses direct byte mapping
-    DstTex[id.xy] = color;
-}
-)";
-
-static const char* HLSL_GenerateMips = R"(
-Texture2D<float4> SrcMip : register(t0);
-RWTexture2D<float4> DstMip : register(u0);
-
-[numthreads(8, 8, 1)]
-void CSGenMips(uint3 id : SV_DispatchThreadID)
-{
-    uint2 srcCoord = id.xy * 2;
-    float4 c0 = SrcMip[srcCoord + uint2(0, 0)];
-    float4 c1 = SrcMip[srcCoord + uint2(1, 0)];
-    float4 c2 = SrcMip[srcCoord + uint2(0, 1)];
-    float4 c3 = SrcMip[srcCoord + uint2(1, 1)];
-    DstMip[id.xy] = (c0 + c1 + c2 + c3) * 0.25;
-}
-)";
-
-static const char* HLSL_FSR_EASU = R"(
-Texture2D<float4> InputTexture : register(t0);
-RWTexture2D<float4> OutputTexture : register(u0);
-
-cbuffer FsrEasuCB : register(b0)
-{
-    float2 InputSize;
-    float2 OutputSize;
-    float2 InputSizeInv;
-    float2 OutputSizeInv;
-};
-
-float FsrLuma(float3 rgb) {
-    return dot(rgb, float3(0.2126, 0.7152, 0.0722));
-}
-
-float FsrWeight(float x) {
-    float x2 = x * x;
-    return saturate(1.0 - 0.5 * x2) * saturate(1.0 - 0.25 * x2);
-}
-
-[numthreads(8, 8, 1)]
-void CSFSR_EASU(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= (uint)OutputSize.x || id.y >= (uint)OutputSize.y) return;
-
-    float2 uv = (float2(id.xy) + 0.5) * OutputSizeInv;
-    float2 srcPos = uv * InputSize - 0.5;
-    int2 basePos = int2(floor(srcPos));
-    float2 f = frac(srcPos);
-
-    int2 maxSrc = int2(InputSize) - 1;
-
-    float4 c00 = InputTexture[clamp(basePos + int2(0, 0), int2(0, 0), maxSrc)];
-    float4 c10 = InputTexture[clamp(basePos + int2(1, 0), int2(0, 0), maxSrc)];
-    float4 c01 = InputTexture[clamp(basePos + int2(0, 1), int2(0, 0), maxSrc)];
-    float4 c11 = InputTexture[clamp(basePos + int2(1, 1), int2(0, 0), maxSrc)];
-
-    float4 cN  = InputTexture[clamp(basePos + int2(0, -1), int2(0, 0), maxSrc)];
-    float4 cS  = InputTexture[clamp(basePos + int2(0, 2),  int2(0, 0), maxSrc)];
-    float4 cW  = InputTexture[clamp(basePos + int2(-1, 0), int2(0, 0), maxSrc)];
-    float4 cE  = InputTexture[clamp(basePos + int2(2, 0),  int2(0, 0), maxSrc)];
-
-    float l00 = FsrLuma(c00.rgb);
-    float l10 = FsrLuma(c10.rgb);
-    float l01 = FsrLuma(c01.rgb);
-    float l11 = FsrLuma(c11.rgb);
-    float lN  = FsrLuma(cN.rgb);
-    float lS  = FsrLuma(cS.rgb);
-    float lW  = FsrLuma(cW.rgb);
-    float lE  = FsrLuma(cE.rgb);
-
-    float dx = (l10 - l00) + (l11 - l01) + 0.5 * (lE - lW);
-    float dy = (l01 - l00) + (l11 - l10) + 0.5 * (lS - lN);
-    float gradLen = sqrt(dx * dx + dy * dy) + 1e-5;
-    float2 dir = float2(dx, dy) / gradLen;
-
-    float d00_tan = dot(float2(0.0, 0.0) - f, float2(-dir.y, dir.x));
-    float d00_nor = dot(float2(0.0, 0.0) - f, dir);
-    float d10_tan = dot(float2(1.0, 0.0) - f, float2(-dir.y, dir.x));
-    float d10_nor = dot(float2(1.0, 0.0) - f, dir);
-    float d01_tan = dot(float2(0.0, 1.0) - f, float2(-dir.y, dir.x));
-    float d01_nor = dot(float2(0.0, 1.0) - f, dir);
-    float d11_tan = dot(float2(1.0, 1.0) - f, float2(-dir.y, dir.x));
-    float d11_nor = dot(float2(1.0, 1.0) - f, dir);
-
-    float stretch = clamp(gradLen * 4.0, 1.0, 3.0);
-    float w00 = FsrWeight(length(float2(d00_tan, d00_nor * stretch)));
-    float w10 = FsrWeight(length(float2(d10_tan, d10_nor * stretch)));
-    float w01 = FsrWeight(length(float2(d01_tan, d01_nor * stretch)));
-    float w11 = FsrWeight(length(float2(d11_tan, d11_nor * stretch)));
-
-    float4 minColor = min(min(c00, c10), min(c01, c11));
-    float4 maxColor = max(max(c00, c10), max(c01, c11));
-
-    float totalW = w00 + w10 + w01 + w11;
-    if (totalW < 1e-4) {
-        totalW = 1.0;
-        w00 = 1.0; w10 = 0.0; w01 = 0.0; w11 = 0.0;
-    }
-
-    float4 outColor = (c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11) / totalW;
-    outColor = clamp(outColor, minColor, maxColor);
-
-    OutputTexture[id.xy] = outColor;
-}
-)";
-
-static const char* HLSL_FSR_RCAS = R"(
-Texture2D<float4> InputTexture : register(t0);
-RWTexture2D<float4> OutputTexture : register(u0);
-
-cbuffer FsrRcasCB : register(b0)
-{
-    float Sharpness;
-    uint Width;
-    uint Height;
-    uint _pad;
-};
-
-float RcasLuma(float3 rgb) {
-    return dot(rgb, float3(0.2126, 0.7152, 0.0722));
-}
-
-[numthreads(8, 8, 1)]
-void CSFSR_RCAS(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= Width || id.y >= Height) return;
-
-    int2 coord = int2(id.xy);
-    int2 maxCoord = int2(Width - 1, Height - 1);
-
-    float4 e = InputTexture[coord];
-    float4 b = InputTexture[clamp(coord + int2(0, -1), int2(0, 0), maxCoord)];
-    float4 d = InputTexture[clamp(coord + int2(-1, 0), int2(0, 0), maxCoord)];
-    float4 f = InputTexture[clamp(coord + int2(1, 0),  int2(0, 0), maxCoord)];
-    float4 h = InputTexture[clamp(coord + int2(0, 1),  int2(0, 0), maxCoord)];
-
-    float eL = RcasLuma(e.rgb);
-    float bL = RcasLuma(b.rgb);
-    float dL = RcasLuma(d.rgb);
-    float fL = RcasLuma(f.rgb);
-    float hL = RcasLuma(h.rgb);
-
-    float minL = min(min(bL, dL), min(fL, hL));
-    float maxL = max(max(bL, dL), max(fL, hL));
-    minL = min(minL, eL);
-    maxL = max(maxL, eL);
-
-    float contrast = maxL - minL;
-    float hit = min(minL, 1.0 - maxL);
-    float w = 0.0;
-    if (contrast > 1e-4) {
-        float lobe = -hit / (4.0 * contrast + 1e-4);
-        float sharpnessFactor = exp2(-clamp(Sharpness * 2.5, 0.0, 3.0));
-        w = lobe * sharpnessFactor;
-        w = clamp(w, -0.25, 0.0);
-    }
-
-    float4 sharpened = (e + w * (b + d + f + h)) / (1.0 + 4.0 * w);
-    sharpened.rgb = clamp(sharpened.rgb, 0.0, 1.0);
-    sharpened.a = e.a;
-
-    OutputTexture[id.xy] = sharpened;
-}
-)";
-
-static const char* HLSL_ToneMapHdrToSdr = R"(
-Texture2D<float4> SrcTex : register(t0);
-RWTexture2D<unorm float4> DstTex : register(u0);
-
-cbuffer ToneMapParams : register(b0)
-{
-    float ContentPeakScRgb;
-    float DisplayPeakScRgb;
-    float PaperWhiteScRgb;
-    float Exposure;
-    float ExposureGain;
-    uint  Mode;
-    float SplineSrcPivot;
-    float SplineDstPivot;
-    float SplinePa;
-    float SplinePb;
-    float SplineQa;
-    float SplineQb;
-    float SplineQc;
-    uint  IsHdrOutput;
-    float RealHardwarePeakScRgb;
-    uint  TransferFunction;
-    float DesatThreshold;
-    float DesatStrength;
-    float SceneAvgPQ;
-    float MappedAvgPQ;
-
-    float ContrastRecovery;
-    float3 _pad;
-    row_major float4x4 ColorMatrix;
-};
-
-float3 HLGToLinear(float3 v) {
-    float3 e = lerp(
-        v * v / 3.0,
-        ((exp((v - 0.55991073) / 0.17883277) + 0.28466892) / 12.0),
-        step(0.5, v)
-    );
-    float L_S = 0.2627 * e.r + 0.6780 * e.g + 0.0593 * e.b;
-    return e * pow(max(L_S, 0.0), 0.2) * 12.5;
-}
-
-float LinearToPQ(float L) {
-    float L_norm = max(0.0, L) / 125.0;
-    float L_pow = pow(L_norm, 2610.0 / 16384.0);
-    return pow((0.8359375 + 18.8515625 * L_pow) / (1.0 + 18.6875 * L_pow), (2523.0 / 4096.0) * 128.0);
-}
-
-float PQToLinear(float V) {
-    float V_pow = pow(max(0.0, V), 1.0 / ((2523.0 / 4096.0) * 128.0));
-    float L_norm = pow(max(0.0, V_pow - 0.8359375) / (18.8515625 - 18.6875 * V_pow), 1.0 / (2610.0 / 16384.0));
-    return L_norm * 125.0;
-}
-
-float3 SrgbToLinear(float3 c) {
-    return (c <= 0.04045f) ? (c / 12.92f) : pow((c + 0.055f) / 1.055f, 2.4f);
-}
-
-float3 LinearToSrgb(float3 c) {
-    c = max(c, 0.0);
-    return (c <= 0.0031308f) ? (c * 12.92f) : (1.055f * pow(c, 1.0f / 2.4f) - 0.055f);
-}
-
-float3 ToneMapSDR(float3 color, float displayPeak, float paperWhite, uint mode) {
-    float L = dot(color, float3(0.2627, 0.6780, 0.0593));
-    if (L <= 0.0) return color;
-    float targetL = L;
-
-    if (mode == 0) { // Spline
-        float L_pq = LinearToPQ(L);
-        float x = L_pq - SplineSrcPivot;
-        float targetL_pq;
-        if (x > 0.0f) {
-            float contentPeakPq = LinearToPQ(ContentPeakScRgb);
-            x = min(x, contentPeakPq - SplineSrcPivot);
-            targetL_pq = ((SplineQa * x + SplineQb) * x + SplineQc) * x + SplineDstPivot;
-        } else {
-            x = max(x, -SplineSrcPivot);
-            targetL_pq = (SplinePa * x + SplinePb) * x + SplineDstPivot;
-        }
-        float displayPeakPq = LinearToPQ(DisplayPeakScRgb);
-        targetL = PQToLinear(clamp(targetL_pq, 0.0f, displayPeakPq));
-
-        if (ContrastRecovery > 0.0) {
-            float L_original_pq = L_pq;
-            float L_mapped_pq = LinearToPQ(targetL);
-            float orig_contrast = L_original_pq / max(SceneAvgPQ, 1e-6);
-            float mapped_contrast = L_mapped_pq / max(MappedAvgPQ, 1e-6);
-            float contrast_factor = pow(max(orig_contrast / max(mapped_contrast, 1e-6), 1e-6), ContrastRecovery);
-            float targetL_pq = L_mapped_pq * contrast_factor;
-            float displayPeakPq = LinearToPQ(displayPeak);
-            targetL = PQToLinear(clamp(targetL_pq, 0.0f, displayPeakPq));
-        }
-    } else if (mode == 2) { // ITU-R BT.2390 EETF
-        float srcMax_pq = LinearToPQ(ContentPeakScRgb);
-        float dstMax_pq = LinearToPQ(displayPeak);
-        if (srcMax_pq > dstMax_pq) {
-            float L_pq = LinearToPQ(L);
-            float ks = 1.5f * dstMax_pq - 0.5f;
-            ks = max(ks, 0.075f);
-            if (L_pq > ks) {
-                float t = (L_pq - ks) / max(srcMax_pq - ks, 1e-6f);
-                t = saturate(t);
-                float c = (srcMax_pq - ks) / max(dstMax_pq - ks, 1e-6f);
-                float a_val = c - 2.0f;
-                float b_val = 3.0f - 2.0f * c;
-                float H = ((a_val * t + b_val) * t + c) * t;
-                float targetL_pq = ks + (dstMax_pq - ks) * H;
-                targetL = PQToLinear(clamp(targetL_pq, 0.0f, dstMax_pq));
-            }
-        }
-    }
-    
-    float ratio = targetL / L;
-    float3 mapped = color * ratio;
-
-    if (mode != 1 && ratio < DesatThreshold) {
-        float desat = pow((DesatThreshold - ratio) / DesatThreshold, 1.5) * DesatStrength;
-        float luma = dot(mapped, float3(0.2627, 0.6780, 0.0593));
-        mapped = lerp(mapped, (float3)luma, desat);
-    }
-    return mapped;
-}
-
-float3 GamutMapHuePreserving(float3 color, float displayPeak) {
-    float Y = dot(color, float3(0.2126, 0.7152, 0.0722));
-    float max_c = max(color.r, max(color.g, color.b));
-    float min_c = min(color.r, min(color.g, color.b));
-    
-    if (max_c <= 0.0) return (float3)0.0;
-    
-    float k = 1.0;
-    if (max_c > displayPeak && max_c > Y) {
-        k = min(k, (displayPeak - Y) / (max_c - Y));
-    }
-    if (min_c < 0.0 && Y > min_c) {
-        k = min(k, Y / (Y - min_c));
-    }
-    
-    return Y + k * (color - Y);
-}
-
-[numthreads(8, 8, 1)]
-void CSToneMap(uint3 id : SV_DispatchThreadID) {
-    uint width, height;
-    SrcTex.GetDimensions(width, height);
-    if (id.x >= width || id.y >= height) return;
-
-    float4 color = SrcTex[id.xy];
-    color.rgb = max(color.rgb, 0.0);
-
-    if (TransferFunction == 3) { // PQ
-        color.rgb = float3(PQToLinear(color.r), PQToLinear(color.g), PQToLinear(color.b));
-    } else if (TransferFunction == 4) { // HLG
-        color.rgb = HLGToLinear(color.rgb);
-    } else if (TransferFunction == 1) { // SRGB
-        color.rgb = SrgbToLinear(color.rgb);
-    }
-
-    color.rgb *= Exposure * ExposureGain;
-    float luma = dot(color.rgb, float3(0.2627, 0.6780, 0.0593));
-    float displayPeak = max(DisplayPeakScRgb, 1.0);
-    float paperWhite = max(PaperWhiteScRgb, 1.0);
-
-    float3 toneMapped = color.rgb;
-    if (luma > 1e-6) {
-        toneMapped = ToneMapSDR(color.rgb, displayPeak, paperWhite, Mode);
-    }
-
-    // Key physical correction: Normalize physical linear luminance in the range [0, displayPeak] to [0, 1] for SDR OETF encoding
-    float3 normalizedColor = toneMapped / displayPeak;
-    float3 finalColor = mul((float3x3)ColorMatrix, normalizedColor);
-    finalColor = GamutMapHuePreserving(finalColor, 1.0);
-
-    DstTex[id.xy] = float4(LinearToSrgb(finalColor), color.a);
-}
-)";
-
-static const char* HLSL_ToneMapHdrToHdr = R"(
-Texture2D<float4> SrcTex : register(t0);
-RWTexture2D<float4> DstTex : register(u0);
-
-cbuffer ToneMapParams : register(b0)
-{
-    float ContentPeakScRgb;
-    float DisplayPeakScRgb;
-    float PaperWhiteScRgb;
-    float Exposure;
-    float ExposureGain;
-    uint  Mode;
-    float SplineSrcPivot;
-    float SplineDstPivot;
-    float SplinePa;
-    float SplinePb;
-    float SplineQa;
-    float SplineQb;
-    float SplineQc;
-    uint  IsHdrOutput;
-    float RealHardwarePeakScRgb;
-    uint  TransferFunction;
-    float DesatThreshold;
-    float DesatStrength;
-    float SceneAvgPQ;
-    float MappedAvgPQ;
-
-    float ContrastRecovery;
-    float3 _pad;
-    row_major float4x4 ColorMatrix;
-};
-
-float3 HLGToLinear(float3 v) {
-    float3 e = lerp(
-        v * v / 3.0,
-        ((exp((v - 0.55991073) / 0.17883277) + 0.28466892) / 12.0),
-        step(0.5, v)
-    );
-    float L_S = 0.2627 * e.r + 0.6780 * e.g + 0.0593 * e.b;
-    return e * pow(max(L_S, 0.0), 0.2) * 12.5;
-}
-
-float LinearToPQ(float L) {
-    float L_norm = max(0.0, L) / 125.0;
-    float L_pow = pow(L_norm, 2610.0 / 16384.0);
-    return pow((0.8359375 + 18.8515625 * L_pow) / (1.0 + 18.6875 * L_pow), (2523.0 / 4096.0) * 128.0);
-}
-
-float PQToLinear(float V) {
-    float V_pow = pow(max(0.0, V), 1.0 / ((2523.0 / 4096.0) * 128.0));
-    float L_norm = pow(max(0.0, V_pow - 0.8359375) / (18.8515625 - 18.6875 * V_pow), 1.0 / (2610.0 / 16384.0));
-    return L_norm * 125.0;
-}
-
-float3 SrgbToLinear(float3 c) {
-    return (c <= 0.04045f) ? (c / 12.92f) : pow((c + 0.055f) / 1.055f, 2.4f);
-}
-
-float3 ToneMapHDR(float3 color, float displayPeak, float paperWhite, uint mode) {
-    float L = dot(color, float3(0.2627, 0.6780, 0.0593));
-    if (L <= 0.0) return color;
-    float targetL = L;
-
-    if (mode == 0) { // Spline
-        if (ContentPeakScRgb <= DisplayPeakScRgb + 1e-5) {
-            return color;
-        }
-        float L_pq = LinearToPQ(L);
-        float x = L_pq - SplineSrcPivot;
-        float targetL_pq;
-        if (x > 0.0f) {
-            float contentPeakPq = LinearToPQ(ContentPeakScRgb);
-            x = min(x, contentPeakPq - SplineSrcPivot);
-            targetL_pq = ((SplineQa * x + SplineQb) * x + SplineQc) * x + SplineDstPivot;
-        } else {
-            x = max(x, -SplineSrcPivot);
-            targetL_pq = (SplinePa * x + SplinePb) * x + SplineDstPivot;
-        }
-        float displayPeakPq = LinearToPQ(DisplayPeakScRgb);
-        targetL = PQToLinear(clamp(targetL_pq, 0.0f, displayPeakPq));
-
-        if (ContrastRecovery > 0.0) {
-            float L_original_pq = L_pq;
-            float L_mapped_pq = LinearToPQ(targetL);
-            float orig_contrast = L_original_pq / max(SceneAvgPQ, 1e-6);
-            float mapped_contrast = L_mapped_pq / max(MappedAvgPQ, 1e-6);
-            float contrast_factor = pow(max(orig_contrast / max(mapped_contrast, 1e-6), 1e-6), ContrastRecovery);
-            float targetL_pq = L_mapped_pq * contrast_factor;
-            float displayPeakPq = LinearToPQ(displayPeak);
-            targetL = PQToLinear(clamp(targetL_pq, 0.0f, displayPeakPq));
-        }
-    } else if (mode == 2) { // ITU-R BT.2390 EETF
-        float srcMax_pq = LinearToPQ(ContentPeakScRgb);
-        float dstMax_pq = LinearToPQ(displayPeak);
-        if (srcMax_pq > dstMax_pq) {
-            float L_pq = LinearToPQ(L);
-            float ks = 1.5f * dstMax_pq - 0.5f;
-            ks = max(ks, 0.075f);
-            if (L_pq > ks) {
-                float t = (L_pq - ks) / max(srcMax_pq - ks, 1e-6f);
-                t = saturate(t);
-                float c = (srcMax_pq - ks) / max(dstMax_pq - ks, 1e-6f);
-                float a_val = c - 2.0f;
-                float b_val = 3.0f - 2.0f * c;
-                float H = ((a_val * t + b_val) * t + c) * t;
-                float targetL_pq = ks + (dstMax_pq - ks) * H;
-                targetL = PQToLinear(clamp(targetL_pq, 0.0f, dstMax_pq));
-            }
-        }
-    }
-    
-    float ratio = targetL / L;
-    float3 mapped = color * ratio;
-
-    if (mode != 1 && ratio < DesatThreshold) {
-        float desat = pow((DesatThreshold - ratio) / DesatThreshold, 1.5) * DesatStrength;
-        float luma = dot(mapped, float3(0.2627, 0.6780, 0.0593));
-        mapped = lerp(mapped, (float3)luma, desat);
-    }
-    return mapped;
-}
-
-float3 GamutMapHuePreserving(float3 color, float displayPeak) {
-    float Y = dot(color, float3(0.2627, 0.6780, 0.0593));
-    float max_c = max(color.r, max(color.g, color.b));
-    float min_c = min(color.r, min(color.g, color.b));
-    
-    if (max_c <= 0.0) return (float3)0.0;
-    
-    float k = 1.0;
-    if (max_c > displayPeak && max_c > Y) {
-        k = min(k, (displayPeak - Y) / (max_c - Y));
-    }
-    if (min_c < 0.0 && Y > min_c) {
-        k = min(k, Y / (Y - min_c));
-    }
-    
-    return Y + k * (color - Y);
-}
-
-[numthreads(8, 8, 1)]
-void CSToneMapHDR(uint3 id : SV_DispatchThreadID) {
-    uint width, height;
-    SrcTex.GetDimensions(width, height);
-    if (id.x >= width || id.y >= height) return;
-
-    float4 color = SrcTex[id.xy];
-    color.rgb = max(color.rgb, 0.0);
-
-    if (TransferFunction == 3) { // PQ
-        color.rgb = float3(PQToLinear(color.r), PQToLinear(color.g), PQToLinear(color.b));
-    } else if (TransferFunction == 4) { // HLG
-        color.rgb = HLGToLinear(color.rgb);
-    } else if (TransferFunction == 1) { // SRGB
-        color.rgb = SrgbToLinear(color.rgb);
-    }
-
-    color.rgb *= Exposure * ExposureGain;
-    float luma = dot(color.rgb, float3(0.2627, 0.6780, 0.0593));
-    float toneMapTargetPeak = max(DisplayPeakScRgb, 1.0);
-    float gamutPeak = max(min(RealHardwarePeakScRgb, DisplayPeakScRgb), 1.0);
-    float paperWhite = max(PaperWhiteScRgb, 1.0);
-
-    float3 toneMapped = color.rgb;
-    if (luma > 1e-6) {
-        toneMapped = ToneMapHDR(color.rgb, toneMapTargetPeak, paperWhite, Mode);
-    }
-
-    float3 finalColor = mul((float3x3)ColorMatrix, toneMapped);
-    finalColor = GamutMapHuePreserving(finalColor, gamutPeak);
-
-    DstTex[id.xy] = float4(finalColor, color.a);
-}
-)";
-
-static const char* HLSL_ComposeGainMap = R"(
-Texture2D<float4> SdrTex        : register(t0);  // Unbounded float4 to support R32G32B32A32 input
-Texture2D<unorm float>  GainTex : register(t1);  // R8 Gain Map
-RWTexture2D<float4>     DstTex  : register(u0);  // FP16 output
-SamplerState LinearSampler      : register(s0);  // Bilinear filter
-
-cbuffer GainMapParams : register(b0)
-{
-    float3 GainMapMin;    float _pad0;
-    float3 GainMapMax;    float _pad1;
-    float3 Gamma;         float _pad2;
-    float3 OffsetSdr;     float _pad3;
-    float3 OffsetHdr;     float _pad4;
-    float  HdrCapacityMin;
-    float  HdrCapacityMax;
-    float  TargetHeadroom;
-    float  BaseIsHdr;
-    uint   SdrWidth;
-    uint   SdrHeight;
-    uint   _pad5;
-    uint   BaseIsLinear;  // Replace _pad6 for bit depth signaling
-};
-
-// sRGB EOTF (electrical → linear)
-float3 SrgbToLinear(float3 c)
-{
-    float3 lo = c / 12.92;
-    float3 hi = pow(abs((c + 0.055) / 1.055), 2.4);
-    return lerp(hi, lo, step(c, 0.04045));
-}
-
-[numthreads(8, 8, 1)]
-void CSComposeGainMap(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= SdrWidth || id.y >= SdrHeight) return;
-
-    // Read SDR pixel (D3D11 natively swizzles B8G8R8A8 into RGBA channels, floats stay float)
-    float4 sdrColor = SdrTex[id.xy];
-    float3 sdrLinear = sdrColor.rgb;
-    if (BaseIsLinear == 0) {
-        sdrLinear = SrgbToLinear(sdrColor.rgb);
-    }
-
-    // Bilinear sample gain map at normalized UV (handles resolution mismatch)
-    float2 uv = (float2(id.xy) + 0.5) / float2(SdrWidth, SdrHeight);
-    float gainEncoded = GainTex.SampleLevel(LinearSampler, uv, 0).r;
-
-    // Compute ISO 21496-1 weight from display headroom
-    float capRange = HdrCapacityMax - HdrCapacityMin;
-    float weight = 0.0;
-    if (capRange > 0.001)
-        weight = saturate((TargetHeadroom - HdrCapacityMin) / capRange);
-    if (BaseIsHdr > 0.5)
-        weight = 1.0 - weight;
-
-    // Per-channel gain map application
-    float3 safeGamma = max(Gamma, 0.001);
-    float3 gainLog = GainMapMin + (GainMapMax - GainMapMin) * pow(gainEncoded, 1.0 / safeGamma);
-
-    float3 hdrLinear = (sdrLinear + OffsetSdr) * exp2(gainLog * weight) - OffsetHdr;
-    hdrLinear = max(hdrLinear, 0.0);
-
-    DstTex[id.xy] = float4(hdrLinear, 1.0);
-}
-)";
-
-static const char* HLSL_GamutLut = R"(
-Texture2D<float4> SrcTex : register(t0);
-Texture3D<float> OverflowLut : register(t1);
-RWTexture2D<uint> MaskTex : register(u0);
-RWStructuredBuffer<uint> GlobalCounter : register(u1);
-SamplerState LinearSampler : register(s0);
-
-cbuffer GamutLutParams : register(b0)
-{
-    float Epsilon;
-    uint Width;
-    uint Height;
-    uint LutEdge;
-};
-
-groupshared uint groupOverflowCount;
-
-[numthreads(8, 8, 1)]
-void CSGamutLut(uint3 id : SV_DispatchThreadID, uint GI : SV_GroupIndex)
-{
-    // 1. Initialize group-local counter in fast LDS memory
-    if (GI == 0) groupOverflowCount = 0;
-    GroupMemoryBarrierWithGroupSync();
-
-    bool isOverflow = false;
-    if (id.x < Width && id.y < Height) {
-        float3 encoded = saturate(SrcTex[id.xy].rgb);
-        float overflow = OverflowLut.SampleLevel(LinearSampler, encoded, 0);
-        isOverflow = (overflow > 0.5f);
-        // Write per-pixel mask for visualization
-        MaskTex[id.xy] = isOverflow ? 255u : 0u;
-    }
-
-    // 2. Group-level reduction in LDS (zero global memory contention)
-    if (isOverflow) {
-        InterlockedAdd(groupOverflowCount, 1);
-    }
-    GroupMemoryBarrierWithGroupSync();
-
-    // 3. Single representative writes to global counter — reduces atomics from millions to thousands
-    if (GI == 0 && groupOverflowCount > 0) {
-        InterlockedAdd(GlobalCounter[0], groupOverflowCount);
-    }
-}
-)";
 
 HRESULT ComputeEngine::Initialize(ID3D11Device* pDevice) {
     if (!pDevice) return E_INVALIDARG;
@@ -664,25 +17,18 @@ HRESULT ComputeEngine::Initialize(ID3D11Device* pDevice) {
     return S_OK;
 }
 
-HRESULT ComputeEngine::EnsureComputeShader(ComPtr<ID3D11ComputeShader>& shader, const char* hlslSource, const char* entryPoint, const char* debugName) {
+HRESULT ComputeEngine::EnsureComputeShader(ComPtr<ID3D11ComputeShader>& shader, const uint8_t* bytecode, size_t bytecodeSize, const char* debugName) {
     if (shader) return S_OK;
-    if (!m_d3dDevice) return E_FAIL;
+    if (!m_d3dDevice || !bytecode || bytecodeSize == 0) return E_FAIL;
 
-    ComPtr<ID3DBlob> blob;
-    ComPtr<ID3DBlob> errorBlob;
-    HRESULT hr = D3DCompile(hlslSource, strlen(hlslSource), nullptr, nullptr, nullptr, entryPoint, "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errorBlob);
+    HRESULT hr = m_d3dDevice->CreateComputeShader(bytecode, bytecodeSize, nullptr, &shader);
     if (FAILED(hr)) {
-        if (errorBlob) {
-            const char* msg = (const char*)errorBlob->GetBufferPointer();
-            OutputDebugStringA("[ComputeEngine] Shader Error: ");
-            OutputDebugStringA(debugName ? debugName : "Unknown");
-            OutputDebugStringA("\n");
-            OutputDebugStringA(msg);
-            QV_LOG("Shader_Error", TraceLoggingString(msg, "Message"), TraceLoggingString(debugName ? debugName : "Unknown", "Shader"));
-        }
-        return hr;
+        OutputDebugStringA("[ComputeEngine] CreateComputeShader Failed: ");
+        OutputDebugStringA(debugName ? debugName : "Unknown");
+        OutputDebugStringA("\n");
+        QV_LOG("Shader_Create_Error", TraceLoggingString(debugName ? debugName : "Unknown", "Shader"), TraceLoggingInt32(hr, "HR"));
     }
-    return m_d3dDevice->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &shader);
+    return hr;
 }
 
 HRESULT ComputeEngine::EnsureSamplers() {
@@ -768,7 +114,7 @@ HRESULT ComputeEngine::UploadAndConvert(const uint8_t* srcPixels, int width, int
     if (FAILED(hr)) return hr;
 
     // 3. Dispatch
-    hr = EnsureComputeShader(m_csFormatConvert, HLSL_FormatConvert, "CSMain", "FormatConvert");
+    hr = EnsureComputeShader(m_csFormatConvert, Shaders::g_csFormatConvert, sizeof(Shaders::g_csFormatConvert), "FormatConvert");
     if (FAILED(hr)) return hr;
 
     ComPtr<ID3D11ShaderResourceView> pSRV;
@@ -800,7 +146,7 @@ HRESULT ComputeEngine::GenerateMips(ID3D11Texture2D* pTexture) {
     pTexture->GetDesc(&desc);
     if (desc.MipLevels <= 1) return S_FALSE;
 
-    HRESULT hr = EnsureComputeShader(m_csGenMips, HLSL_GenerateMips, "CSGenMips", "GenerateMips");
+    HRESULT hr = EnsureComputeShader(m_csGenMips, Shaders::g_csGenerateMips, sizeof(Shaders::g_csGenerateMips), "GenerateMips");
     if (FAILED(hr)) return hr;
 
     m_d3dContext->CSSetShader(m_csGenMips.Get(), nullptr, 0);
@@ -996,7 +342,7 @@ HRESULT ComputeEngine::DispatchGamutMaskLut(
         uint32_t lutEdge;
     } params = { epsilon, srcDesc.Width, srcDesc.Height, static_cast<uint32_t>(lutEdge) };
 
-    hr = EnsureComputeShader(m_csGamutLut, HLSL_GamutLut, "CSGamutLut", "GamutLut");
+    hr = EnsureComputeShader(m_csGamutLut, Shaders::g_csGamutLut, sizeof(Shaders::g_csGamutLut), "GamutLut");
     if (FAILED(hr)) return hr;
     hr = EnsureSamplers();
     if (FAILED(hr)) return hr;
@@ -1132,7 +478,7 @@ HRESULT ComputeEngine::ToneMapHdrToSdr(const uint8_t* srcPixels, int width, int 
     hr = m_d3dDevice->CreateUnorderedAccessView(pDst.Get(), nullptr, &pUAV);
     if (FAILED(hr)) return hr;
 
-    hr = EnsureComputeShader(m_csToneMapHdrToSdr, HLSL_ToneMapHdrToSdr, "CSToneMap", "ToneMapHdrToSdr");
+    hr = EnsureComputeShader(m_csToneMapHdrToSdr, Shaders::g_csToneMapHdrToSdr, sizeof(Shaders::g_csToneMapHdrToSdr), "ToneMapHdrToSdr");
     if (FAILED(hr)) return hr;
 
     if (!m_toneMapConstantBuffer) {
@@ -1217,7 +563,7 @@ HRESULT ComputeEngine::ToneMapHdrToHdr(const uint8_t* srcPixels, int width, int 
     hr = m_d3dDevice->CreateUnorderedAccessView(pDst.Get(), nullptr, &pUAV);
     if (FAILED(hr)) return hr;
 
-    hr = EnsureComputeShader(m_csToneMapHdrToHdr, HLSL_ToneMapHdrToHdr, "CSToneMapHDR", "ToneMapHdrToHdr");
+    hr = EnsureComputeShader(m_csToneMapHdrToHdr, Shaders::g_csToneMapHdrToHdr, sizeof(Shaders::g_csToneMapHdrToHdr), "ToneMapHdrToHdr");
     if (FAILED(hr)) return hr;
 
     if (!m_toneMapConstantBuffer) {
@@ -1333,7 +679,7 @@ HRESULT ComputeEngine::ToneMapHdrTextureToHdr(ID3D11Texture2D* srcTexture,
                                               const ToneMapSettings& settings,
                                               ID3D11Texture2D** outTexture) {
     if (!m_valid) return E_FAIL;
-    HRESULT hr = EnsureComputeShader(m_csToneMapHdrToHdr, HLSL_ToneMapHdrToHdr, "CSToneMapHDR", "ToneMapHdrToHdr");
+    HRESULT hr = EnsureComputeShader(m_csToneMapHdrToHdr, Shaders::g_csToneMapHdrToHdr, sizeof(Shaders::g_csToneMapHdrToHdr), "ToneMapHdrToHdr");
     if (FAILED(hr)) return hr;
     if (!m_toneMapConstantBuffer) {
         D3D11_BUFFER_DESC cbDesc = {};
@@ -1355,7 +701,7 @@ HRESULT ComputeEngine::ToneMapHdrTextureToSdr(ID3D11Texture2D* srcTexture,
                                               const ToneMapSettings& settings,
                                               ID3D11Texture2D** outTexture) {
     if (!m_valid) return E_FAIL;
-    HRESULT hr = EnsureComputeShader(m_csToneMapHdrToSdr, HLSL_ToneMapHdrToSdr, "CSToneMap", "ToneMapHdrToSdr");
+    HRESULT hr = EnsureComputeShader(m_csToneMapHdrToSdr, Shaders::g_csToneMapHdrToSdr, sizeof(Shaders::g_csToneMapHdrToSdr), "ToneMapHdrToSdr");
     if (FAILED(hr)) return hr;
     if (!m_toneMapConstantBuffer) {
         D3D11_BUFFER_DESC cbDesc = {};
@@ -1483,7 +829,7 @@ HRESULT QuickView::ComputeEngine::ComposeGainMap(
     m_d3dDevice->CreateUnorderedAccessView(pDst.Get(), nullptr, &pDstUAV);
 
     // 3. Upload constant buffer
-    hr = EnsureComputeShader(m_csComposeGainMap, HLSL_ComposeGainMap, "CSComposeGainMap", "ComposeGainMap");
+    hr = EnsureComputeShader(m_csComposeGainMap, Shaders::g_csComposeGainMap, sizeof(Shaders::g_csComposeGainMap), "ComposeGainMap");
     if (FAILED(hr)) return hr;
     hr = EnsureSamplers();
     if (FAILED(hr)) return hr;
@@ -1542,9 +888,9 @@ HRESULT QuickView::ComputeEngine::ExecuteFsr1Upscale(
 {
     if (!m_valid || !srcTexture || !outTexture || srcW == 0 || srcH == 0 || dstW == 0 || dstH == 0) return E_INVALIDARG;
 
-    HRESULT hr = EnsureComputeShader(m_csFsrEasu, HLSL_FSR_EASU, "CSFSR_EASU", "FSR_EASU");
+    HRESULT hr = EnsureComputeShader(m_csFsrEasu, Shaders::g_csFsrEasu, sizeof(Shaders::g_csFsrEasu), "FSR_EASU");
     if (FAILED(hr)) return hr;
-    hr = EnsureComputeShader(m_csFsrRcas, HLSL_FSR_RCAS, "CSFSR_RCAS", "FSR_RCAS");
+    hr = EnsureComputeShader(m_csFsrRcas, Shaders::g_csFsrRcas, sizeof(Shaders::g_csFsrRcas), "FSR_RCAS");
     if (FAILED(hr)) return hr;
 
     if (!m_fsrEasuConstantBuffer) {
