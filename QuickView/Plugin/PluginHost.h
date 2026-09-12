@@ -113,6 +113,12 @@ public:
     float GetSrAutoTriggerMaxSourceMp() const;
     void SetSrAutoTriggerMaxSourceMp(float maxMp);
 
+    uint32_t GetSrAutoTriggerMaxWidth() const;
+    void SetSrAutoTriggerMaxWidth(uint32_t maxW);
+
+    uint32_t GetSrAutoTriggerMaxHeight() const;
+    void SetSrAutoTriggerMaxHeight(uint32_t maxH);
+
     // Multi-Language localization propagation to active plugin
     void SetLanguage(const std::string& langCode);
 
@@ -232,6 +238,8 @@ private:
     std::atomic<float> m_srDenoise{0.00f};
     std::atomic<int> m_srDebounceDelayMs{150};
     std::atomic<float> m_srAutoTriggerMaxSourceMp{1.0f};
+    std::atomic<uint32_t> m_srAutoTriggerMaxWidth{1080};
+    std::atomic<uint32_t> m_srAutoTriggerMaxHeight{1080};
     std::string m_currentLanguage = "zh-CN";
 
     // Dynamic Parameter storage: key -> value

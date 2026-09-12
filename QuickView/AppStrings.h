@@ -470,6 +470,10 @@ namespace AppStrings {
     extern const wchar_t* Settings_Label_SrAutoTrigger;
     extern const wchar_t* Settings_Label_SrAutoTriggerMaxSourceMp;
     extern const wchar_t* Settings_Tooltip_SrAutoTriggerMaxSourceMp;
+    extern const wchar_t* Settings_Label_SrAutoTriggerMaxWidth;
+    extern const wchar_t* Settings_Tooltip_SrAutoTriggerMaxWidth;
+    extern const wchar_t* Settings_Label_SrAutoTriggerMaxHeight;
+    extern const wchar_t* Settings_Tooltip_SrAutoTriggerMaxHeight;
     extern const wchar_t* Settings_Value_Unlimited;
     extern const wchar_t* Settings_Label_SrOpenInCompare;
     extern const wchar_t* Settings_Label_SrPromptModel;

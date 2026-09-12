@@ -4950,6 +4950,8 @@ void SaveConfig() {
     WriteConfigFloat(L"Controls", L"FsrSharpness", g_config.FsrSharpness, iniPath.c_str());
     WriteConfigInt(L"Controls", L"SrDebounceDelayMs", g_config.SrDebounceDelayMs, iniPath.c_str());
     WriteConfigFloat(L"Controls", L"SrAutoTriggerMaxSourceMp", g_config.SrAutoTriggerMaxSourceMp, iniPath.c_str());
+    WriteConfigInt(L"Controls", L"SrAutoTriggerMaxWidth", g_config.SrAutoTriggerMaxWidth, iniPath.c_str());
+    WriteConfigInt(L"Controls", L"SrAutoTriggerMaxHeight", g_config.SrAutoTriggerMaxHeight, iniPath.c_str());
     WriteConfigBool(L"Controls", L"InvertWheel", g_config.InvertWheel, iniPath.c_str());
     WriteConfigInt(L"Controls", L"WheelActionMode", g_config.WheelActionMode, iniPath.c_str());
     WriteConfigInt(L"Controls", L"ThumbWheelMode", g_config.ThumbWheelMode, iniPath.c_str());
@@ -5278,6 +5280,12 @@ void LoadConfig() {
         g_config.SrAutoTriggerMaxSourceMp = std::clamp(val, 0.1f, 16.0f);
     }
     QuickView::PluginHost::Instance().SetSrAutoTriggerMaxSourceMp(g_config.SrAutoTriggerMaxSourceMp);
+    g_config.SrAutoTriggerMaxWidth = GetPrivateProfileIntW(L"Controls", L"SrAutoTriggerMaxWidth", 1080, iniPath.c_str());
+    if (g_config.SrAutoTriggerMaxWidth < 0 || g_config.SrAutoTriggerMaxWidth > 8192) g_config.SrAutoTriggerMaxWidth = 1080;
+    QuickView::PluginHost::Instance().SetSrAutoTriggerMaxWidth((uint32_t)g_config.SrAutoTriggerMaxWidth);
+    g_config.SrAutoTriggerMaxHeight = GetPrivateProfileIntW(L"Controls", L"SrAutoTriggerMaxHeight", 1080, iniPath.c_str());
+    if (g_config.SrAutoTriggerMaxHeight < 0 || g_config.SrAutoTriggerMaxHeight > 8192) g_config.SrAutoTriggerMaxHeight = 1080;
+    QuickView::PluginHost::Instance().SetSrAutoTriggerMaxHeight((uint32_t)g_config.SrAutoTriggerMaxHeight);
     g_config.InvertWheel = GetPrivateProfileIntW(L"Controls", L"InvertWheel", 0, iniPath.c_str()) != 0;
     g_config.WheelActionMode = GetPrivateProfileIntW(L"Controls", L"WheelActionMode", 0, iniPath.c_str());
     g_config.ThumbWheelMode = GetPrivateProfileIntW(L"Controls", L"ThumbWheelMode", 0, iniPath.c_str());
@@ -6549,13 +6557,23 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
     }
     if (!frame || !frame->pixels) return;
 
-    // [QVX-SR] Check source image megapixel limit for auto trigger
+    // [QVX-SR] Check source image dimensions limit for auto trigger
     if (!forceManual) {
-        float maxMp = QuickView::PluginHost::Instance().GetSrAutoTriggerMaxSourceMp();
-        if (maxMp < 16.0f - 0.05f) { // Values < 16.0 MP are strictly constrained limits (16.0 = unlimited)
-            float imageMp = static_cast<float>(static_cast<uint64_t>(frame->width) * frame->height) / 1000000.0f;
-            if (imageMp > maxMp) {
-                return; // Exceeds user-configured auto trigger limit, skip
+        int maxW = static_cast<int>(QuickView::PluginHost::Instance().GetSrAutoTriggerMaxWidth());
+        int maxH = static_cast<int>(QuickView::PluginHost::Instance().GetSrAutoTriggerMaxHeight());
+        if (maxW > 0 || maxH > 0) {
+            if (maxW > 0 && maxH > 0) {
+                if (frame->width > maxW || frame->height > maxH) {
+                    return; // Exceeds configured width or height limit, skip
+                }
+            } else if (maxW > 0) {
+                if (frame->width > maxW) {
+                    return; // Exceeds configured width limit, skip
+                }
+            } else if (maxH > 0) {
+                if (frame->height > maxH) {
+                    return; // Exceeds configured height limit, skip
+                }
             }
         }
     }
@@ -6689,10 +6707,72 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
     }
 }
 
+// [QVX-SR] Check if promoted SR or 1.0x native bitmap already exists in cache, enabling 0ms instant switch
+static bool CanFastSwitchSuperResolution(HWND hwnd) {
+    if (!QuickView::PluginHost::Instance().IsSrPluginEnabled() ||
+        QuickView::PluginHost::Instance().GetSrPluginInstallState() == QuickView::PluginInstallState::NotInstalled) {
+        return false;
+    }
+    const auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+    if (!primaryPane.resource || primaryPane.path.empty()) return false;
+    if (primaryPane.resource.isSvg || primaryPane.resource.isWebView) return false;
+    if (g_cropState.IsActive || primaryPane.editState.HasCrop) return false;
+
+    VisualState vs = GetVisualState();
+    RECT rcClient{};
+    GetClientRect(hwnd, &rcClient);
+    float winW = (float)rcClient.right;
+    float winH = (float)rcClient.bottom;
+    float galleryH = (g_gallery.IsPinned() && g_gallery.IsVisible()) ? g_gallery.GetVisualHeight(winH) : 0.0f;
+    float effWinH = std::max(1.0f, winH - galleryH);
+
+    float baseFit = ComputeBaseFitScaleForVisual(vs, winW, effWinH);
+    float nativeW = (float)(vs.IsRotated90 ? primaryPane.metadata.Height : primaryPane.metadata.Width);
+    if (nativeW <= 0.0f) nativeW = vs.VisualSize.width;
+
+    float currentDisplayedW = vs.VisualSize.width * baseFit * primaryPane.view.Zoom;
+    float pixelStretchRatio = (nativeW > 0.0f) ? (currentDisplayedW / nativeW) : 1.0f;
+
+    // Multi-frame animation: if converted to memory SR animator, reuse directly
+    if (primaryPane.resource.animator && primaryPane.resource.animator->IsAnimated()) {
+        return primaryPane.resource.animator->IsSrDecoder();
+    }
+
+    if (pixelStretchRatio > 1.001f) {
+        // Zoom In (> 100%): Check if promoted SR texture already cached for active model with sufficient scale
+        std::string activeModelId = QuickView::PluginHost::Instance().GetSrModelId();
+        float targetScale = 2.0f;
+        if (activeModelId == "realesr-animevideov3-auto") {
+            if (pixelStretchRatio <= 2.2f) targetScale = 2.0f;
+            else if (pixelStretchRatio <= 3.2f) targetScale = 3.0f;
+            else targetScale = 4.0f;
+        } else {
+            targetScale = QuickView::PluginHost::Instance().GetCurrentSrModelScale();
+            if (targetScale < 2.0f) targetScale = 2.0f;
+        }
+
+        if (primaryPane.resource.promotedSrBitmap && primaryPane.resource.promotedModelId == activeModelId) {
+            return (primaryPane.resource.promotedSrScale >= targetScale);
+        }
+        return false;
+    } else {
+        // Zoom <= 100%: If currently upscaled to SR level > 1.0x, we can immediately fallback to 1.0x native frame
+        return (primaryPane.resource.currentSrLevel > 1.0f);
+    }
+}
+
 // [QVX-SR] Centralized Debounced Super-Resolution Scheduler
 void ScheduleDebouncedSuperResolution(HWND hwnd) {
     if (!hwnd || !g_renderEngine) return;
     if (QuickView::PluginHost::Instance().IsSrPluginEnabled() && QuickView::PluginHost::Instance().IsSrAutoTriggerEnabled()) {
+        if (CanFastSwitchSuperResolution(hwnd)) {
+            // [Zero-Latency] Cached promoted SR texture or native 1.0x frame is already available;
+            // switch instantly (0ms) without waiting for the multi-second recomputation debounce timer!
+            KillTimer(hwnd, TIMER_ID_SR_DEBOUNCE);
+            TriggerDebouncedSuperResolution(hwnd, false);
+            return;
+        }
+
         if (g_config.SrDebounceDelayMs > 0) {
             SetTimer(hwnd, TIMER_ID_SR_DEBOUNCE, (UINT)g_config.SrDebounceDelayMs, nullptr);
         } else {

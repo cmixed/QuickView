@@ -401,6 +401,10 @@ const wchar_t *Settings_Label_SrPluginModule = nullptr;
 const wchar_t *Settings_Label_SrAutoTrigger = nullptr;
 const wchar_t *Settings_Label_SrAutoTriggerMaxSourceMp = nullptr;
 const wchar_t *Settings_Tooltip_SrAutoTriggerMaxSourceMp = nullptr;
+const wchar_t *Settings_Label_SrAutoTriggerMaxWidth = nullptr;
+const wchar_t *Settings_Tooltip_SrAutoTriggerMaxWidth = nullptr;
+const wchar_t *Settings_Label_SrAutoTriggerMaxHeight = nullptr;
+const wchar_t *Settings_Tooltip_SrAutoTriggerMaxHeight = nullptr;
 const wchar_t *Settings_Value_Unlimited = nullptr;
 const wchar_t *Settings_Label_SrOpenInCompare = nullptr;
 const wchar_t *Settings_Label_SrPromptModel = nullptr;
@@ -1026,6 +1030,10 @@ struct LanguageTable {
     const wchar_t *Settings_Label_SrAutoTrigger;
     const wchar_t *Settings_Label_SrAutoTriggerMaxSourceMp;
     const wchar_t *Settings_Tooltip_SrAutoTriggerMaxSourceMp;
+    const wchar_t *Settings_Label_SrAutoTriggerMaxWidth;
+    const wchar_t *Settings_Tooltip_SrAutoTriggerMaxWidth;
+    const wchar_t *Settings_Label_SrAutoTriggerMaxHeight;
+    const wchar_t *Settings_Tooltip_SrAutoTriggerMaxHeight;
     const wchar_t *Settings_Value_Unlimited;
     const wchar_t *Settings_Label_SrOpenInCompare;
     const wchar_t *Settings_Label_SrPromptModel;
@@ -1653,7 +1661,11 @@ static const LanguageTable Table_EN = {
     L"Plugin Module", // Settings_Label_SrPluginModule
     L"Auto Trigger", // Settings_Label_SrAutoTrigger
     L"Max Source Size", // Settings_Label_SrAutoTriggerMaxSourceMp
-    L"Limit the maximum source image megapixels (MP) for automatic super-resolution. Images exceeding this size will skip auto SR to save VRAM and compute. Drag to the far right for unlimited.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Limit the maximum source image megapixels (MP) for automatic super-resolution. Images exceeding this size will skip auto SR to save VRAM and compute. Drag to the far right for unlimited. (Reference: 1.0 MP ≈ 1000×1000, 2.0 MP ≈ 1920×1080 FHD, 4.0 MP ≈ 2560×1440 2K, 8.3 MP ≈ 3840×2160 4K)", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Max Source Width", // Settings_Label_SrAutoTriggerMaxWidth
+    L"Maximum source image width (in pixels) for automatic super-resolution. Set to 0 for unlimited. If either width or height is 0, only the non-zero value acts as the constraint.", // Settings_Tooltip_SrAutoTriggerMaxWidth
+    L"Max Source Height", // Settings_Label_SrAutoTriggerMaxHeight
+    L"Maximum source image height (in pixels) for automatic super-resolution. Set to 0 for unlimited. If either width or height is 0, only the non-zero value acts as the constraint.", // Settings_Tooltip_SrAutoTriggerMaxHeight
     L"Unlimited", // Settings_Value_Unlimited
     L"Show in Compare Mode on Manual Trigger", // Settings_Label_SrOpenInCompare
     L"Prompt Model Selection on Manual Trigger", // Settings_Label_SrPromptModel
@@ -2281,7 +2293,11 @@ static const LanguageTable Table_CN = {
     L"超分辨率插件模块", // Settings_Label_SrPluginModule
     L"自动触发", // Settings_Label_SrAutoTrigger
     L"原图尺寸限制", // Settings_Label_SrAutoTriggerMaxSourceMp
-    L"限制自动触发超分辨率的原始图片最大像素（MP）。超过此大小的图片将跳过自动超分以节省显存与算力，拖至最右侧为无限制。", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"限制自动触发超分辨率的原始图片最大像素（MP）。超过此大小的图片将跳过自动超分以节省显存与算力，拖至最右侧为无限制。（参考：1.0 MP ≈ 1000×1000，2.0 MP ≈ 1920×1080 / 全高清，4.0 MP ≈ 2560×1440 / 2K，8.3 MP ≈ 3840×2160 / 4K）", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"原图最大宽度", // Settings_Label_SrAutoTriggerMaxWidth
+    L"限制自动超分辨率的原始图片最大宽度（像素）。设为 0 为无限制。若宽或高仅有一个为 0，则仅使用非零值作为约束；均非 0 时两者皆须满足。", // Settings_Tooltip_SrAutoTriggerMaxWidth
+    L"原图最大高度", // Settings_Label_SrAutoTriggerMaxHeight
+    L"限制自动超分辨率的原始图片最大高度（像素）。设为 0 为无限制。若宽或高仅有一个为 0，则仅使用非零值作为约束；均非 0 时两者皆须满足。", // Settings_Tooltip_SrAutoTriggerMaxHeight
     L"无限制", // Settings_Value_Unlimited
     L"手动触发后在对比模式中显示", // Settings_Label_SrOpenInCompare
     L"手动触发时提示选择模型", // Settings_Label_SrPromptModel
@@ -2909,7 +2925,11 @@ static const LanguageTable Table_TW = {
     L"超解析度外掛模組", // Settings_Label_SrPluginModule
     L"自動觸發", // Settings_Label_SrAutoTrigger
     L"原圖尺寸限制", // Settings_Label_SrAutoTriggerMaxSourceMp
-    L"限制自動觸發超解析度的原始圖片最大像素（MP）。超過此大小的圖片將跳過自動超分以節省顯存與算力，拖至最右側為無限制。", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"限制自動觸發超解析度的原始圖片最大像素（MP）。超過此大小的圖片將跳過自動超分以節省顯存與算力，拖至最右側為無限制。（參考：1.0 MP ≈ 1000×1000，2.0 MP ≈ 1920×1080 / 全高清，4.0 MP ≈ 2560×1440 / 2K，8.3 MP ≈ 3840×2160 / 4K）", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"原圖最大寬度", // Settings_Label_SrAutoTriggerMaxWidth
+    L"限制自動超解析度的原始圖片最大寬度（像素）。設為 0 為無限制。若寬或高僅有一個為 0，則僅使用非零值作為約束；均非 0 時兩者皆須滿足。", // Settings_Tooltip_SrAutoTriggerMaxWidth
+    L"原圖最大高度", // Settings_Label_SrAutoTriggerMaxHeight
+    L"限制自動超解析度的原始圖片最大高度（像素）。設為 0 為無限制。若寬或高僅有一個為 0，則僅使用非零值作為約束；均非 0 時兩者皆須滿足。", // Settings_Tooltip_SrAutoTriggerMaxHeight
     L"無限制", // Settings_Value_Unlimited
     L"手動觸發後在對比模式中顯示", // Settings_Label_SrOpenInCompare
     L"手動觸發時提示選擇模型", // Settings_Label_SrPromptModel
@@ -3537,7 +3557,11 @@ static const LanguageTable Table_JA = {
     L"プラグインモジュール", // Settings_Label_SrPluginModule
     L"自動トリガー", // Settings_Label_SrAutoTrigger
     L"元画像サイズ制限", // Settings_Label_SrAutoTriggerMaxSourceMp
-    L"自動超解像を適用する元画像の最大画素数（MP）を制限します。このサイズを超える画像はVRAMとGPU負荷を抑えるため自動超解像をスキップします。右端までドラッグすると無制限になります。", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"自動超解像を適用する元画像の最大画素数（MP）を制限します。このサイズを超える画像はVRAMとGPU負荷を抑えるため自動超解像をスキップします。右端までドラッグすると無制限になります。（参考：1.0 MP ≈ 1000×1000、2.0 MP ≈ 1920×1080 FHD、4.0 MP ≈ 2560×1440 2K、8.3 MP ≈ 3840×2160 4K）", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"元画像最大幅", // Settings_Label_SrAutoTriggerMaxWidth
+    L"自動超解像を適用する元画像の最大幅（ピクセル）を制限します。0で無制限。幅または高さのいずれかのみが0の場合、0以外の値のみが制約になります。", // Settings_Tooltip_SrAutoTriggerMaxWidth
+    L"元画像最大高さ", // Settings_Label_SrAutoTriggerMaxHeight
+    L"自動超解像を適用する元画像の最大高さ（ピクセル）を制限します。0で無制限。幅または高さのいずれかのみが0の場合、0以外の値のみが制約になります。", // Settings_Tooltip_SrAutoTriggerMaxHeight
     L"無制限", // Settings_Value_Unlimited
     L"手動実行後に比較モードで表示", // Settings_Label_SrOpenInCompare
     L"手動トリガー時にモデル選択を表示", // Settings_Label_SrPromptModel
@@ -4165,7 +4189,11 @@ static const LanguageTable Table_RU = {
     L"Модуль плагина", // Settings_Label_SrPluginModule
     L"Автоматический запуск", // Settings_Label_SrAutoTrigger
     L"Лимит размера оригинала", // Settings_Label_SrAutoTriggerMaxSourceMp
-    L"Ограничение максимального разрешения оригинала (МП) для автоматического супер-разрешения. Изображения большего размера будут пропущены. Крайнее правое положение — без ограничений.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Ограничение максимального разрешения оригинала (МП) для автоматического супер-разрешения. Изображения большего размера будут пропущены. Крайнее правое положение — без ограничений. (Справка: 1.0 МП ≈ 1000×1000, 2.0 МП ≈ 1920×1080 FHD, 4.0 МП ≈ 2560×1440 2K, 8.3 МП ≈ 3840×2160 4K)", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Макс. ширина оригинала", // Settings_Label_SrAutoTriggerMaxWidth
+    L"Ограничение максимальной ширины оригинала (в пикселях) для авто-суперразрешения. 0 — без ограничений.", // Settings_Tooltip_SrAutoTriggerMaxWidth
+    L"Макс. высота оригинала", // Settings_Label_SrAutoTriggerMaxHeight
+    L"Ограничение максимальной высоты оригинала (в пикселях) для авто-суперразрешения. 0 — без ограничений.", // Settings_Tooltip_SrAutoTriggerMaxHeight
     L"Без ограничений", // Settings_Value_Unlimited
     L"Показать в режиме сравнения при ручном запуске", // Settings_Label_SrOpenInCompare
     L"Запрашивать выбор модели при ручном запуске", // Settings_Label_SrPromptModel
@@ -4793,7 +4821,11 @@ static const LanguageTable Table_DE = {
     L"Plugin-Modul", // Settings_Label_SrPluginModule
     L"Automatisches Auslösen", // Settings_Label_SrAutoTrigger
     L"Maximale Quellgröße", // Settings_Label_SrAutoTriggerMaxSourceMp
-    L"Begrenzt die maximale Megapixelzahl (MP) des Quellbildes für die automatische Super-Resolution. Größere Bilder werden übersprungen. Ganz rechts bedeutet unbegrenzt.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Begrenzt die maximale Megapixelzahl (MP) des Quellbildes für die automatische Super-Resolution. Größere Bilder werden übersprungen. Ganz rechts bedeutet unbegrenzt. (Referenz: 1.0 MP ≈ 1000×1000, 2.0 MP ≈ 1920×1080 FHD, 4.0 MP ≈ 2560×1440 2K, 8.3 MP ≈ 3840×2160 4K)", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Maximale Quellbreite", // Settings_Label_SrAutoTriggerMaxWidth
+    L"Begrenzt die maximale Breite des Quellbildes (in Pixeln) für automatische Super-Resolution. 0 bedeutet unbegrenzt.", // Settings_Tooltip_SrAutoTriggerMaxWidth
+    L"Maximale Quellhöhe", // Settings_Label_SrAutoTriggerMaxHeight
+    L"Begrenzt die maximale Höhe des Quellbildes (in Pixeln) für automatische Super-Resolution. 0 bedeutet unbegrenzt.", // Settings_Tooltip_SrAutoTriggerMaxHeight
     L"Unbegrenzt", // Settings_Value_Unlimited
     L"Nach manuellem Auslösen im Vergleichsmodus anzeigen", // Settings_Label_SrOpenInCompare
     L"Modellauswahl bei manuellem Auslösen abfragen", // Settings_Label_SrPromptModel
@@ -5421,7 +5453,11 @@ static const LanguageTable Table_ES = {
     L"Módulo de plugin", // Settings_Label_SrPluginModule
     L"Activación automática", // Settings_Label_SrAutoTrigger
     L"Límite de tamaño original", // Settings_Label_SrAutoTriggerMaxSourceMp
-    L"Limita los megapíxeles (MP) máximos de la imagen original para la superresolución automática. Las imágenes más grandes se omitirán. Arrastre hacia la derecha para sin límite.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Limita los megapíxeles (MP) máximos de la imagen original para la superresolución automática. Las imágenes más grandes se omitirán. Arrastre hacia la derecha para sin límite. (Referencia: 1.0 MP ≈ 1000×1000, 2.0 MP ≈ 1920×1080 FHD, 4.0 MP ≈ 2560×1440 2K, 8.3 MP ≈ 3840×2160 4K)", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Ancho máx. de origen", // Settings_Label_SrAutoTriggerMaxWidth
+    L"Limita el ancho máximo de la imagen original (en píxeles) para la superresolución automática. 0 significa ilimitado.", // Settings_Tooltip_SrAutoTriggerMaxWidth
+    L"Alto máx. de origen", // Settings_Label_SrAutoTriggerMaxHeight
+    L"Limita el alto máximo de la imagen original (en píxeles) para la superresolución automática. 0 significa ilimitado.", // Settings_Tooltip_SrAutoTriggerMaxHeight
     L"Ilimitado", // Settings_Value_Unlimited
     L"Mostrar en modo comparación al activar manualmente", // Settings_Label_SrOpenInCompare
     L"Preguntar modelo al activar manualmente", // Settings_Label_SrPromptModel
@@ -6049,7 +6085,11 @@ static const LanguageTable Table_FR = {
     L"Module de plugin", // Settings_Label_SrPluginModule
     L"Déclenchement automatique", // Settings_Label_SrAutoTrigger
     L"Taille max de la source", // Settings_Label_SrAutoTriggerMaxSourceMp
-    L"Limite le nombre maximal de mégapixels (MP) de l'image d'origine pour la super-résolution automatique. Les images plus grandes seront ignorées. Glissez tout à droite pour illimité.", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Limite le nombre maximal de mégapixels (MP) de l'image d'origine pour la super-résolution automatique. Les images plus grandes seront ignorées. Glissez tout à droite pour illimité. (Référence : 1.0 MP ≈ 1000×1000, 2.0 MP ≈ 1920×1080 FHD, 4.0 MP ≈ 2560×1440 2K, 8.3 MP ≈ 3840×2160 4K)", // Settings_Tooltip_SrAutoTriggerMaxSourceMp
+    L"Largeur max de la source", // Settings_Label_SrAutoTriggerMaxWidth
+    L"Limite la largeur maximale de l'image d'origine (en pixels) pour la super-résolution automatique. 0 pour illimité.", // Settings_Tooltip_SrAutoTriggerMaxWidth
+    L"Hauteur max de la source", // Settings_Label_SrAutoTriggerMaxHeight
+    L"Limite la hauteur maximale de l'image d'origine (en pixels) pour la super-résolution automatique. 0 pour illimité.", // Settings_Tooltip_SrAutoTriggerMaxHeight
     L"Illimité", // Settings_Value_Unlimited
     L"Afficher en mode comparaison après déclenchement manuel", // Settings_Label_SrOpenInCompare
     L"Demander le modèle lors du déclenchement manuel", // Settings_Label_SrPromptModel
@@ -6683,6 +6723,10 @@ void Apply(const LanguageTable& t) {
   Settings_Label_SrAutoTrigger = t.Settings_Label_SrAutoTrigger;
   Settings_Label_SrAutoTriggerMaxSourceMp = t.Settings_Label_SrAutoTriggerMaxSourceMp;
   Settings_Tooltip_SrAutoTriggerMaxSourceMp = t.Settings_Tooltip_SrAutoTriggerMaxSourceMp;
+  Settings_Label_SrAutoTriggerMaxWidth = t.Settings_Label_SrAutoTriggerMaxWidth;
+  Settings_Tooltip_SrAutoTriggerMaxWidth = t.Settings_Tooltip_SrAutoTriggerMaxWidth;
+  Settings_Label_SrAutoTriggerMaxHeight = t.Settings_Label_SrAutoTriggerMaxHeight;
+  Settings_Tooltip_SrAutoTriggerMaxHeight = t.Settings_Tooltip_SrAutoTriggerMaxHeight;
   Settings_Value_Unlimited = t.Settings_Value_Unlimited;
   Settings_Label_SrOpenInCompare = t.Settings_Label_SrOpenInCompare;
   Settings_Label_SrPromptModel = t.Settings_Label_SrPromptModel;

@@ -1169,17 +1169,38 @@ HRESULT CompositionEngine::UpdateTransformMatrix(VisualState vs, float /*winW*/,
     float targetScaleX = zoom * compScaleX;
     float targetScaleY = zoom * compScaleY;
 
+    float effectivePanX = panX;
+    float effectivePanY = panY;
+
+    // [Pixel Snapping] Eliminate subpixel blurriness at 1:1 scale (100% zoom)
+    // When target scale is effectively 1.0x (within 0.1% tolerance) and rotation is right-angled,
+    // ensure the visual bounds align exactly with physical pixel grid on the display.
+    if (fabsf(targetScaleX - 1.0f) < 0.001f && fabsf(targetScaleY - 1.0f) < 0.001f &&
+        fmodf(fabsf(vs.TotalRotation), 90.0f) < 0.01f && pLayer->width > 0 && pLayer->height > 0) {
+        float visualW = vs.IsRotated90 ? static_cast<float>(pLayer->height) : static_cast<float>(pLayer->width);
+        float visualH = vs.IsRotated90 ? static_cast<float>(pLayer->width) : static_cast<float>(pLayer->height);
+
+        float originX = (static_cast<float>(m_width) * 0.5f) + panX - (visualW * targetScaleX * 0.5f);
+        float originY = (static_cast<float>(m_height) * 0.5f) + panY - (visualH * targetScaleY * 0.5f);
+
+        float snappedOriginX = std::round(originX);
+        float snappedOriginY = std::round(originY);
+
+        effectivePanX += (snappedOriginX - originX);
+        effectivePanY += (snappedOriginY - originY);
+    }
+
     // 3. Set Transforms Directly (Zero-latency atomic presentation)
     bool targetChanged = (fabsf(targetScaleX - m_currentScale * m_currentCompScaleX) > 0.0001f) ||
                          (fabsf(targetScaleY - m_currentScale * m_currentCompScaleY) > 0.0001f) ||
-                         (fabsf(panX - m_currentPanX) > 0.0001f) ||
-                         (fabsf(panY - m_currentPanY) > 0.0001f);
+                         (fabsf(effectivePanX - m_currentPanX) > 0.0001f) ||
+                         (fabsf(effectivePanY - m_currentPanY) > 0.0001f);
 
     if (targetChanged) {
         m_scaleTransform->SetScaleX(targetScaleX);
         m_scaleTransform->SetScaleY(targetScaleY);
-        m_translateTransform->SetOffsetX(panX);
-        m_translateTransform->SetOffsetY(panY);
+        m_translateTransform->SetOffsetX(effectivePanX);
+        m_translateTransform->SetOffsetY(effectivePanY);
     }
     
     // E. Center Screen: [REMOVED]
@@ -1193,8 +1214,8 @@ HRESULT CompositionEngine::UpdateTransformMatrix(VisualState vs, float /*winW*/,
     m_currentScale = zoom;
     m_currentCompScaleX = compScaleX;
     m_currentCompScaleY = compScaleY;
-    m_currentPanX = panX;
-    m_currentPanY = panY;
+    m_currentPanX = effectivePanX;
+    m_currentPanY = effectivePanY;
     
     return S_OK;
 }

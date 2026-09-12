@@ -38,6 +38,10 @@ int PluginHost::GetSrDebounceDelayMs() const { return m_srDebounceDelayMs.load(s
 void PluginHost::SetSrDebounceDelayMs(int delayMs) { m_srDebounceDelayMs.store(std::clamp(delayMs, 0, 5000), std::memory_order_relaxed); }
 float PluginHost::GetSrAutoTriggerMaxSourceMp() const { return m_srAutoTriggerMaxSourceMp.load(std::memory_order_relaxed); }
 void PluginHost::SetSrAutoTriggerMaxSourceMp(float maxMp) { m_srAutoTriggerMaxSourceMp.store(std::clamp(maxMp, 0.1f, 16.0f), std::memory_order_relaxed); }
+uint32_t PluginHost::GetSrAutoTriggerMaxWidth() const { return m_srAutoTriggerMaxWidth.load(std::memory_order_relaxed); }
+void PluginHost::SetSrAutoTriggerMaxWidth(uint32_t maxW) { m_srAutoTriggerMaxWidth.store((std::min)(maxW, 8192u), std::memory_order_relaxed); }
+uint32_t PluginHost::GetSrAutoTriggerMaxHeight() const { return m_srAutoTriggerMaxHeight.load(std::memory_order_relaxed); }
+void PluginHost::SetSrAutoTriggerMaxHeight(uint32_t maxH) { m_srAutoTriggerMaxHeight.store((std::min)(maxH, 8192u), std::memory_order_relaxed); }
 std::string PluginHost::GetLastExecutionLog() const { std::lock_guard<std::recursive_mutex> lock(m_srMutex); return m_lastLog; }
 double PluginHost::GetLastDurationMs() const { return m_lastDurationMs.load(std::memory_order_relaxed); }
 bool PluginHost::IsFetchingManifest() const { return m_isFetchingManifest.load(std::memory_order_relaxed); }
@@ -536,6 +540,8 @@ void PluginHost::ResetToDefaults() {
     m_srDenoise = 0.0f;
     m_srDebounceDelayMs = 150;
     m_srAutoTriggerMaxSourceMp = 1.0f;
+    m_srAutoTriggerMaxWidth = 1080;
+    m_srAutoTriggerMaxHeight = 1080;
     m_dynamicParams.clear();
 
     if (m_srVTable && m_srContext) {
@@ -602,6 +608,8 @@ void PluginHost::LoadConfig(const wchar_t* iniPath) {
     wchar_t* endMp = nullptr;
     float maxMp = wcstof(maxMpBuf, &endMp);
     m_srAutoTriggerMaxSourceMp = (maxMp >= 0.1f && maxMp <= 16.0f) ? maxMp : 1.0f;
+    m_srAutoTriggerMaxWidth = (uint32_t)GetPrivateProfileIntW(L"SuperResolution", L"SrAutoTriggerMaxWidth", 1080, iniPath);
+    m_srAutoTriggerMaxHeight = (uint32_t)GetPrivateProfileIntW(L"SuperResolution", L"SrAutoTriggerMaxHeight", 1080, iniPath);
 
     // Load plugin-specific dynamic parameters from [Plugin.<plugin_id>] section
     EnsureSrModuleLoaded();
@@ -668,6 +676,12 @@ void PluginHost::SaveConfig(const wchar_t* iniPath) const {
 
     swprintf_s(numBuf, L"%.2f", m_srAutoTriggerMaxSourceMp.load(std::memory_order_relaxed));
     WritePrivateProfileStringW(L"SuperResolution", L"SrAutoTriggerMaxSourceMp", numBuf, iniPath);
+
+    swprintf_s(numBuf, L"%u", m_srAutoTriggerMaxWidth.load(std::memory_order_relaxed));
+    WritePrivateProfileStringW(L"SuperResolution", L"SrAutoTriggerMaxWidth", numBuf, iniPath);
+
+    swprintf_s(numBuf, L"%u", m_srAutoTriggerMaxHeight.load(std::memory_order_relaxed));
+    WritePrivateProfileStringW(L"SuperResolution", L"SrAutoTriggerMaxHeight", numBuf, iniPath);
 
     // Save all dynamic params under active plugin ID section
     const char* pluginId = (m_srHeader && m_srHeader->plugin_id) ? m_srHeader->plugin_id : "sr_ncnn_vulkan";

@@ -2818,32 +2818,59 @@ void SettingsOverlay::BuildMenu() {
                 tabPlugins.items.push_back(itemAutoTrigger);
 
                 if (s_srAutoTrigger) {
-                    static float s_srMaxSourceMp = g_config.SrAutoTriggerMaxSourceMp;
-                    s_srMaxSourceMp = QuickView::PluginHost::Instance().GetSrAutoTriggerMaxSourceMp();
-                    SettingsItem itemMaxSourceMp = { AppStrings::Settings_Label_SrAutoTriggerMaxSourceMp, OptionType::Slider, nullptr, &s_srMaxSourceMp };
-                    itemMaxSourceMp.tooltipText = AppStrings::Settings_Tooltip_SrAutoTriggerMaxSourceMp;
-                    itemMaxSourceMp.minVal = 0.1f;
-                    itemMaxSourceMp.maxVal = 16.0f;
-                    itemMaxSourceMp.step = 0.1f;
-                    itemMaxSourceMp.displayFormat = L"%.1f MP";
-                    itemMaxSourceMp.isDisabled = !s_srPluginEnabled;
-                    itemMaxSourceMp.onChange2 = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
-                        g_config.SrAutoTriggerMaxSourceMp = s_srMaxSourceMp;
-                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxSourceMp(s_srMaxSourceMp);
+                    static float s_srMaxWidth = (float)g_config.SrAutoTriggerMaxWidth;
+                    s_srMaxWidth = (float)QuickView::PluginHost::Instance().GetSrAutoTriggerMaxWidth();
+                    SettingsItem itemMaxWidth = { AppStrings::Settings_Label_SrAutoTriggerMaxWidth, OptionType::Slider, nullptr, &s_srMaxWidth };
+                    itemMaxWidth.tooltipText = AppStrings::Settings_Tooltip_SrAutoTriggerMaxWidth;
+                    itemMaxWidth.minVal = 0.0f;
+                    itemMaxWidth.maxVal = 8192.0f;
+                    itemMaxWidth.step = 64.0f;
+                    itemMaxWidth.displayFormat = L"%.0f px";
+                    itemMaxWidth.isDisabled = !s_srPluginEnabled;
+                    itemMaxWidth.onChange2 = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        g_config.SrAutoTriggerMaxWidth = (int)(s_srMaxWidth + 0.5f);
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxWidth((uint32_t)g_config.SrAutoTriggerMaxWidth);
                         SaveConfig();
                     };
-                    itemMaxSourceMp.onLiveUpdate = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
-                        g_config.SrAutoTriggerMaxSourceMp = s_srMaxSourceMp;
-                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxSourceMp(s_srMaxSourceMp);
+                    itemMaxWidth.onLiveUpdate = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        g_config.SrAutoTriggerMaxWidth = (int)(s_srMaxWidth + 0.5f);
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxWidth((uint32_t)g_config.SrAutoTriggerMaxWidth);
                     };
-                    itemMaxSourceMp.onReset = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
-                        s_srMaxSourceMp = 1.0f;
-                        g_config.SrAutoTriggerMaxSourceMp = 1.0f;
-                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxSourceMp(1.0f);
+                    itemMaxWidth.onReset = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        s_srMaxWidth = 1080.0f;
+                        g_config.SrAutoTriggerMaxWidth = 1080;
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxWidth(1080);
                         SaveConfig();
                         if (overlay) overlay->RequestRebuild();
                     };
-                    tabPlugins.items.push_back(itemMaxSourceMp);
+                    tabPlugins.items.push_back(itemMaxWidth);
+
+                    static float s_srMaxHeight = (float)g_config.SrAutoTriggerMaxHeight;
+                    s_srMaxHeight = (float)QuickView::PluginHost::Instance().GetSrAutoTriggerMaxHeight();
+                    SettingsItem itemMaxHeight = { AppStrings::Settings_Label_SrAutoTriggerMaxHeight, OptionType::Slider, nullptr, &s_srMaxHeight };
+                    itemMaxHeight.tooltipText = AppStrings::Settings_Tooltip_SrAutoTriggerMaxHeight;
+                    itemMaxHeight.minVal = 0.0f;
+                    itemMaxHeight.maxVal = 8192.0f;
+                    itemMaxHeight.step = 64.0f;
+                    itemMaxHeight.displayFormat = L"%.0f px";
+                    itemMaxHeight.isDisabled = !s_srPluginEnabled;
+                    itemMaxHeight.onChange2 = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        g_config.SrAutoTriggerMaxHeight = (int)(s_srMaxHeight + 0.5f);
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxHeight((uint32_t)g_config.SrAutoTriggerMaxHeight);
+                        SaveConfig();
+                    };
+                    itemMaxHeight.onLiveUpdate = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        g_config.SrAutoTriggerMaxHeight = (int)(s_srMaxHeight + 0.5f);
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxHeight((uint32_t)g_config.SrAutoTriggerMaxHeight);
+                    };
+                    itemMaxHeight.onReset = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
+                        s_srMaxHeight = 1080.0f;
+                        g_config.SrAutoTriggerMaxHeight = 1080;
+                        QuickView::PluginHost::Instance().SetSrAutoTriggerMaxHeight(1080);
+                        SaveConfig();
+                        if (overlay) overlay->RequestRebuild();
+                    };
+                    tabPlugins.items.push_back(itemMaxHeight);
 
                     static float s_srDebounceFloat = (float)g_config.SrDebounceDelayMs;
                     s_srDebounceFloat = (float)g_config.SrDebounceDelayMs;
@@ -6027,7 +6054,8 @@ void SettingsOverlay::DrawSlider(ID2D1DeviceContext* pRT, const D2D1_RECT_F& rec
             if (maxV <= 1.05f && wcsstr(format, L"%%") != nullptr) {
                 displayVal *= 100.0f;
             }
-            if (wcsstr(format, L"MP") != nullptr && val >= maxV - 0.05f) {
+            if ((wcsstr(format, L"MP") != nullptr && val >= maxV - 0.05f) ||
+                (wcsstr(format, L"px") != nullptr && minV == 0.0f && val <= 0.05f)) {
                 swprintf_s(buf, L"%s", AppStrings::Settings_Value_Unlimited ? AppStrings::Settings_Value_Unlimited : L"Unlimited");
             } else {
                 swprintf_s(buf, format, displayVal);

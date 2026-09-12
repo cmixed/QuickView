@@ -683,6 +683,8 @@ struct AppConfig {
     float FsrSharpness = 0.20f;         // 0.0f to 1.0f (RCAS sharpness for AMD FSR 1.0)
     int SrDebounceDelayMs = 3000;       // 0ms to 5000ms delay after zoom settle before neural SR triggers (Default 3s)
     float SrAutoTriggerMaxSourceMp = 1.0f; // 0.1MP to 16.0MP max source image size for auto SR trigger (16.0 = unlimited, Default 1.0MP)
+    int SrAutoTriggerMaxWidth = 1080;      // 0 to 8192 px max source width for auto SR trigger (0 = unlimited, Default 1080)
+    int SrAutoTriggerMaxHeight = 1080;     // 0 to 8192 px max source height for auto SR trigger (0 = unlimited, Default 1080)
     bool InvertWheel = false;
     int WheelActionMode = 0;            // 0=Zoom, 1=Navigate
     int ThumbWheelMode = 0;             // 0=Navigate, 1=Zoom
