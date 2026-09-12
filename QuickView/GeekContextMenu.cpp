@@ -654,11 +654,24 @@ void GeekContextMenu::CalculateLayout() {
     GetMonitorInfoW(hMon, &mi);
     float waH = static_cast<float>(mi.rcWork.bottom - mi.rcWork.top) / m_scale;
 
-    m_maxBodyH = (waH * 0.85f) - m_actionRowH - MENU_PAD * 2.0f;
+    // Use full work area height with safety margin instead of arbitrary 0.85 scaling.
+    const float bottomPad = m_actions.empty() ? 16.0f : MENU_PAD;
+    const float nonBodyH = m_bodyStartY + bottomPad;
+    constexpr float SCREEN_MARGIN = 8.0f;
+    const float maxAvailableTotalH = std::max(100.0f, waH - SCREEN_MARGIN * 2.0f);
+    const float calculatedMaxBodyH = std::max(0.0f, maxAvailableTotalH - nonBodyH);
 
-    float maxScroll = std::max(0.0f, m_totalBodyH - m_maxBodyH);
-    if (m_scrollOffset > maxScroll) m_scrollOffset = maxScroll;
-    if (m_scrollOffset < 0) m_scrollOffset = 0;
+    // Provide 4.0 DIP slack to avoid subpixel rounding triggering scroll on high-DPI displays.
+    constexpr float TOLERANCE_SLACK = 4.0f;
+    if (m_totalBodyH <= calculatedMaxBodyH + TOLERANCE_SLACK) {
+        m_maxBodyH = m_totalBodyH;
+        m_scrollOffset = 0.0f;
+    } else {
+        m_maxBodyH = calculatedMaxBodyH;
+        float maxScroll = std::max(0.0f, m_totalBodyH - m_maxBodyH);
+        if (m_scrollOffset > maxScroll) m_scrollOffset = maxScroll;
+        if (m_scrollOffset < 0.0f) m_scrollOffset = 0.0f;
+    }
 }
 
 SIZE GeekContextMenu::GetWindowSize() const {
