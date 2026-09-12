@@ -10504,7 +10504,8 @@ SKIP_EDGE_NAV:;
 
         if (GetPaneContext(PaneSlot::Primary).resource) {
             float currentRealScale = GetCurrentRealScale(hwnd);
-            bool is100Percent = (fabsf(currentRealScale - 1.0f) < 0.05f);
+            // Tightened tolerance to 0.001f (0.1%) to prevent near-fit zoom levels (e.g., 99%) from being falsely treated as 100%
+            bool is100Percent = (fabsf(currentRealScale - 1.0f) < 0.001f);
 
             HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
             MONITORINFO mi{}; mi.cbSize = sizeof(mi); GetMonitorInfoW(hMon, &mi);
@@ -17379,7 +17380,8 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
             PerformCompareZoom100(hwnd);
         } else if (GetPaneContext(PaneSlot::Primary).resource) {
             float currentRealScale = GetCurrentRealScale(hwnd);
-            bool is100Percent = (fabsf(currentRealScale - 1.0f) < 0.05f);
+            // Tightened tolerance to 0.001f (0.1%) to prevent near-fit zoom levels (e.g., 99%) from being falsely treated as 100%
+            bool is100Percent = (fabsf(currentRealScale - 1.0f) < 0.001f);
             bool isMaximizedOrFullscreen = IsZoomed(hwnd) || g_isFullScreen;
             bool isWindowFixed = isMaximizedOrFullscreen || g_runtime.LockWindowSize;
 
@@ -17405,10 +17407,10 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
             PerformCompareZoomFit(hwnd);
         } else if (GetPaneContext(PaneSlot::Primary).resource) {
             float currentRealScale = GetCurrentRealScale(hwnd);
-            bool is100Percent = (fabsf(currentRealScale - 1.0f) < 0.05f);
+            bool is100Percent = (fabsf(currentRealScale - 1.0f) < 0.001f);
             bool isMaximizedOrFullscreen = IsZoomed(hwnd) || g_isFullScreen;
             bool isWindowFixed = isMaximizedOrFullscreen || g_runtime.LockWindowSize;
-            bool isFitZoom = (fabsf(GetPaneContext(PaneSlot::Primary).view.Zoom - 1.0f) < 0.02f);
+            bool isFitZoom = (fabsf(GetPaneContext(PaneSlot::Primary).view.Zoom - 1.0f) < 0.001f);
 
             if (isWindowFixed) {
                 if (isFitZoom && !is100Percent) {
