@@ -193,6 +193,7 @@ private:
     D2D1_RECT_F GetComboDropdownRect(const SettingsItem* item) const;
     void RenderUpdateToast(ID2D1DeviceContext* pRT, float hudX, float hudY, float hudW, float hudH);
     void RenderTooltip(ID2D1DeviceContext* pRT);
+    void DrawNewBadge(ID2D1DeviceContext* pRT, float badgeX, float badgeY, float s);
 
     // Keyboard navigation helper methods
     bool IsItemInteractive(const SettingsItem& item) const;

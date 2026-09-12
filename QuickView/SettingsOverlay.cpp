@@ -1328,7 +1328,6 @@ void SettingsOverlay::BuildMenu() {
     tabTheme.items.push_back({ AppStrings::Settings_Header_CoreMaterial, OptionType::Header });
 
     SettingsItem itemContextMenuBackdrop = { AppStrings::Settings_Label_ContextMenuBackdrop, OptionType::Segment, nullptr, nullptr, BindEnum(&g_config.MenuBackdropStyle), nullptr, 0, 0, {L"Acrylic", L"Mica", L"Mica Alt"} };
-    itemContextMenuBackdrop.isNewOption = true;
     itemContextMenuBackdrop.tooltipText = AppStrings::Settings_Tooltip_BackdropEffectsTip;
     itemContextMenuBackdrop.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
         if (g_config.MenuBackdropStyle != 0) { // 1=Mica, 2=Mica Alt
@@ -1510,7 +1509,6 @@ void SettingsOverlay::BuildMenu() {
     
     // Canvas Color Segment
     SettingsItem itemColor = { AppStrings::Settings_Label_CanvasColor, OptionType::Segment, nullptr, nullptr, BindEnum(&g_config.CanvasColor), nullptr, 0, 0, {AppStrings::Settings_Option_Black, AppStrings::Settings_Option_White, AppStrings::Settings_Option_Grid, AppStrings::Settings_Option_Custom, AppStrings::Settings_Option_Effects} };
-    itemColor.isNewOption = true;
     itemColor.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
         ApplyWindowTheme(overlay->m_hwnd);
         overlay->m_pendingRebuild = true;
@@ -1520,7 +1518,6 @@ void SettingsOverlay::BuildMenu() {
     if (g_config.CanvasColor == 4) {
         // Effects mode: Show sub-segment for selecting effect (Mica, Mica Alt, Acrylic)
         SettingsItem itemCanvasEffectStyle = { AppStrings::Settings_Label_CanvasEffectStyle, OptionType::Segment, nullptr, nullptr, BindEnum(&g_config.CanvasEffectStyle), nullptr, 0, 0, {L"Mica", L"Mica Alt", L"Acrylic"} };
-        itemCanvasEffectStyle.isNewOption = true;
         itemCanvasEffectStyle.tooltipText = AppStrings::Settings_Tooltip_BackdropEffectsTip;
         itemCanvasEffectStyle.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
             ApplyWindowTheme(overlay->m_hwnd);
@@ -1566,7 +1563,6 @@ void SettingsOverlay::BuildMenu() {
     itemUiScale.minVal = 0.0f;
     itemUiScale.maxVal = 11.0f;
     itemUiScale.step = 1.0f;
-    itemUiScale.isNewOption = true;
     itemUiScale.options = { AppStrings::Settings_Option_Auto, L"75%", L"90%", L"100%", L"110%", L"125%", L"150%", L"175%", L"200%", L"225%", L"250%", L"300%" };
     itemUiScale.onLiveUpdate = []([[maybe_unused]] SettingsOverlay* overlay, SettingsItem* item) {
         if (item && item->pFloatVal) {
@@ -1647,7 +1643,6 @@ void SettingsOverlay::BuildMenu() {
     tabVisuals.items.push_back(itemGalleryMin);
 
     SettingsItem itemBorderInd = { AppStrings::Settings_Label_ShowBorderIndicator, OptionType::Segment, nullptr, &g_config.BorderIndicatorCustomR, &g_config.ShowBorderIndicator, nullptr, 0, 0, {AppStrings::Settings_Option_Off, AppStrings::Settings_Option_On, AppStrings::Settings_Option_Custom} };
-    itemBorderInd.isNewOption = true;
     itemBorderInd.tooltipText = AppStrings::Settings_Tooltip_ShowBorderIndicator;
     itemBorderInd.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
         if (g_config.ShowBorderIndicator == 2) {
@@ -1769,7 +1764,6 @@ void SettingsOverlay::BuildMenu() {
     
     // Custom Lite Info Panel Section (Group Header + Cloud Lists + Presets)
     SettingsItem headerCustomLite = { AppStrings::Settings_Label_CustomLiteInfoPanel, OptionType::Header };
-    headerCustomLite.isNewOption = true;
     tabVisuals.items.push_back(headerCustomLite);
     
     SettingsItem tagCloudNormal;
@@ -1806,7 +1800,6 @@ void SettingsOverlay::BuildMenu() {
     tabVisuals.items.push_back(separatorPreset);
 
     SettingsItem headerCustomFull = { AppStrings::Settings_Label_CustomFullInfoPanel, OptionType::Header };
-    headerCustomFull.isNewOption = true;
     tabVisuals.items.push_back(headerCustomFull);
     
     SettingsItem tagCloudFullNormal;
@@ -1895,7 +1888,6 @@ void SettingsOverlay::BuildMenu() {
         AppStrings::Settings_Option_DoubleClick_WheelMode2,
         AppStrings::Settings_Option_None
     };
-    itemDoubleClick.isNewOption = true;
     itemDoubleClick.tooltipText = AppStrings::Settings_Tooltip_DoubleClick;
     itemDoubleClick.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
         extern void ResetWheelPanMode();
@@ -2012,7 +2004,6 @@ void SettingsOverlay::BuildMenu() {
         tabControl.items.push_back(itemGalleryTrigger);
 
         SettingsItem itemKeepVisible = { AppStrings::Settings_Label_KeepGalleryVisibleOnThumbnailClick, OptionType::Toggle, &g_config.GalleryKeepVisibleOnThumbnailClick };
-        itemKeepVisible.isNewOption = true;
         itemKeepVisible.tooltipText = AppStrings::Settings_Tooltip_KeepGalleryVisibleOnThumbnailClick;
         itemKeepVisible.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
             if (g_config.GalleryKeepVisibleOnThumbnailClick) {
@@ -2035,7 +2026,6 @@ void SettingsOverlay::BuildMenu() {
             itemAreaHeight.maxVal = 100.0f;
             itemAreaHeight.step = 1.0f;
             itemAreaHeight.displayFormat = L"%.0f px";
-            itemAreaHeight.isNewOption = true;
             itemAreaHeight.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
             tabControl.items.push_back(itemAreaHeight);
         } else if (g_config.GalleryTriggerMode == 1) {
@@ -2044,7 +2034,6 @@ void SettingsOverlay::BuildMenu() {
             itemDwell.maxVal = 2.00f;
             itemDwell.step = 0.01f;
             itemDwell.displayFormat = L"%.2f s";
-            itemDwell.isNewOption = true;
             itemDwell.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
             tabControl.items.push_back(itemDwell);
         }
@@ -2054,7 +2043,6 @@ void SettingsOverlay::BuildMenu() {
         itemExitDelay.maxVal = 3.00f;
         itemExitDelay.step = 0.05f;
         itemExitDelay.displayFormat = L"%.2f s";
-        itemExitDelay.isNewOption = true;
         itemExitDelay.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
         tabControl.items.push_back(itemExitDelay);
     }
@@ -2124,20 +2112,11 @@ void SettingsOverlay::BuildMenu() {
         item.type = OptionType::HotkeyBindRow;
         item.hotkeyAction = action;
         
-        if (action == HotkeyAction::EnterCropMode || action == HotkeyAction::SaveAs ||
-            action == HotkeyAction::CopyPixels || action == HotkeyAction::CopyFileItem || action == HotkeyAction::CopyPath ||
-            action == HotkeyAction::ToggleFilmstrip || action == HotkeyAction::ToggleSettings ||
-            action == HotkeyAction::SuperResolution) {
-            item.isNewOption = true;
-        }
         if (action == HotkeyAction::EnterCropMode) {
             item.tooltipText = AppStrings::Settings_Tooltip_CropModeHotkey;
         }
         if (action == HotkeyAction::Loupe) {
             item.tooltipText = AppStrings::Settings_Tooltip_LoupeHotkey;
-        }
-        if (action == HotkeyAction::ToggleMinimap) {
-            item.isNewOption = true;
         }
         // Apply pending conflict status if any
         if (m_lastConflictAction == action && GetTickCount() - m_lastConflictTime < 3000) {
@@ -2177,6 +2156,7 @@ void SettingsOverlay::BuildMenu() {
     // Zoom Mode In
     SettingsItem itemZoomIn = { AppStrings::Settings_Label_ZoomModeIn, OptionType::ComboBox, nullptr, nullptr, BindEnum(&g_config.ZoomModeIn), nullptr, 0, 0, {AppStrings::Settings_Option_Auto, AppStrings::Settings_Option_Linear, AppStrings::Settings_Option_Nearest, AppStrings::Settings_Option_HighQualityCubic, AppStrings::Settings_Option_FSR} };
     itemZoomIn.tooltipText = AppStrings::Settings_Tooltip_ZoomModeIn;
+    // [NEW-Badge] Added in v6.41.0 (AMD FSR 1.0 & upscaling algorithms)
     itemZoomIn.isNewOption = true;
     itemZoomIn.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
         SaveConfig();
@@ -2195,6 +2175,7 @@ void SettingsOverlay::BuildMenu() {
     itemFsrSharpness.step = 0.05f;
     itemFsrSharpness.displayFormat = L"%.2f";
     itemFsrSharpness.isDisabled = (g_config.ZoomModeIn != 4);
+    // [NEW-Badge] Added in v6.41.0 (AMD FSR 1.0 sharpness)
     itemFsrSharpness.isNewOption = true;
     itemFsrSharpness.onChange2 = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
         SaveConfig();
@@ -2616,6 +2597,8 @@ void SettingsOverlay::BuildMenu() {
             itemAccordion.isActivated = s_srPluginExpanded;
             itemAccordion.isDisabled = !isCurrentModelInstalled;
             itemAccordion.disabledText = !isCurrentModelInstalled ? AppStrings::Settings_Prompt_DownloadModelFirst : L"";
+            // [NEW-Badge] Added in v6.44.0 (AI Super-Resolution Plugin)
+            itemAccordion.isNewOption = true;
             
             // Clicking Card Header body / arrow toggles expansion
             itemAccordion.onChange = []([[maybe_unused]] SettingsOverlay* overlay, SettingsItem* item) {
@@ -3472,7 +3455,6 @@ void SettingsOverlay::BuildMenu() {
     tabAdvanced.items.push_back(itemCustomEditor);
 
     SettingsItem itemConfigIO = { AppStrings::Settings_Header_ConfigManagement, OptionType::DualActionButton };
-    itemConfigIO.isNewOption = true;
     itemConfigIO.buttonText = AppStrings::Settings_Action_ImportTheme;
     itemConfigIO.buttonText2 = AppStrings::Settings_Action_ExportTheme;
     itemConfigIO.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) {
@@ -4043,9 +4025,8 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
         
         m_textFormatBadge->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         m_textFormatBadge->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        pRT->DrawText(L"↑↓ Move  ←→ Adjust", 19, m_textFormatBadge.Get(), hintRect1, m_brushTextDim.Get());
-        pRT->DrawText(L"Enter OK  ^Tab Switch", 21, m_textFormatBadge.Get(), hintRect2, m_brushTextDim.Get());
-        m_textFormatBadge->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        pRT->DrawText(L"Tab / ↑↓  Navigate", 18, m_textFormatBadge.Get(), hintRect1, m_brushTextDim.Get());
+        pRT->DrawText(L"Ctrl+Tab  Switch Tab", 20, m_textFormatBadge.Get(), hintRect2, m_brushTextDim.Get());
 
         // 3. Content Area (Right portion of HUD)
         float contentX = hudX + sidebarW + padding;
@@ -4214,6 +4195,25 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                 m_textFormatHeader->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 pRT->DrawText(item.label.c_str(), (UINT32)item.label.length(), m_textFormatHeader.Get(), titleRect, isEnabled ? m_brushText.Get() : m_brushTextDim.Get());
 
+                if (item.isNewOption) {
+                    float titleTextW = 100.0f * s;
+                    ComPtr<IDWriteTextLayout> titleLayout;
+                    if (SUCCEEDED(m_dwriteFactory->CreateTextLayout(
+                            item.label.c_str(), (UINT32)item.label.length(), m_textFormatHeader.Get(),
+                            titleRight - titleLeft, headerH, &titleLayout))) {
+                        DWRITE_TEXT_METRICS metrics = {};
+                        if (SUCCEEDED(titleLayout->GetMetrics(&metrics))) {
+                            titleTextW = ceilf(metrics.widthIncludingTrailingWhitespace);
+                        }
+                    }
+                    float badgeW = 24.0f * s;
+                    float badgeH = 11.0f * s;
+                    float maxBadgeX = titleRight - badgeW;
+                    float badgeX = std::min(titleLeft + titleTextW + 8.0f * s, maxBadgeX);
+                    float badgeY = contentY + (headerH - badgeH) * 0.5f;
+                    DrawNewBadge(pRT, badgeX, badgeY, s);
+                }
+
                 contentY += headerH + (isExpanded ? 10.0f * s : 16.0f * s);
                 m_settingsContentHeight = (contentY - startContentY > m_settingsContentHeight) ? (contentY - startContentY) : m_settingsContentHeight;
                 continue;
@@ -4264,20 +4264,7 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                     float badgeX = std::min(contentX + textW + 6.0f * s, maxBadgeX);
                     // Align visually with header text center
                     float badgeY = contentY + 10.0f * s + (headerTextH - badgeH) / 2.0f;
-                    D2D1_RECT_F badgeRect = D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH);
-                    D2D1_ROUNDED_RECT roundedBadge = D2D1::RoundedRect(badgeRect, 2.0f * s, 2.0f * s);
-                    
-                    // Draw Capsule Background (Accent color with slight transparency)
-                    float origOpacity = m_brushAccent->GetOpacity();
-                    m_brushAccent->SetOpacity(origOpacity * 0.85f);
-                    pRT->FillRoundedRectangle(roundedBadge, m_brushAccent.Get());
-                    m_brushAccent->SetOpacity(origOpacity); // Restore
-                    
-                    // Draw Micro text "NEW" (Force white text on blue background)
-                    D2D1_RECT_F textRect = badgeRect;
-                    textRect.top += 0.5f * s; // Visual vertical alignment refinement
-                    textRect.bottom += 0.5f * s;
-                    pRT->DrawText(L"NEW", 3, m_textFormatBadge.Get(), textRect, m_brushWhite.Get());
+                    DrawNewBadge(pRT, badgeX, badgeY, s);
                 }
 
                 contentY += 50.0f * s; // More spacing for header
@@ -4744,20 +4731,7 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                     float maxBadgeX = contentX + labelWidth - badgeW;
                     float badgeX = std::min(contentX + textW + 5.0f * s, maxBadgeX);
                     float badgeY = contentY + (rowHeight - badgeH) / 2.0f;
-                    D2D1_RECT_F badgeRect = D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH);
-                    D2D1_ROUNDED_RECT roundedBadge = D2D1::RoundedRect(badgeRect, 2.0f * s, 2.0f * s);
-                    
-                    // Draw Capsule Background (Accent color with slight transparency)
-                    float origOpacity = m_brushAccent->GetOpacity();
-                    m_brushAccent->SetOpacity(origOpacity * 0.85f);
-                    pRT->FillRoundedRectangle(roundedBadge, m_brushAccent.Get());
-                    m_brushAccent->SetOpacity(origOpacity); // Restore
-                    
-                    // Draw Micro text "NEW" (Force white text on blue background)
-                    D2D1_RECT_F textRect = badgeRect;
-                    textRect.top += 0.5f * s; // Visual vertical alignment refinement
-                    textRect.bottom += 0.5f * s;
-                    pRT->DrawText(L"NEW", 3, m_textFormatBadge.Get(), textRect, m_brushWhite.Get());
+                    DrawNewBadge(pRT, badgeX, badgeY, s);
                 }
 
                 // Tooltip Icon (?)
@@ -7084,6 +7058,26 @@ void SettingsOverlay::OnHotkeyCaptured(const KeyCombo& combo) {
         SaveConfig();
     }
     if (m_hwnd) InvalidateRect(m_hwnd, NULL, FALSE);
+}
+
+void SettingsOverlay::DrawNewBadge(ID2D1DeviceContext* pRT, float badgeX, float badgeY, float s) {
+    if (!pRT || !m_brushAccent || !m_brushWhite || !m_textFormatBadge) return;
+
+    float badgeW = 24.0f * s;
+    float badgeH = 11.0f * s;
+    D2D1_RECT_F badgeRect = D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH);
+    D2D1_ROUNDED_RECT roundedBadge = D2D1::RoundedRect(badgeRect, 2.0f * s, 2.0f * s);
+
+    // Draw Capsule Background (Accent color with slight transparency)
+    float origOpacity = m_brushAccent->GetOpacity();
+    m_brushAccent->SetOpacity(origOpacity * 0.85f);
+    pRT->FillRoundedRectangle(roundedBadge, m_brushAccent.Get());
+    m_brushAccent->SetOpacity(origOpacity);
+
+    // Draw Micro text "NEW" strictly centered horizontally and vertically
+    m_textFormatBadge->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    m_textFormatBadge->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    pRT->DrawText(L"NEW", 3, m_textFormatBadge.Get(), badgeRect, m_brushWhite.Get());
 }
 
 #if defined(__clang__)
