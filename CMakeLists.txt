@@ -448,6 +448,7 @@ add_executable(QuickViewTests
     tests/GeekWidgetsTests.cpp
     tests/PluginHostTests.cpp
     tests/RatingMetadataTests.cpp
+    tests/TileJpegTests.cpp
     QuickView/GeekWidgets.cpp
     QuickView/GeekIconLibrary.cpp
     QuickView/GeekIconData.cpp

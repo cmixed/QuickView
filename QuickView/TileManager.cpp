@@ -385,24 +385,23 @@ namespace QuickView {
         return m_layers[lod].get();
     }
 
-    void TileManager::OnTileReady(TileKey key, std::shared_ptr<RawImageFrame> frame) {
+        void TileManager::OnTileReady(TileKey key, std::shared_ptr<RawImageFrame> frame) {
         std::lock_guard lock(m_mutex);
         TileEntry* entry = GetTileEntry(key);
         if (entry) {
-            // Check if still wanted
-             if (entry->state.load() == TileStateCode::Empty) {
-                 // Cancelled
-                 return;
-             }
-             
-             if (entry->data) {
-                 entry->data->state = TileStateCode::Ready;
-                 entry->data->frame = frame;
-                 TileStateCode oldState = entry->state.exchange(TileStateCode::Ready);
-                 if (oldState != TileStateCode::Ready) {
-                     m_readyCount++;
-                 }
-             }
+            TileStateCode curState = entry->state.load();
+            if (curState == TileStateCode::Empty) {
+                return;
+            }
+            
+            if (entry->data) {
+                entry->data->state = TileStateCode::Ready;
+                entry->data->frame = frame;
+                TileStateCode oldState = entry->state.exchange(TileStateCode::Ready);
+                if (oldState != TileStateCode::Ready) {
+                    m_readyCount++;
+                }
+            }
         }
     }
 
@@ -504,16 +503,6 @@ namespace QuickView {
         if (endY > maxRows) endY = maxRows;
 
         progress.lod = self->m_currentLOD;
-        for (int y = startY; y < endY; ++y) {
-            for (int x = startX; x < endX; ++x) {
-                ++progress.totalTiles;
-                TileEntry* entry = layer->GetEntry(x, y);
-                if (entry && entry->state.load(std::memory_order_relaxed) == TileStateCode::Ready) {
-                    ++progress.readyTiles;
-                }
-            }
-        }
-
         return progress;
     }
 

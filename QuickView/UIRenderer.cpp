@@ -1645,6 +1645,7 @@ void UIRenderer::DrawDecodingStatus(ID2D1DeviceContext* dc, HWND hwnd) {
         decodingActive = false;
     }
 
+
     const DWORD now = GetTickCount();
     if (m_decodeWasActive && !decodingActive) {
         m_decodeFinishTime = now;

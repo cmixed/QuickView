@@ -2809,7 +2809,7 @@ HRESULT CImageLoader::FullDecodeToMMF(
       return p->buf;
     };
 
-    if (!WuffsLoader::DecodePNG(data, size, &w, &h, allocator, {}) ||
+    if (!WuffsLoader::DecodePNG(data, size, &w, &h, allocator, checkCancel) ||
         !allocOK) {
       QV_LOG("MMF_Decode", TraceLoggingString("PNG Failed", "Action"));
       return E_FAIL;
@@ -2829,7 +2829,7 @@ HRESULT CImageLoader::FullDecodeToMMF(
   // Works for AVIF, HEIC, TIFF, and any other format.
   // ---------------------------------------------------------------
   QuickView::RawImageFrame heapFrame;
-  HRESULT hr = FullDecodeFromMemory(data, size, &heapFrame);
+  HRESULT hr = FullDecodeFromMemory(data, size, &heapFrame, checkCancel);
   if (FAILED(hr) || !heapFrame.IsValid())
     return FAILED(hr) ? hr : E_FAIL;
 

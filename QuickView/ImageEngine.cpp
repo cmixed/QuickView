@@ -407,6 +407,12 @@ void ImageEngine::DispatchImageLoad(const std::wstring& path, ImageID imageId, u
                     m_loader->ComputeHistogramFromFrame(*cachedFrame, &e.metadata);
                 }
                 
+                // [Fix] When revisiting a cached Titan image, re-trigger master warmup so
+                // subsequent tile decodes at higher zoom levels find master backing ready.
+                if (enableTitan) {
+                    m_heavyPool->EnsureMasterWarmup(path, imageId, primaryMMF, targetSlot, generationId);
+                }
+
                 QueueEvent(std::move(e)); 
                 
                 return; 

@@ -205,33 +205,13 @@ void HeavyLanePool::ResetBenchState() {
         bag.masterCache = std::move(m_masterLOD0Cache);
         m_masterLOD0Cache = {};
     }
-    {
-        std::lock_guard lock(m_masterBackingMutex);
-        // [Fix Race Condition] libjxl's runner threads may still be writing to backing.view.
-        // We MUST NOT return it to the pool immediately if the thread is still active.
-        bool threadActive = m_masterWarmupThread.joinable();
-
-        if (m_masterBacking.isPooled && !threadActive) {
-            // [Instant Reuse] Only safe to return to pool if no thread is writing to it.
-            RelinquishToPool(std::move(m_masterBacking));
-        } else {
-            // If thread is active, we MUST move the store to the TrashBag so the GC 
-            // thread joins the worker BEFORE unmapping/deleting the file.
-            bag.backing = std::move(m_masterBacking);
-        }
+    if (bag.lodCache.pixels || bag.masterCache.pixels) {
+        EnqueueTrash(std::move(bag));
     }
 
-    // [Fix] Move warmup thread INTO the TrashBag so GC joins it
-    if (m_masterWarmupThread.joinable()) {
-        m_masterWarmupThread.request_stop();   // Signal decode to abort
-        bag.warmupThread = std::move(m_masterWarmupThread);
-    }
-    m_masterWarmupImageId.store(0, std::memory_order_release);
-    m_masterWarmupReady.store(false, std::memory_order_release);
-    m_lodCacheCond.notify_all();
-    
-    // Async cleanup: GC thread will join warmup, then destroy MMF + caches
-    EnqueueTrash(std::move(bag));
+    // [Fix] Safely stop warmup thread and retire associated backing store under mutex protection
+    StopMasterWarmup();
+
     m_isProgressiveJPEG = false;
     m_isProgressiveJXL = false;
     m_lodCacheFailCount.store(0); // [B4] Reset fail counter on new image
@@ -742,56 +722,68 @@ void HeavyLanePool::SubmitTileBatch(const std::wstring& path, ImageID imageId, s
 // ============================================================================
 
 void HeavyLanePool::CancelOthers(ImageID currentId, PaneSlot targetSlot) {
-    std::lock_guard lock(m_poolMutex);
-    
-// 1. Clear Job Queue of non-matching IDs
-    auto it = m_pendingJobs.begin();
-    int removedTiles = 0;
-    while (it != m_pendingJobs.end()) {
-        if (it->targetSlot == targetSlot && it->imageId != currentId) {
-            if (it->type == JobType::Tile) {
-                removedTiles++;
-                // [Dedup] Remove from in-flight set
-                m_inFlightTiles.erase(MakeTileHash(it->tileCoord.col, it->tileCoord.row, it->tileCoord.lod));
+    {
+        std::lock_guard lock(m_poolMutex);
+        
+        // 1. Clear Job Queue of non-matching IDs
+        auto it = m_pendingJobs.begin();
+        int removedTiles = 0;
+        while (it != m_pendingJobs.end()) {
+            if (it->targetSlot == targetSlot && it->imageId != currentId) {
+                if (it->type == JobType::Tile) {
+                    removedTiles++;
+                    // [Dedup] Remove from in-flight set
+                    m_inFlightTiles.erase(MakeTileHash(it->tileCoord.col, it->tileCoord.row, it->tileCoord.lod));
+                }
+                it = m_pendingJobs.erase(it);
+                m_cancelCount++;
+            } else {
+                ++it;
             }
-            it = m_pendingJobs.erase(it);
-            m_cancelCount++;
-        } else {
-            ++it;
+        }
+        if (removedTiles > 0) m_activeTileJobs.fetch_sub(removedTiles);
+        
+        // 2. Stop BUSY workers working on old IDs
+        for (auto& w : m_workers) {
+            if (w.state == WorkerState::BUSY && w.currentId != currentId) {
+                w.stopSource.request_stop();
+                // [Phase 4.1] Kill any active subprocess for this worker immediately
+                if (w.activeWorkerProcess) {
+                    TerminateProcess(w.activeWorkerProcess, static_cast<UINT>(E_ABORT));
+                    // Do not close handle here, the thread's wait loop will close it or we close it on reuse
+                }
+            }
         }
     }
-    if (removedTiles > 0) m_activeTileJobs.fetch_sub(removedTiles);
-    
-    // 2. Stop BUSY workers working on old IDs
-    for (auto& w : m_workers) {
-        if (w.state == WorkerState::BUSY && w.currentId != currentId) {
-            w.stopSource.request_stop();
-            // [Phase 4.1] Kill any active subprocess for this worker immediately
-            if (w.activeWorkerProcess) {
-                TerminateProcess(w.activeWorkerProcess, static_cast<UINT>(E_ABORT));
-                // Do not close handle here, the thread's wait loop will close it or we close it on reuse
-            }
-        }
+
+    // 3. Immediately abort any master warmup belonging to the old image
+    if (m_masterWarmupRunning.load(std::memory_order_relaxed) &&
+        m_masterWarmupImageId.load(std::memory_order_relaxed) != currentId) {
+        StopMasterWarmup();
     }
 }
 
 void HeavyLanePool::CancelAll() {
-    std::lock_guard lock(m_poolMutex);
-    
-    int discardedTiles = 0;
-    for (const auto& job : m_pendingJobs) {
-        if (job.type == JobType::Tile) discardedTiles++;
-    }
-    if (discardedTiles > 0) m_activeTileJobs.fetch_sub(discardedTiles);
-    
-    m_pendingJobs.clear();
-    m_inFlightTiles.clear(); // [Dedup] Reset in-flight tracking
-    for (auto& w : m_workers) {
-        w.stopSource.request_stop();
-        if (w.activeWorkerProcess) {
-            TerminateProcess(w.activeWorkerProcess, static_cast<UINT>(E_ABORT));
+    {
+        std::lock_guard lock(m_poolMutex);
+        
+        int discardedTiles = 0;
+        for (const auto& job : m_pendingJobs) {
+            if (job.type == JobType::Tile) discardedTiles++;
+        }
+        if (discardedTiles > 0) m_activeTileJobs.fetch_sub(discardedTiles);
+        
+        m_pendingJobs.clear();
+        m_inFlightTiles.clear(); // [Dedup] Reset in-flight tracking
+        for (auto& w : m_workers) {
+            w.stopSource.request_stop();
+            if (w.activeWorkerProcess) {
+                TerminateProcess(w.activeWorkerProcess, static_cast<UINT>(E_ABORT));
+            }
         }
     }
+
+    StopMasterWarmup();
 }
 
 // ============================================================================
@@ -1202,7 +1194,14 @@ void HeavyLanePool::PerformDecode(int workerId, const JobInfo& job, std::stop_to
         }
     } guard{ this, job.tileCoord, job.type == JobType::Tile };
 
-    if (job.path.empty()) return;
+    if (job.path.empty()) {
+        if (job.type == JobType::Tile) {
+            if (auto tm = m_parent->GetTileManager()) {
+                tm->OnTileCancelled(TileKey::From(job.tileCoord.col, job.tileCoord.row, job.tileCoord.lod));
+            }
+        }
+        return;
+    }
     
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -1218,7 +1217,14 @@ void HeavyLanePool::PerformDecode(int workerId, const JobInfo& job, std::stop_to
         return cc->st->stop_requested() || cc->src->stop_requested();
     };
 
-    if (cancelPred()) return;
+    if (cancelPred()) {
+        if (job.type == JobType::Tile) {
+            if (auto tm = m_parent->GetTileManager()) {
+                tm->OnTileCancelled(TileKey::From(job.tileCoord.col, job.tileCoord.row, job.tileCoord.lod));
+            }
+        }
+        return;
+    }
 
     // [Phase 4.1] Bug 3: Visibility Culling - Drop stale jobs instantly
     if (job.type == JobType::Tile) {
@@ -1439,18 +1445,20 @@ void HeavyLanePool::PerformDecode(int workerId, const JobInfo& job, std::stop_to
                        }
                    }
 
+                   QuantumArena* effectiveArena = m_isTitanMode.load(std::memory_order_relaxed) ? nullptr : &arena;
                    if (!animResolved) {
-                       hr = m_loader->LoadToFrameFromMemory(job.mmf->data(), job.mmf->size(), &rawFrame, &arena, targetW, targetH, &loaderName, &meta);
+                       hr = m_loader->LoadToFrameFromMemory(job.mmf->data(), job.mmf->size(), &rawFrame, effectiveArena, targetW, targetH, &loaderName, &meta);
                        if (FAILED(hr)) {
                            // Fallback to file if MMF decode fails
-                           hr = m_loader->LoadToFrame(job.path.c_str(), &rawFrame, &arena, targetW, targetH, &loaderName, cancelPred, &meta, !job.isFullDecode, m_isTitanMode, job.targetHdrHeadroomStops, job.targetPrimaries);
+                           hr = m_loader->LoadToFrame(job.path.c_str(), &rawFrame, effectiveArena, targetW, targetH, &loaderName, cancelPred, &meta, !job.isFullDecode, m_isTitanMode, job.targetHdrHeadroomStops, job.targetPrimaries);
                        } else {
                            // MMF Decode Success -> Trigger Touch-Up Prefetch!
                            TriggerPrefetch(job.mmf);
                        }
                    }
               } else {
-                   hr = m_loader->LoadToFrame(job.path.c_str(), &rawFrame, &arena, targetW, targetH, &loaderName, cancelPred, &meta, !job.isFullDecode, m_isTitanMode, job.targetHdrHeadroomStops, job.targetPrimaries);
+                   QuantumArena* effectiveArena = m_isTitanMode.load(std::memory_order_relaxed) ? nullptr : &arena;
+                   hr = m_loader->LoadToFrame(job.path.c_str(), &rawFrame, effectiveArena, targetW, targetH, &loaderName, cancelPred, &meta, !job.isFullDecode, m_isTitanMode, job.targetHdrHeadroomStops, job.targetPrimaries);
               }
               } // end FAILED(hr) inline fallback
               // [Baseline Benchmark] Measure performance from Standard (base layer) decode
@@ -1738,6 +1746,7 @@ void HeavyLanePool::PerformDecode(int workerId, const JobInfo& job, std::stop_to
 tile_decode_done: ; // [P14] Jump target for fast path (skip legacy TJ decode)
           auto decodeEnd = std::chrono::high_resolution_clock::now();
           int decodeMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(decodeEnd - decodeStart).count();
+
           
           // [Dynamic Regulation] Feedback loop
           if (job.type == JobType::Tile) {
@@ -1990,7 +1999,7 @@ HeavyLanePool::PoolStats HeavyLanePool::GetStats() const {
     stats.lastDecodeTimeMs = m_lastDecodeTimeMs.load();
     stats.lastDecodeId = m_lastDecodeId.load();
     // [Fix] Only report as active if it's actually running and not finished
-    stats.masterWarmupActive = m_masterWarmupThread.joinable() && !m_masterWarmupReady.load();
+    stats.masterWarmupActive = m_masterWarmupRunning.load(std::memory_order_relaxed) && !m_masterWarmupReady.load(std::memory_order_relaxed);
     stats.activeTileJobs = m_activeTileJobs.load();
     
     for (const auto& w : m_workers) {
@@ -2052,8 +2061,8 @@ void HeavyLanePool::GetWorkerSnapshots(WorkerSnapshot* outBuffer, int capacity, 
 
 bool HeavyLanePool::IsIdle() const {
     std::lock_guard lock(m_poolMutex);
-    // [Fix] Background warmup is only "busy" if it's joinable AND not yet ready.
-    bool warmingUp = m_masterWarmupThread.joinable() && !m_masterWarmupReady.load();
+    // [Fix] Background warmup is only "busy" if it's running AND not yet ready.
+    bool warmingUp = m_masterWarmupRunning.load(std::memory_order_relaxed) && !m_masterWarmupReady.load(std::memory_order_relaxed);
     return m_busyCount.load() == 0 && m_pendingJobs.empty() && !warmingUp;
 }
 
@@ -2118,32 +2127,38 @@ bool HeavyLanePool::ShouldWarmupMasterBacking() const {
             fmt == QuickView::TitanFormat::JXL);
 }
 
-void HeavyLanePool::StopMasterWarmup() {
+void HeavyLanePool::StopMasterWarmupLocked() {
+    TrashBag bag;
     if (m_masterWarmupThread.joinable()) {
         m_masterWarmupThread.request_stop();
         
         // [Fix Bug #85] NO SYNC JOIN HERE! 
         // Synchronous join() blocks the main dispatcher/UI thread during rapid scrolling.
         // Instead, we move the thread ownership into a TrashBag and let GC handle it.
-        TrashBag bag;
         bag.warmupThread = std::move(m_masterWarmupThread);
-        
-        // [Safety Fix] Move the backing store associated with this thread into the trash bag.
-        // This ensures the MMF view remains mapped until the thread is joined in the GC thread.
-        {
-            std::lock_guard lock(m_masterBackingMutex);
-            // If the backing store belongs to the image we are stopping, or is incomplete (imageId=0)
-            if (m_masterBacking.view && 
-                (m_masterBacking.imageId == m_masterWarmupImageId.load() || m_masterBacking.imageId == 0)) {
-                bag.backing = std::move(m_masterBacking);
-                m_masterBacking = {}; // Ensure m_masterBacking is clear
-            }
-        }
-        EnqueueTrash(std::move(bag));
     }
+    m_masterWarmupRunning.store(false, std::memory_order_release);
     m_masterWarmupImageId.store(0, std::memory_order_release);
     m_masterWarmupReady.store(false, std::memory_order_release);
     m_lodCacheCond.notify_all(); // Wake any waiters so they can re-check
+
+    // [Safety Fix] Move the backing store associated with this thread into the trash bag.
+    // This ensures the MMF view remains mapped until the thread is joined in the GC thread.
+    {
+        std::lock_guard lock(m_masterBackingMutex);
+        if (m_masterBacking.view) {
+            bag.backing = std::move(m_masterBacking);
+            m_masterBacking = {}; // Ensure m_masterBacking is clear
+        }
+    }
+    if (bag.warmupThread.joinable() || bag.backing.view) {
+        EnqueueTrash(std::move(bag));
+    }
+}
+
+void HeavyLanePool::StopMasterWarmup() {
+    std::lock_guard lock(m_masterWarmupMutex);
+    StopMasterWarmupLocked();
 }
 
 void HeavyLanePool::EnsureMasterWarmup(const std::wstring& path, ImageID imageId, std::shared_ptr<QuickView::MappedFile> mmf, PaneSlot targetSlot, uint64_t generationId) {
@@ -2155,23 +2170,30 @@ void HeavyLanePool::EnsureMasterWarmup(const std::wstring& path, ImageID imageId
         return;
     }
 
+    std::lock_guard lock(m_masterWarmupMutex);
+
     // Already warming up this image.
     if (m_masterWarmupThread.joinable() &&
         m_masterWarmupImageId.load(std::memory_order_acquire) == imageId) {
         return;
     }
 
-    StopMasterWarmup();
+    StopMasterWarmupLocked();
     m_masterWarmupImageId.store(imageId, std::memory_order_release);
     m_masterWarmupReady.store(false, std::memory_order_release);
+    m_masterWarmupRunning.store(true, std::memory_order_release);
     const uint32_t warmupGen = m_generationID.load(std::memory_order_acquire);
 
     m_masterWarmupThread = std::jthread([this, path, imageId, mmf, warmupGen, targetSlot, generationId](std::stop_token st) {
         // [Fix] Ensure the UI marquee stops even if we exit early (failure/stop)
         struct Finalizer {
             std::atomic<bool>* ready;
-            ~Finalizer() { ready->store(true, std::memory_order_release); }
-        } finalizer{ &m_masterWarmupReady };
+            std::atomic<bool>* running;
+            ~Finalizer() {
+                ready->store(true, std::memory_order_release);
+                running->store(false, std::memory_order_release);
+            }
+        } finalizer{ &m_masterWarmupReady, &m_masterWarmupRunning };
 
         // [Refix Bug #85] IO Throttling
         // Warmup tasks (especially massive JXL decodes) MUST respect concurrency limits.
@@ -2418,21 +2440,26 @@ void HeavyLanePool::EnqueueTrash(TrashBag&& bag) {
         std::vector<TrashBag> localBatch;
         {
             std::lock_guard lock(m_gcMutex);
-            if (m_gcQueue.size() > (pressure ? 0 : 8)) {
-                localBatch.swap(m_gcQueue);
+            // [Safety Rule] Only synchronously reclaim pure-memory bags without active threads.
+            // NEVER call join() on warmupThread from the caller/UI thread (causes 30s-1min UI freeze).
+            auto it = m_gcQueue.begin();
+            while (it != m_gcQueue.end()) {
+                if (!it->warmupThread.joinable()) {
+                    localBatch.push_back(std::move(*it));
+                    it = m_gcQueue.erase(it);
+                } else {
+                    ++it;
+                }
             }
         }
         if (!localBatch.empty()) {
-            QV_LOG("GC_Lifecycle", TraceLoggingString("CRITICAL TrashBacklog SyncRecovery", "Action"));
-            for (auto& bag : localBatch) {
-                bag.warmupThread = {};
-            }
+            QV_LOG("GC_Lifecycle", TraceLoggingString("PureMemory SyncRecovery", "Action"));
             for (auto& bag : localBatch) {
                 if (bag.backing.isPooled) {
                     RelinquishToPool(std::move(bag.backing));
                 }
             }
-            localBatch.clear(); // RAII destruction of MMFs and Threads happens HERE.
+            localBatch.clear(); // Pure memory deallocation (zero stall)
         }
     }
 }
@@ -3190,7 +3217,7 @@ HRESULT HeavyLanePool::FullDecodeAndCacheLOD(Worker& worker, const JobInfo& job,
     
     // [P15] Decode full image — format-aware dispatch
     QuickView::RawImageFrame fullFrame;
-    HRESULT hr;
+    HRESULT hr = E_FAIL; // [Fix] Explicitly initialize to E_FAIL (prevents undefined behavior in Release-LTO)
     
     if (m_titanFormat.load() == QuickView::TitanFormat::JPEG) {
         // JPEG: use TurboJPEG with IDCT scaling (scale parameter is used)
@@ -3316,6 +3343,7 @@ HRESULT HeavyLanePool::FullDecodeAndCacheLOD(Worker& worker, const JobInfo& job,
             bool expectsMasterCache = ShouldWarmupMasterBacking();
             bool warmupResolved = false;  // Set true when warmup-wait path produces final result
             
+
             if (expectsMasterCache && m_masterWarmupImageId.load(std::memory_order_acquire) == job.imageId) {
                 // Warmup is building the Master Cache — wait for it
                 QV_LOG("Worker_Route", TraceLoggingString("Phase4 WaitMasterWarmup DirectToMMF", "Action"));
@@ -3551,7 +3579,7 @@ HRESULT HeavyLanePool::FullDecodeAndCacheLOD(Worker& worker, const JobInfo& job,
         QV_LOG("P14_FullDecode",
             TraceLoggingString("FAILED", "Action"),
             TraceLoggingUInt32((uint32_t)hr, "HR"));
-        return hr;
+        return FAILED(hr) ? hr : E_FAIL; // [Fix] Never leak spurious S_OK when fullFrame is invalid!
     }
 
     // Guard against undersized fallback buffers (e.g. 1x1 fake base).

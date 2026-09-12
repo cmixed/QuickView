@@ -16854,58 +16854,82 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
              targetH += (int)std::lround(164.0f * g_uiScale);
          }
 
-         // [Aspect-Preserving Screen Cap]
-         // Cap proportionally when the target window fits the full workspace rectangle.
-         float maxTargetW = (float)maxW;
-         float maxTargetH = (float)maxH;
-         bool isWindowCapped = false;
-         if ((float)targetW > maxTargetW || (float)targetH > maxTargetH) {
-             float scaleCap = (std::min)(maxTargetW / (float)targetW, maxTargetH / (float)targetH);
-             targetW = (int)std::lround((float)targetW * scaleCap);
-             targetH = (int)std::lround((float)targetH * scaleCap);
-             isWindowCapped = true;
-         }
+         // [Independent Axis Bounds Clamping]
+         // Clamp each axis independently to monitor workspace dimensions.
+         // This ensures narrow tall images expand horizontally when vertical space is exhausted,
+         // and wide panoramic images expand vertically when horizontal space is exhausted.
+         if (targetW > maxW) targetW = maxW;
+         if (targetH > maxH) targetH = maxH;
 
          if (targetW < (int)std::lround(GetMinWindowWidth())) targetW = (int)std::lround(GetMinWindowWidth());
          if (targetH < (int)std::lround(GetMinWindowHeight())) targetH = (int)std::lround(GetMinWindowHeight());
-
-         float effFinalWinH = (float)targetH - galleryH;
-         if (effFinalWinH < 1.0f) effFinalWinH = 1.0f;
-         float baseFit_next = (std::min)((float)targetW / imgW, effFinalWinH / imgH);
-         if (imgW < 200.0f && imgH < 200.0f && baseFit_next > 1.0f) {
-             baseFit_next = 1.0f;
-         }
-         float targetZoomState = (baseFit_next > 0.0001f) ? (newTotalScale / baseFit_next) : 1.0f;
 
          // 2. Compute target window outer rect
          const POINT* windowAnchor = (g_config.MouseAnchoredWindowZoom ? centerPt : nullptr);
          RECT targetRect = ExpandWindowRectToTargetWithinBounds(rcWin, targetW, targetH, bounds, windowAnchor);
 
+         // [Zero-Flicker Geometry Guarantee]
+         // Re-align targetW/targetH with actual targetRect physical dimensions after boundary containment,
+         // ensuring SetWindowPos, SyncDCompState, and OnPaint all operate on 100% identical pixel dimensions.
+         targetW = targetRect.right - targetRect.left;
+         targetH = targetRect.bottom - targetRect.top;
+
+         float effFinalWinH = (float)targetH - galleryH;
+         if (effFinalWinH < 1.0f) effFinalWinH = 1.0f;
+         float baseFit_next = ComputeBaseFitScaleForVisual(vs, (float)targetW, effFinalWinH);
+         float targetZoomState = (baseFit_next > 0.0001f) ? (newTotalScale / baseFit_next) : 1.0f;
+
          // 3. Compute client border offsets
          const int borderLeft = ptOldClientOrigin.x - rcWin.left;
          const int borderTop = ptOldClientOrigin.y - rcWin.top;
 
-         float oldZoom = GetPaneContext(PaneSlot::Primary).view.Zoom;
-         if (oldZoom < 0.0001f) oldZoom = 0.0001f;
-         float zoomRatio = targetZoomState / oldZoom;
+         // Real screen positions of old and new client content centers
+         const float oldCenterScreenX = (float)ptOldClientOrigin.x + currentWinW * 0.5f;
+         const float oldCenterScreenY = (float)ptOldClientOrigin.y + effCurrentWinH * 0.5f;
+         const float newCenterScreenX = (float)(targetRect.left + borderLeft) + (float)targetW * 0.5f;
+         const float newCenterScreenY = (float)(targetRect.top + borderTop) + effFinalWinH * 0.5f;
 
-         float startPanX = GetPaneContext(PaneSlot::Primary).view.PanX;
-         float startPanY = GetPaneContext(PaneSlot::Primary).view.PanY;
+         const float scaleRatio = (currentTotalScale > 0.0001f) ? (newTotalScale / currentTotalScale) : 1.0f;
+         const float startPanX = GetPaneContext(PaneSlot::Primary).view.PanX;
+         const float startPanY = GetPaneContext(PaneSlot::Primary).view.PanY;
          float targetPanX = 0.0f;
          float targetPanY = 0.0f;
 
-         if (isWindowCapped && windowAnchor) {
-             // Window is capped at screen bounds; hardware zoom takes over internally around mouse anchor
-             const float clientMouseX = (float)windowAnchor->x - ((float)targetRect.left + (float)borderLeft);
-             const float clientMouseY = (float)windowAnchor->y - ((float)targetRect.top + (float)borderTop);
-             const float mouseRelX = clientMouseX - (float)targetW * 0.5f;
-             const float mouseRelY = clientMouseY - (float)effFinalWinH * 0.5f;
-             targetPanX = startPanX * zoomRatio + mouseRelX * (1.0f - zoomRatio);
-             targetPanY = startPanY * zoomRatio + mouseRelY * (1.0f - zoomRatio);
+         if (windowAnchor) {
+             // Screen invariant anchor equation: compensates for window center movement across translation
+             const float dx_old = (float)windowAnchor->x - oldCenterScreenX;
+             const float dy_old = (float)windowAnchor->y - oldCenterScreenY;
+             const float dx_new = (float)windowAnchor->x - newCenterScreenX;
+             const float dy_new = (float)windowAnchor->y - newCenterScreenY;
+
+             targetPanX = startPanX * scaleRatio + (dx_new - scaleRatio * dx_old);
+             targetPanY = startPanY * scaleRatio + (dy_new - scaleRatio * dy_old);
          } else {
-             // Window adapts smoothly to image dimensions; image fills the client area symmetrically
+             // Center zoom: compensate for window center movement so image center remains invariant on screen
+             const float deltaCenterX = newCenterScreenX - oldCenterScreenX;
+             const float deltaCenterY = newCenterScreenY - oldCenterScreenY;
+             targetPanX = startPanX * scaleRatio - deltaCenterX;
+             targetPanY = startPanY * scaleRatio - deltaCenterY;
+         }
+
+         // [Zero-Jitter C0 Viewport Clamping]
+         // When scaled image dimension fits inside the client viewport, strictly center it (Pan = 0).
+         // When overflowing, smoothly clamp pan to avoid border jumping.
+         const float scaledW = vs.VisualSize.width * newTotalScale;
+         const float scaledH = vs.VisualSize.height * newTotalScale;
+         const float maxPanX = (std::max)(0.0f, (scaledW - (float)targetW) * 0.5f);
+         const float maxPanY = (std::max)(0.0f, (scaledH - effFinalWinH) * 0.5f);
+
+         if (maxPanX <= 0.5f) {
              targetPanX = 0.0f;
+         } else {
+             targetPanX = (std::clamp)(targetPanX, -maxPanX, maxPanX);
+         }
+
+         if (maxPanY <= 0.5f) {
              targetPanY = 0.0f;
+         } else {
+             targetPanY = (std::clamp)(targetPanY, -maxPanY, maxPanY);
          }
 
          // Direct Mode - Snap to target immediately with atomic DComp barrier
