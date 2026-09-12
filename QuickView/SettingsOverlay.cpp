@@ -4804,30 +4804,43 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
             bool isHovered = (&item == m_pHoverItem);
 
             switch (item.type) {
-                case OptionType::Toggle:
-                    item.interactRect = D2D1::RectF(controlRect.right - 44.0f * m_uiScale, controlRect.top + (controlRect.bottom - controlRect.top - 22.0f * m_uiScale) / 2.0f, controlRect.right, controlRect.top + (controlRect.bottom - controlRect.top - 22.0f * m_uiScale) / 2.0f + 22.0f * m_uiScale);
-                    if (item.isDisabled) {
-                        const float s = m_uiScale;
-                        float w = 44.0f * s;
-                        float h = 22.0f * s;
-                        float x = controlRect.right - w;
-                        float y = controlRect.top + (controlRect.bottom - controlRect.top - h) / 2.0f;
-                        D2D1_RECT_F toggleRect = D2D1::RectF(x, y, x + w, y + h);
+                case OptionType::Toggle: {
+                    const float padRight = 8.0f * m_uiScale;
+                    const float toggleRight = controlRect.right - padRight;
+                    const float s = m_uiScale;
+                    const float w = 44.0f * s;
+                    const float h = 22.0f * s;
+                    const float x = toggleRight - w;
+                    const float y = contentY + (rowHeight - h) * 0.5f;
+                    D2D1_RECT_F toggleRect = D2D1::RectF(x, y, toggleRight, y + h);
+                    item.interactRect = toggleRect;
 
-                        // Disabled gray background
+                    if (item.isDisabled) {
+                        const bool isLight = IsLightThemeActive();
                         ComPtr<ID2D1SolidColorBrush> brushDisabledBg;
-                        pRT->CreateSolidColorBrush(D2D1::ColorF(0.20f, 0.20f, 0.22f, 0.6f), &brushDisabledBg);
+                        ComPtr<ID2D1SolidColorBrush> brushDisabledBorder;
+                        ComPtr<ID2D1SolidColorBrush> brushDisabledKnob;
+
+                        D2D1_COLOR_F bgClr = isLight ? D2D1::ColorF(0.92f, 0.94f, 0.97f, 0.70f) : D2D1::ColorF(0.20f, 0.20f, 0.22f, 0.60f);
+                        D2D1_COLOR_F borderClr = isLight ? D2D1::ColorF(0.78f, 0.82f, 0.88f, 0.80f) : D2D1::ColorF(0.32f, 0.32f, 0.35f, 0.60f);
+                        D2D1_COLOR_F knobClr = isLight ? D2D1::ColorF(0.62f, 0.66f, 0.72f, 0.90f) : D2D1::ColorF(0.45f, 0.45f, 0.48f, 0.90f);
+
+                        pRT->CreateSolidColorBrush(bgClr, &brushDisabledBg);
+                        pRT->CreateSolidColorBrush(borderClr, &brushDisabledBorder);
+                        pRT->CreateSolidColorBrush(knobClr, &brushDisabledKnob);
+
                         if (brushDisabledBg) {
-                            pRT->FillRoundedRectangle(D2D1::RoundedRect(toggleRect, h/2, h/2), brushDisabledBg.Get());
+                            pRT->FillRoundedRectangle(D2D1::RoundedRect(toggleRect, h * 0.5f, h * 0.5f), brushDisabledBg.Get());
+                        }
+                        if (brushDisabledBorder) {
+                            pRT->DrawRoundedRectangle(D2D1::RoundedRect(toggleRect, h * 0.5f, h * 0.5f), brushDisabledBorder.Get(), 1.0f * s);
                         }
 
-                        // Disabled gray knob
+                        // Disabled knob
                         float knobSize = h - 4.0f;
                         float knobX = x + 2.0f;
                         float knobY = y + 2.0f;
-                        D2D1_ELLIPSE knob = D2D1::Ellipse(D2D1::Point2F(knobX + knobSize/2, knobY + knobSize/2), knobSize/2, knobSize/2);
-                        ComPtr<ID2D1SolidColorBrush> brushDisabledKnob;
-                        pRT->CreateSolidColorBrush(D2D1::ColorF(0.45f, 0.45f, 0.48f, 0.9f), &brushDisabledKnob);
+                        D2D1_ELLIPSE knob = D2D1::Ellipse(D2D1::Point2F(knobX + knobSize * 0.5f, knobY + knobSize * 0.5f), knobSize * 0.5f, knobSize * 0.5f);
                         if (brushDisabledKnob) {
                             pRT->FillEllipse(knob, brushDisabledKnob.Get());
                         }
@@ -4843,12 +4856,14 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                             }
                         }
                     } else {
-                        DrawToggle(pRT, controlRect, (item.pBoolVal ? *item.pBoolVal : false), isHovered);
+                        D2D1_RECT_F toggleContainerRect = D2D1::RectF(controlRect.left, contentY, toggleRight, contentY + rowHeight);
+                        DrawToggle(pRT, toggleContainerRect, (item.pBoolVal ? *item.pBoolVal : false), isHovered);
                         if (isFocused) {
                             float togH = item.interactRect.bottom - item.interactRect.top;
                             float togR = togH * 0.5f;
                             pRT->DrawRoundedRectangle(D2D1::RoundedRect(item.interactRect, togR, togR), m_brushAccent.Get(), 1.5f * s);
                         }
+                    }
 
                         // Status text (e.g., "Restart required")
                         // Auto-hide after 3 seconds
@@ -4962,17 +4977,24 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                       pRT->DrawRoundedRectangle(D2D1::RoundedRect(pillGeom.rect, pillGeom.radius, pillGeom.radius), m_brushAccent.Get(), 1.5f * s);
                   }
                 } break;
-                case OptionType::Segment:
-                    item.interactRect = controlRect;
+                case OptionType::Segment: {
+                    D2D1_RECT_F segRect = controlRect;
+                    if (!item.label.empty()) {
+                        const float padRight = 8.0f * s;
+                        const float segH = 24.0f * s;
+                        const float segCy = contentY + rowHeight * 0.5f;
+                        segRect = D2D1::RectF(controlX, segCy - segH * 0.5f, controlX + controlW - padRight, segCy + segH * 0.5f);
+                    }
+                    item.interactRect = segRect;
                     if (item.isDisabled) {
                         // Grayed out segment
-                        DrawSegment(pRT, controlRect, (item.pIntVal ? *item.pIntVal : 0), item.options, true, item.pFloatVal);
+                        DrawSegment(pRT, segRect, (item.pIntVal ? *item.pIntVal : 0), item.options, true, item.pFloatVal);
                     } else {
-                        DrawSegment(pRT, controlRect, (item.pIntVal ? *item.pIntVal : 0), item.options, false, item.pFloatVal);
+                        DrawSegment(pRT, segRect, (item.pIntVal ? *item.pIntVal : 0), item.options, false, item.pFloatVal);
                     }
                     if (isFocused) {
-                        float segR = 12.0f * s;
-                        pRT->DrawRoundedRectangle(D2D1::RoundedRect(controlRect, segR, segR), m_brushAccent.Get(), 1.5f * s);
+                        float segR = (segRect.bottom - segRect.top) * 0.5f;
+                        pRT->DrawRoundedRectangle(D2D1::RoundedRect(segRect, segR, segR), m_brushAccent.Get(), 1.5f * s);
                     }
                     // If label is empty (top-level page switcher), draw hairline divider exactly at controlRect.bottom and add spacing
                     if (item.label.empty()) {
@@ -4989,6 +5011,7 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                         contentY += 28.0f * s;
                     }
                     break;
+                }
                  case OptionType::ActionButton: {
                      const float padRight = 8.0f * s;
                      const float btnLeft = controlX;
@@ -5144,7 +5167,8 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                      }
                      
                      // Color Swatch Button (Pill shape)
-                     D2D1_RECT_F btnRect = D2D1::RectF(btnLeft, controlRect.top, controlRect.right, controlRect.bottom);
+                     const float padRight = 8.0f * s;
+                     D2D1_RECT_F btnRect = D2D1::RectF(btnLeft, controlRect.top, controlRect.right - padRight, controlRect.bottom);
                      float minBtnW = 90.0f * s;
                      if (btnRect.right - btnRect.left < minBtnW) {
                          btnRect.left = (std::max)(controlRect.left, btnRect.right - minBtnW);
@@ -5951,24 +5975,51 @@ void SettingsOverlay::DrawToggle(ID2D1DeviceContext* pRT, const D2D1_RECT_F& rec
     float w = 44.0f * s;
     float h = 22.0f * s;
     float x = rect.right - w;
-    float y = rect.top + (rect.bottom - rect.top - h) / 2.0f;
+    float y = rect.top + (rect.bottom - rect.top - h) * 0.5f;
     D2D1_RECT_F toggleRect = D2D1::RectF(x, y, x + w, y + h);
 
-    // Background pill
-    ComPtr<ID2D1SolidColorBrush> brush;
-    if (isOn) {
-        brush = m_brushAccent;
-    } else {
-        brush = isHovered ? m_brushBorder : m_brushControlBg;
-    }
-    pRT->FillRoundedRectangle(D2D1::RoundedRect(toggleRect, h/2, h/2), brush.Get());
+    const bool isLight = IsLightThemeActive();
 
-    // Knob
-    float knobSize = h - 4.0f;
-    float knobX = isOn ? (x + w - knobSize - 2.0f) : (x + 2.0f);
-    float knobY = y + 2.0f;
-    D2D1_ELLIPSE knob = D2D1::Ellipse(D2D1::Point2F(knobX + knobSize/2, knobY + knobSize/2), knobSize/2, knobSize/2);
-    pRT->FillEllipse(knob, m_brushText.Get());
+    // 1. Track (Background Pill & Border) - Fully unified with ComboBox / Segment
+    if (isOn) {
+        pRT->FillRoundedRectangle(D2D1::RoundedRect(toggleRect, h * 0.5f, h * 0.5f), m_brushAccent.Get());
+        pRT->DrawRoundedRectangle(D2D1::RoundedRect(toggleRect, h * 0.5f, h * 0.5f), m_brushAccent.Get(), 1.0f * s);
+    } else {
+        // Off state: exactly the same controlBg and border as ComboBox
+        pRT->FillRoundedRectangle(D2D1::RoundedRect(toggleRect, h * 0.5f, h * 0.5f), m_brushControlBg.Get());
+        pRT->DrawRoundedRectangle(
+            D2D1::RoundedRect(toggleRect, h * 0.5f, h * 0.5f),
+            isHovered ? m_brushAccent.Get() : m_brushBorder.Get(),
+            1.0f * s);
+    }
+
+    // 2. Knob (Thumb circle)
+    const float pad = 2.0f * s;
+    float knobSize = h - pad * 2.0f;
+    float knobX = isOn ? (x + w - knobSize - pad) : (x + pad);
+    float knobY = y + pad;
+    D2D1_ELLIPSE knob = D2D1::Ellipse(
+        D2D1::Point2F(knobX + knobSize * 0.5f, knobY + knobSize * 0.5f),
+        knobSize * 0.5f,
+        knobSize * 0.5f);
+
+    if (isOn) {
+        // Active: Always crisp pure white knob on colored accent track
+        pRT->FillEllipse(knob, m_brushWhite.Get());
+    } else {
+        if (isLight) {
+            // Option 2: Elegant slate blue-gray tone echoing the theme accent
+            const auto palette = GetSettingsThemePalette();
+            const D2D1_COLOR_F knobClr = isHovered
+                ? D2D1::ColorF(0.26f, 0.35f, 0.48f, 1.0f)
+                : D2D1::ColorF(0.38f, 0.46f, 0.58f, 1.0f);
+            m_brushBorder->SetColor(knobClr);
+            pRT->FillEllipse(knob, m_brushBorder.Get());
+            m_brushBorder->SetColor(palette.border); // Restore
+        } else {
+            pRT->FillEllipse(knob, m_brushWhite.Get());
+        }
+    }
 }
 
 void SettingsOverlay::DrawSlider(ID2D1DeviceContext* pRT, const D2D1_RECT_F& rect, float val,
@@ -6541,6 +6592,8 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
                 float segW = (std::min)(280.0f * sc, contentW);
                 controlX = m_pHoverItem->rect.left + (contentW - segW) * 0.5f;
                 controlW = segW;
+            } else {
+                controlW -= 8.0f * sc;
             }
              
              if (x >= controlX && x <= controlX + controlW) {
