@@ -33,17 +33,20 @@ LRESULT CALLBACK DialogEditSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     DialogState& dialog = AppContext::GetInstance().Dialog;
     if (uMsg == WM_KEYDOWN) {
         if (wParam == VK_RETURN) {
-            int len = GetWindowTextLengthW(hWnd);
-            if (len > 0) {
-                std::vector<wchar_t> buf(len + 1);
-                GetWindowTextW(hWnd, buf.data(), len + 1);
-                dialog.InputText = buf.data();
+            bool commit = !dialog.IsMultiLineInput || (GetKeyState(VK_CONTROL) < 0);
+            if (commit) {
+                int len = GetWindowTextLengthW(hWnd);
+                if (len > 0) {
+                    std::vector<wchar_t> buf(len + 1);
+                    GetWindowTextW(hWnd, buf.data(), len + 1);
+                    dialog.InputText = buf.data();
+                } else {
+                    dialog.InputText.clear();
+                }
                 dialog.FinalResult = DialogResult::Yes;
-            } else {
-                dialog.FinalResult = DialogResult::None;
+                dialog.IsVisible = false;
+                return 0;
             }
-            dialog.IsVisible = false;
-            return 0;
         }
         else if (wParam == VK_ESCAPE) {
             dialog.FinalResult = DialogResult::None;
@@ -56,7 +59,11 @@ LRESULT CALLBACK DialogEditSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
         }
     }
     else if (uMsg == WM_CHAR) {
-        if (wParam == VK_RETURN || wParam == VK_ESCAPE) return 0;
+        if (wParam == VK_RETURN) {
+            if (!dialog.IsMultiLineInput || (GetKeyState(VK_CONTROL) < 0)) return 0;
+        } else if (wParam == VK_ESCAPE) {
+            return 0;
+        }
     }
     
     return CallWindowProc(dialog.oldEditProc, hWnd, uMsg, wParam, lParam);
@@ -69,7 +76,7 @@ bool DialogController::IsActive() const {
 }
 
 void DialogController::MarkDirty() {
-    RequestRepaint(QuickView::PaintLayer::Dynamic);
+    RequestRepaint(QuickView::PaintLayer::All);
 }
 
 void DialogController::Render(ID2D1DeviceContext* context) {
@@ -108,9 +115,9 @@ void DialogController::Render(ID2D1DeviceContext* context) {
         config.backgroundTransform = g_compEngine ? g_compEngine->GetScreenTransform() : D2D1::Matrix3x2F::Identity();
         geekGlass.DrawGeekGlassPanel(context, config);
 
-        // [Material Boost] Consistency for Dialog Density
-        float masterOpacity = g_config.GlassModalsOpacity / 100.0f;
-        D2D1_COLOR_F fillerColor = isLight ? D2D1::ColorF(0.95f, 0.95f, 0.97f, 1.0f) : D2D1::ColorF(0.08f, 0.08f, 0.10f, 1.0f);
+        // [Material Boost] Consistency for Dialog Density (Input dialogs use 100% opaque solid background to ensure readability)
+        float masterOpacity = m_context.Dialog.HasInput ? 1.0f : (g_config.GlassModalsOpacity / 100.0f);
+        D2D1_COLOR_F fillerColor = isLight ? D2D1::ColorF(0.97f, 0.97f, 0.98f, 1.0f) : D2D1::ColorF(0.11f, 0.11f, 0.13f, 1.0f);
         pBrush->SetColor(fillerColor);
         pBrush->SetOpacity(masterOpacity);
         context->FillRoundedRectangle(D2D1::RoundedRect(layout.Box, 10.0f * g_uiScale, 10.0f * g_uiScale), pBrush.Get());
@@ -118,8 +125,9 @@ void DialogController::Render(ID2D1DeviceContext* context) {
 
         geekGlass.DrawGeekGlassToppings(context, config);
     } else {
-        D2D1_COLOR_F bgClr = isLight ? D2D1::ColorF(0.95f, 0.95f, 0.97f, 1.0f) : D2D1::ColorF(0.08f, 0.08f, 0.10f, 1.0f);
-        pBrush->SetColor(D2D1::ColorF(bgClr.r, bgClr.g, bgClr.b, g_config.GlassModalsOpacity / 100.0f));
+        float alpha = m_context.Dialog.HasInput ? 1.0f : (g_config.GlassModalsOpacity / 100.0f);
+        D2D1_COLOR_F bgClr = isLight ? D2D1::ColorF(0.97f, 0.97f, 0.98f, alpha) : D2D1::ColorF(0.11f, 0.11f, 0.13f, alpha);
+        pBrush->SetColor(bgClr);
         context->FillRoundedRectangle(D2D1::RoundedRect(layout.Box, 10.0f * g_uiScale, 10.0f * g_uiScale), pBrush.Get());
     }
 
@@ -173,11 +181,13 @@ void DialogController::Render(ID2D1DeviceContext* context) {
         displayTitle = g_uiRenderer->MakeMiddleEllipsis(availableWidth, m_context.Dialog.Title, fmtTitle.Get());
     }
 
-    float titleTop = layout.Box.top + 18;
-    float titleBottom = layout.Box.top + 48;
-    pBrush->SetColor(txtClr);
-    context->DrawText(displayTitle.c_str(), (UINT32)displayTitle.length(), fmtTitle.Get(), 
-        D2D1::RectF(layout.Box.left + 25, titleTop, layout.Box.right - 25, titleBottom), pBrush.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
+    float titleBottom = layout.Box.top + (displayTitle.empty() ? 10.0f : 48.0f);
+    if (!displayTitle.empty()) {
+        float titleTop = layout.Box.top + 18;
+        pBrush->SetColor(txtClr);
+        context->DrawText(displayTitle.c_str(), (UINT32)displayTitle.length(), fmtTitle.Get(), 
+            D2D1::RectF(layout.Box.left + 25, titleTop, layout.Box.right - 25, titleBottom), pBrush.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
+    }
 
     // Message
     float msgTop = titleBottom + 8;
@@ -198,21 +208,24 @@ void DialogController::Render(ID2D1DeviceContext* context) {
 
     // Input Control
     if (m_context.Dialog.HasInput) {
-        float inputRadius = 6.0f;
-        D2D1_COLOR_F inputBgClr = isLight ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.05f) : D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.35f);
+        float inputRadius = 7.0f * g_uiScale;
+        D2D1_COLOR_F inputBgClr = isLight ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.04f) : D2D1::ColorF(0.06f, 0.06f, 0.08f, 1.0f);
         pBrush->SetColor(inputBgClr);
         context->FillRoundedRectangle(D2D1::RoundedRect(layout.Input, inputRadius, inputRadius), pBrush.Get());
 
         // Border
-        D2D1_COLOR_F inputBordClr = isLight ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.2f) : D2D1::ColorF(0.35f, 0.35f, 0.35f, 1.0f);
+        bool isEditFocused = (m_context.Dialog.hEdit && GetFocus() == m_context.Dialog.hEdit);
+        D2D1_COLOR_F inputBordClr = isEditFocused ? accentColor : (isLight ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.16f) : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.14f));
         pBrush->SetColor(inputBordClr);
-        D2D1_RECT_F borderRect = layout.Input;
-        context->DrawRoundedRectangle(D2D1::RoundedRect(borderRect, inputRadius, inputRadius), pBrush.Get(), 1.0f);
+        context->DrawRoundedRectangle(D2D1::RoundedRect(layout.Input, inputRadius, inputRadius), pBrush.Get(), isEditFocused ? 1.8f : 1.0f);
 
-        // Focus Highlight
-        if (m_context.Dialog.hEdit && GetFocus() == m_context.Dialog.hEdit) {
-            pBrush->SetColor(accentColor);
-            context->DrawRoundedRectangle(D2D1::RoundedRect(borderRect, inputRadius, inputRadius), pBrush.Get(), 2.0f);
+        // Multi-line keyboard shortcut hint
+        if (m_context.Dialog.IsMultiLineInput && fmtBody) {
+            D2D1_RECT_F hintRect = D2D1::RectF(layout.Input.left, layout.Input.bottom + 8.0f * g_uiScale, layout.Input.left + 260.0f * g_uiScale, layout.Input.bottom + 28.0f * g_uiScale);
+            D2D1_COLOR_F hintClr = isLight ? D2D1::ColorF(0.5f, 0.5f, 0.55f, 1.0f) : D2D1::ColorF(0.55f, 0.55f, 0.6f, 1.0f);
+            pBrush->SetColor(hintClr);
+            const wchar_t* hintStr = L"[Ctrl+Enter] 快速提交保存";
+            context->DrawText(hintStr, (UINT32)wcslen(hintStr), fmtBody.Get(), hintRect, pBrush.Get());
         }
     }
 
@@ -403,8 +416,14 @@ static void CreateDialogInputInternal(HWND parent, DialogState& dialog) {
         
     if (dialog.hInputHost) {
         RECT rcHost; GetClientRect(dialog.hInputHost, &rcHost);
+        DWORD editStyle = WS_CHILD | WS_VISIBLE | ES_LEFT;
+        if (dialog.IsMultiLineInput) {
+            editStyle |= ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN;
+        } else {
+            editStyle |= ES_AUTOHSCROLL;
+        }
         dialog.hEdit = CreateWindowExW(0, L"EDIT", dialog.InputText.c_str(),
-            WS_CHILD | WS_VISIBLE | ES_LEFT | ES_AUTOHSCROLL,
+            editStyle,
             0, 0, rcHost.right, rcHost.bottom,
             dialog.hInputHost, nullptr, GetModuleHandle(nullptr), nullptr);
             
@@ -412,7 +431,7 @@ static void CreateDialogInputInternal(HWND parent, DialogState& dialog) {
           if (g_defaultIMC) {
               ImmAssociateContext(dialog.hEdit, g_defaultIMC);
           }
-          int fontHeight = (int)(22 * g_uiScale);
+          int fontHeight = (int)((dialog.IsMultiLineInput ? 18 : 22) * g_uiScale);
           dialog.hFont = CreateFontW(
               fontHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -689,10 +708,10 @@ std::optional<LRESULT> DialogController::OnLButtonDown(HWND hwnd, int x, int y) 
                     std::vector<wchar_t> buf(len + 1);
                     GetWindowTextW(m_context.Dialog.hEdit, buf.data(), len + 1);
                     m_context.Dialog.InputText = buf.data();
-                    m_context.Dialog.FinalResult = m_context.Dialog.Buttons[i].Result;
                  } else {
-                    m_context.Dialog.FinalResult = DialogResult::None;
+                    m_context.Dialog.InputText.clear();
                  }
+                 m_context.Dialog.FinalResult = m_context.Dialog.Buttons[i].Result;
             } else {
                 m_context.Dialog.FinalResult = m_context.Dialog.Buttons[i].Result;
             }
@@ -706,33 +725,35 @@ std::optional<LRESULT> DialogController::OnLButtonDown(HWND hwnd, int x, int y) 
 }
 
 
-std::wstring DialogController::ShowInputDialog(HWND hwnd, const std::wstring& title, const std::wstring& message, const std::wstring& initialText, const std::wstring& confirmButtonText) 
+std::wstring DialogController::ShowInputDialog(HWND hwnd, const std::wstring& title, const std::wstring& message, const std::wstring& initialText, const std::wstring& confirmButtonText, bool isMultiLine) 
 {
-    std::wstring okBtnText = confirmButtonText.empty() ? L"Rename" : confirmButtonText;
-    std::vector<DialogButton> buttons = { { DialogResult::Yes, okBtnText.c_str(), true }, { DialogResult::None, L"Cancel" } };
+    std::wstring okBtnText = confirmButtonText.empty() ? (AppStrings::Dialog_Button_OK ? AppStrings::Dialog_Button_OK : L"OK") : confirmButtonText;
+    std::wstring cancelBtnText = AppStrings::Dialog_Cancel ? AppStrings::Dialog_Cancel : L"Cancel";
+    std::vector<DialogButton> buttons = { { DialogResult::Yes, okBtnText.c_str(), true }, { DialogResult::None, cancelBtnText.c_str() } };
     DialogResult res = DialogResult::None;
-    return ShowInputDialog(hwnd, title, message, initialText, buttons, res);
+    return ShowInputDialog(hwnd, title, message, initialText, buttons, res, isMultiLine);
 }
 
-std::wstring DialogController::ShowInputDialog(HWND hwnd, const std::wstring& title, const std::wstring& message, const std::wstring& initialText, const std::vector<DialogButton>& buttons, DialogResult& outResult)
+std::wstring DialogController::ShowInputDialog(HWND hwnd, const std::wstring& title, const std::wstring& message, const std::wstring& initialText, const std::vector<DialogButton>& buttons, DialogResult& outResult, bool isMultiLine)
 {
     m_hwnd = hwnd;
     m_context.Dialog.IsVisible = true;
     m_context.Dialog.Title = title;
     m_context.Dialog.Message = message;
     m_context.Dialog.QualityText.clear();
-    m_context.Dialog.AccentColor = D2D1::ColorF(D2D1::ColorF::Orange); 
+    m_context.Dialog.AccentColor = D2D1::ColorF(0.0f, 0.478f, 0.8f, 1.0f); 
     m_context.Dialog.Buttons = buttons;
     m_context.Dialog.SelectedButtonIndex = 0;
     m_context.Dialog.HasCheckbox = false;
     m_context.Dialog.HasInput = true;
+    m_context.Dialog.IsMultiLineInput = isMultiLine;
     m_context.Dialog.InputText = initialText;
     m_context.Dialog.FinalResult = DialogResult::None;
     
     EnsureWindowSizeForDialog(hwnd);
     CreateDialogInputInternal(hwnd, m_context.Dialog);
     
-    RequestRepaint(QuickView::PaintLayer::Dynamic);
+    RequestRepaint(QuickView::PaintLayer::All);
     UpdateWindow(hwnd); 
     
     MSG msgStruct;
@@ -744,7 +765,7 @@ std::wstring DialogController::ShowInputDialog(HWND hwnd, const std::wstring& ti
     }
     
     DestroyDialogInputInternal(m_context.Dialog);
-    RequestRepaint(QuickView::PaintLayer::Dynamic);
+    RequestRepaint(QuickView::PaintLayer::All);
     if (!IsCompareModeActive()) {
         AdjustWindowForOverlay(hwnd, true);
     }

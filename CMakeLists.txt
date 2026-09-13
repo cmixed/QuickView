@@ -121,6 +121,8 @@ set(QUICKVIEW_SOURCES
     QuickView/WebContentHost.cpp
     QuickView/WebViewThumbService.cpp
     QuickView/Plugin/PluginHost.cpp
+    QuickView/AiActionManager.cpp
+    QuickView/AiActionOverlay.cpp
     
     # Third party manually included
     third_party/yyjson/yyjson.c
@@ -449,6 +451,8 @@ add_executable(QuickViewTests
     tests/PluginHostTests.cpp
     tests/RatingMetadataTests.cpp
     tests/TileJpegTests.cpp
+    tests/AiActionManagerTests.cpp
+    QuickView/AiActionManager.cpp
     QuickView/GeekWidgets.cpp
     QuickView/GeekIconLibrary.cpp
     QuickView/GeekIconData.cpp
@@ -489,6 +493,7 @@ target_link_libraries(QuickViewTests PRIVATE
     mscms.lib
     gdiplus.lib
     winhttp.lib
+    crypt32.lib
     unrar-mini
     ZLIB::ZLIB
     libjpeg-turbo::turbojpeg-static

@@ -7297,6 +7297,20 @@ std::wstring GetHotkeyActionName(HotkeyAction action) {
         }
         break;
     }
+    case HotkeyAction::AiAction: {
+        needsCleaning = false;
+        switch (GetActiveLanguage()) {
+        case AppStrings::Language::ChineseSimplified:  raw = L"AI 动作"; break;
+        case AppStrings::Language::ChineseTraditional: raw = L"AI 動作"; break;
+        case AppStrings::Language::Japanese:           raw = L"AI アクション"; break;
+        case AppStrings::Language::Russian:            raw = L"AI Действия"; break;
+        case AppStrings::Language::German:             raw = L"AI-Aktionen"; break;
+        case AppStrings::Language::Spanish:            raw = L"Acciones IA"; break;
+        case AppStrings::Language::French:             raw = L"Actions IA"; break;
+        default:                                       raw = L"AI Actions"; break;
+        }
+        break;
+    }
     case HotkeyAction::NavNext:
         raw = AppStrings::Toolbar_Tooltip_Next;
         break;

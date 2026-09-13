@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ThemeSystem.h"
+#include "AiActionManager.h"
 #include "yyjson.h"
 #include <commdlg.h>
 #include <cstring>
@@ -270,6 +271,8 @@ namespace QuickView::UI::ConfigIO {
 
     bool ExportConfig(HWND hwnd) {
         ::SaveConfig();
+        QuickView::AI::AiActionManager::Instance().SaveConfig();
+
         std::wstring dest = ShowFileDialog(hwnd, true,
             L"QuickView Config (*.ini)\0*.ini\0All Files (*.*)\0*.*\0", L"ini", L"QuickView.ini");
         if (dest.empty()) return false;
@@ -277,7 +280,20 @@ namespace QuickView::UI::ConfigIO {
         std::wstring src = GetConfigPath();
         if (src.empty() || GetFileAttributesW(src.c_str()) == INVALID_FILE_ATTRIBUTES) return false;
         if (_wcsicmp(src.c_str(), dest.c_str()) == 0) return true;
-        return CopyFileW(src.c_str(), dest.c_str(), FALSE) != FALSE;
+        bool ok = CopyFileW(src.c_str(), dest.c_str(), FALSE) != FALSE;
+
+        // Synchronously export ai_actions.json to the same folder if present
+        wchar_t destAiJson[MAX_PATH] = { 0 };
+        wcscpy_s(destAiJson, dest.c_str());
+        PathRemoveFileSpecW(destAiJson);
+        PathAppendW(destAiJson, L"ai_actions.json");
+
+        std::wstring srcAiJson = QuickView::AI::AiActionManager::Instance().GetConfigFilePath();
+        if (GetFileAttributesW(srcAiJson.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            CopyFileW(srcAiJson.c_str(), destAiJson, FALSE);
+        }
+
+        return ok;
     }
 
     bool ImportConfig(HWND hwnd) {
@@ -292,6 +308,18 @@ namespace QuickView::UI::ConfigIO {
 
         if (_wcsicmp(src.c_str(), dest.c_str()) != 0) {
             if (!CopyFileW(src.c_str(), dest.c_str(), FALSE)) return false;
+        }
+
+        // Synchronously import ai_actions.json from the same source folder if present
+        wchar_t srcAiJson[MAX_PATH] = { 0 };
+        wcscpy_s(srcAiJson, src.c_str());
+        PathRemoveFileSpecW(srcAiJson);
+        PathAppendW(srcAiJson, L"ai_actions.json");
+
+        if (GetFileAttributesW(srcAiJson) != INVALID_FILE_ATTRIBUTES) {
+            std::wstring destAiJson = QuickView::AI::AiActionManager::Instance().GetConfigFilePath();
+            CopyFileW(srcAiJson, destAiJson.c_str(), FALSE);
+            QuickView::AI::AiActionManager::Instance().ReloadConfig();
         }
 
         LoadConfig();

@@ -51,6 +51,7 @@ struct DialogState {
     
     // [Input Mode]
     bool HasInput = false;
+    bool IsMultiLineInput = false;
     std::wstring InputText;
     HWND hEdit = nullptr;
     HWND hInputHost = nullptr; 

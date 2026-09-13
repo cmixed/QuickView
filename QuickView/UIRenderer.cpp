@@ -17,6 +17,7 @@
 #include "SettingsOverlay.h"
 #include "PrintPreviewUI.h"
 #include "ExportPanel.h"
+#include "AiActionOverlay.h"
 #include <functional> // For std::hash
 
 namespace {
@@ -939,6 +940,12 @@ void UIRenderer::RenderStaticLayer(ID2D1DeviceContext* dc, HWND hwnd) {
     if (g_helpOverlay.IsVisible()) {
         g_helpOverlay.SetGeekGlassData(m_bgCommandList.Get(), m_compEngine ? m_compEngine->GetScreenTransform() : D2D1::Matrix3x2F::Identity());
         g_helpOverlay.Render(dc, (float)m_width, (float)m_height);
+    }
+
+    // AI Actions HUD Overlay
+    if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+        QuickView::UI::AiActionOverlay::Instance().SetGeekGlassData(m_bgCommandList.Get(), m_compEngine ? m_compEngine->GetScreenTransform() : D2D1::Matrix3x2F::Identity());
+        QuickView::UI::AiActionOverlay::Instance().Render(dc, (float)m_width, (float)m_height);
     }
     
     // [Topmost Guarantee] Window Controls strictly drawn at the very end of Static Layer

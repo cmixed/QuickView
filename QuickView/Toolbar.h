@@ -26,6 +26,7 @@ enum class ToolbarButtonID {
     CompareZoomOut,
     CompareSyncZoom,
     CompareSyncPan,
+    CompareSave,
     CompareExit,
     // Animation mode
     AnimPlayPause,

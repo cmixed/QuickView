@@ -24,6 +24,8 @@
 #include "GeekGlass.h"
 #include "GeekIconRenderer.h"
 #include "GeekWidgets.h"
+#include "AiActionTypes.h"
+#include "AiActionManager.h" 
 
 // Windows headers
 #pragma comment(lib, "version.lib")
@@ -39,6 +41,8 @@ extern std::wstring& g_imagePath;
 extern FileNavigator& g_navigator;
 extern Toolbar g_toolbar; // [Fix] Allow Settings to update toolbar state directly
 extern HelpOverlay g_helpOverlay;
+extern OSDState g_osd;
+extern HWND g_mainHwnd;
 
 namespace {
 
@@ -890,15 +894,21 @@ void SettingsOverlay::CreateResources(ID2D1DeviceContext* pRT) {
         DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(m_dwriteFactory.GetAddressOf()));
     }
 
-    if (!m_textFormatHeader || !m_textFormatItem || !m_textFormatBadge || !m_textFormatStepper) {
+    if (!m_textFormatHeader || !m_textFormatItem || !m_textFormatBadge || !m_textFormatStepper || !m_textFormatItemBold) {
         float scaledHeader = fontSizeHeader * m_uiScale;
         float scaledItem = fontSizeItem * m_uiScale;
         float scaledBadge = 7.5f * m_uiScale; // Micro font size for NEW badge
         float scaledStepper = 15.5f * m_uiScale; // Enhanced size for ⊖ / ⊕ icons
         m_dwriteFactory->CreateTextFormat(fontFace, nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, scaledHeader, AppStrings::CurrentLocale, &m_textFormatHeader);
         m_dwriteFactory->CreateTextFormat(fontFace, nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, scaledItem, AppStrings::CurrentLocale, &m_textFormatItem);
+        m_dwriteFactory->CreateTextFormat(fontFace, nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, scaledItem, AppStrings::CurrentLocale, &m_textFormatItemBold);
         m_dwriteFactory->CreateTextFormat(fontFace, nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, scaledBadge, AppStrings::CurrentLocale, &m_textFormatBadge);
         m_dwriteFactory->CreateTextFormat(fontFace, nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, scaledStepper, AppStrings::CurrentLocale, &m_textFormatStepper);
+    }
+
+    if (m_textFormatItemBold) {
+        m_textFormatItemBold->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        m_textFormatItemBold->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     }
 
     if (m_textFormatItem) {
@@ -970,6 +980,768 @@ template<typename T>
 int* BindEnum(T* ptr) { return reinterpret_cast<int*>(ptr); }
 
 
+
+
+// ============================================================================
+// AI Actions & Model Profiles Tab Builder
+// ============================================================================
+namespace {
+    struct ProviderPreset {
+        std::wstring name;
+        QuickView::AI::ApiProtocol protocol;
+        std::string defaultUrl;
+    };
+    static const ProviderPreset s_providerPresets[] = {
+        { L"Google Gemini", QuickView::AI::ApiProtocol::OpenAiChat, "https://generativelanguage.googleapis.com/v1beta/openai/" },
+        { L"OpenAI (ChatGPT)", QuickView::AI::ApiProtocol::OpenAiChat, "https://api.openai.com/v1/" },
+        { L"Anthropic Claude", QuickView::AI::ApiProtocol::OpenAiChat, "https://api.anthropic.com/v1/" },
+        { L"xAI Grok", QuickView::AI::ApiProtocol::OpenAiChat, "https://api.x.ai/v1/" },
+        { L"SiliconFlow (硅基流动)", QuickView::AI::ApiProtocol::OpenAiImagesGenerate, "https://api.siliconflow.cn/v1/" },
+        { L"阿里百炼 (DashScope)", QuickView::AI::ApiProtocol::OpenAiChat, "https://dashscope.aliyuncs.com/compatible-mode/v1/" },
+        { L"本地 ComfyUI", QuickView::AI::ApiProtocol::ComfyUI, "http://127.0.0.1:8188/" },
+        { L"本地 SD WebUI / Forge", QuickView::AI::ApiProtocol::StabilityInpaint, "http://127.0.0.1:7860/" },
+        { L"自定义 (Custom Endpoint)", QuickView::AI::ApiProtocol::OpenAiChat, "" }
+    };
+
+    struct AiUiState {
+        std::vector<std::wstring> profileUrls;
+        std::vector<std::wstring> profileKeys;
+        std::vector<std::wstring> profileModels;
+        std::vector<int> profileProviderIndices;
+        std::vector<int> profileMaxResIndices;
+        std::vector<bool> profileExpanded;
+        std::vector<std::vector<std::wstring>> profileFetchedModels;
+        std::vector<std::vector<std::wstring_view>> profileFetchedModelViews;
+        std::vector<int> profileFetchedModelIndex;
+        std::vector<std::vector<std::wstring>> profileHybridModelOptions;
+        std::vector<std::vector<std::wstring_view>> profileHybridModelOptionViews;
+        std::vector<int> profileHybridModelSelection;
+        std::vector<bool> profileIsFetchingModels;
+
+        std::vector<std::wstring> profileMaskedKeys;
+
+        std::vector<std::wstring> actionNames;
+        std::vector<std::wstring> actionPrompts;
+        std::vector<int> actionProfileIndices;
+        std::vector<std::vector<std::wstring>> actionProfileOptionStrings;
+        std::vector<std::vector<std::wstring_view>> actionProfileOptionViews;
+        std::vector<int> actionScopeIndices;
+        std::vector<bool> actionExpanded;
+
+        int defaultProfileIndex = 0;
+        std::vector<std::wstring> profileNames;
+        std::vector<std::wstring_view> profileNameViews;
+        std::vector<std::wstring_view> providerOptions = {
+            L"Google Gemini", L"OpenAI (ChatGPT)", L"Anthropic Claude", L"xAI Grok",
+            L"SiliconFlow (硅基流动)", L"阿里百炼 (DashScope)", L"本地 ComfyUI",
+            L"本地 SD WebUI / Forge", L"自定义 (Custom Endpoint)"
+        };
+        std::vector<std::wstring_view> maxResOptions = { L"4K / 原图优先 (4096px)", L"2K 高清 (2048px)", L"1K 标准 (1024px)", L"原始尺寸 (不限制)" };
+        std::vector<std::wstring_view> scopeOptions = { L"自适应 (选区优先)", L"强制全图", L"局部修补 (贴回羽化)" };
+    };
+    static AiUiState s_aiUi;
+
+    static std::string WideToUtf8(std::wstring_view wideStr) {
+        if (wideStr.empty()) return "";
+        int req = WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), static_cast<int>(wideStr.size()), nullptr, 0, nullptr, nullptr);
+        if (req <= 0) return "";
+        std::string result(req, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), static_cast<int>(wideStr.size()), result.data(), req, nullptr, nullptr);
+        return result;
+    }
+
+    [[maybe_unused]] static std::wstring Utf8ToWide(std::string_view utf8Str) {
+        if (utf8Str.empty()) return L"";
+        int req = MultiByteToWideChar(CP_UTF8, 0, utf8Str.data(), static_cast<int>(utf8Str.size()), nullptr, 0);
+        if (req <= 0) return L"";
+        std::wstring result(req, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, utf8Str.data(), static_cast<int>(utf8Str.size()), result.data(), req);
+        return result;
+    }
+
+    static std::wstring FormatMaskedKey(const std::wstring& plain) {
+        if (plain.empty()) return L"";
+        if (plain.length() <= 8) {
+            return std::wstring(plain.length(), L'•');
+        }
+        std::wstring prefix = plain.substr(0, 4);
+        std::wstring suffix = plain.substr(plain.length() - 4);
+        return prefix + L"••••••••" + suffix;
+    }
+
+    void SyncFromAiManager() {
+        auto& mgr = QuickView::AI::AiActionManager::Instance();
+        auto& profiles = mgr.GetProfiles();
+        auto& actions = mgr.GetActions();
+
+        if (profiles.empty()) {
+            QuickView::AI::ModelProfile defP;
+            defP.id = "primary_profile";
+            defP.displayName = L"Google Gemini";
+            defP.protocol = QuickView::AI::ApiProtocol::OpenAiChat;
+            defP.baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/";
+            defP.defaultModel = "";
+            defP.maxResolution = QuickView::AI::MaxResolution::Original_4K;
+            defP.timeoutSeconds = 45;
+            profiles.push_back(defP);
+            mgr.SetDefaultProfileId(defP.id);
+            mgr.SaveConfig();
+        }
+
+        s_aiUi.profileUrls.resize(profiles.size());
+        s_aiUi.profileKeys.resize(profiles.size());
+        s_aiUi.profileMaskedKeys.resize(profiles.size());
+        s_aiUi.profileModels.resize(profiles.size());
+        s_aiUi.profileProviderIndices.resize(profiles.size(), 0);
+        s_aiUi.profileMaxResIndices.resize(profiles.size(), 0);
+        s_aiUi.profileFetchedModels.resize(profiles.size());
+        s_aiUi.profileFetchedModelViews.resize(profiles.size());
+        s_aiUi.profileFetchedModelIndex.resize(profiles.size(), 0);
+        s_aiUi.profileHybridModelOptions.resize(profiles.size());
+        s_aiUi.profileHybridModelOptionViews.resize(profiles.size());
+        s_aiUi.profileHybridModelSelection.resize(profiles.size(), 0);
+        if (s_aiUi.profileIsFetchingModels.size() != profiles.size()) {
+            s_aiUi.profileIsFetchingModels.assign(profiles.size(), false);
+        }
+        if (s_aiUi.profileExpanded.size() != profiles.size()) {
+            s_aiUi.profileExpanded.assign(profiles.size(), false);
+        }
+
+        s_aiUi.profileNames.clear();
+        s_aiUi.profileNameViews.clear();
+        s_aiUi.defaultProfileIndex = 0;
+
+        for (size_t i = 0; i < profiles.size(); ++i) {
+            auto& p = profiles[i];
+            s_aiUi.profileNames.push_back(p.displayName);
+            if (p.id == mgr.GetDefaultProfileId()) {
+                s_aiUi.defaultProfileIndex = static_cast<int>(i);
+            }
+
+            int provIdx = static_cast<int>(std::size(s_providerPresets)) - 1; // Custom default
+            for (size_t k = 0; k < std::size(s_providerPresets); ++k) {
+                if (p.displayName == s_providerPresets[k].name) {
+                    provIdx = static_cast<int>(k);
+                    break;
+                }
+            }
+            s_aiUi.profileProviderIndices[i] = provIdx;
+
+            s_aiUi.profileUrls[i] = Utf8ToWide(p.baseUrl);
+
+            std::string plainKey = QuickView::AI::AiActionManager::DecryptApiKey(p.encryptedApiKey);
+            s_aiUi.profileKeys[i] = Utf8ToWide(plainKey);
+            s_aiUi.profileMaskedKeys[i] = FormatMaskedKey(s_aiUi.profileKeys[i]);
+
+            s_aiUi.profileModels[i] = Utf8ToWide(p.defaultModel);
+
+            s_aiUi.profileFetchedModels[i].clear();
+            s_aiUi.profileFetchedModelViews[i].clear();
+            s_aiUi.profileFetchedModelIndex[i] = 0;
+            for (size_t mi = 0; mi < p.fetchedModels.size(); ++mi) {
+                const auto& mName = p.fetchedModels[mi];
+                std::wstring wName(mName.begin(), mName.end());
+                if (mName == p.defaultModel) {
+                    s_aiUi.profileFetchedModelIndex[i] = static_cast<int>(mi);
+                }
+                s_aiUi.profileFetchedModels[i].push_back(std::move(wName));
+            }
+            for (const auto& wName : s_aiUi.profileFetchedModels[i]) {
+                s_aiUi.profileFetchedModelViews[i].push_back(wName);
+            }
+
+            // Hybrid Model Combobox Options (Auto-fetch + Pick from list or Custom Input)
+            s_aiUi.profileHybridModelOptions[i].clear();
+            s_aiUi.profileHybridModelOptionViews[i].clear();
+
+            std::wstring customOpt = L"✏️ 自定义输入模型标识...";
+            if (!p.defaultModel.empty()) {
+                std::wstring curDef(p.defaultModel.begin(), p.defaultModel.end());
+                customOpt += L" [" + curDef + L"]";
+            }
+            s_aiUi.profileHybridModelOptions[i].push_back(customOpt);
+
+            int hybridSel = 0; // Default to Option 0 (Custom / Current model)
+            if (p.fetchedModels.empty()) {
+                std::wstring fetchOpt = s_aiUi.profileIsFetchingModels[i] ? L"⏳ 正在拉取可用模型列表..." : L"🔄 自动拉取服务端模型列表...";
+                s_aiUi.profileHybridModelOptions[i].push_back(fetchOpt);
+            } else {
+                for (size_t mi = 0; mi < p.fetchedModels.size(); ++mi) {
+                    const auto& mName = p.fetchedModels[mi];
+                    std::wstring wName(mName.begin(), mName.end());
+                    if (mName == p.defaultModel) {
+                        hybridSel = static_cast<int>(mi + 1);
+                    }
+                    s_aiUi.profileHybridModelOptions[i].push_back(std::move(wName));
+                }
+            }
+
+            s_aiUi.profileHybridModelSelection[i] = hybridSel;
+            for (const auto& optStr : s_aiUi.profileHybridModelOptions[i]) {
+                s_aiUi.profileHybridModelOptionViews[i].push_back(optStr);
+            }
+
+            if (p.maxResolution == QuickView::AI::MaxResolution::Original_4K) s_aiUi.profileMaxResIndices[i] = 0;
+            else if (p.maxResolution == QuickView::AI::MaxResolution::FHD_2K) s_aiUi.profileMaxResIndices[i] = 1;
+            else if (p.maxResolution == QuickView::AI::MaxResolution::Standard_1K) s_aiUi.profileMaxResIndices[i] = 2;
+            else s_aiUi.profileMaxResIndices[i] = 3;
+        }
+        for (const auto& name : s_aiUi.profileNames) {
+            s_aiUi.profileNameViews.push_back(name);
+        }
+
+        s_aiUi.actionNames.resize(actions.size());
+        s_aiUi.actionPrompts.resize(actions.size());
+        s_aiUi.actionProfileIndices.resize(actions.size(), 0);
+        s_aiUi.actionProfileOptionStrings.resize(actions.size());
+        s_aiUi.actionProfileOptionViews.resize(actions.size());
+        s_aiUi.actionScopeIndices.resize(actions.size(), 0);
+        if (s_aiUi.actionExpanded.size() != actions.size()) {
+            s_aiUi.actionExpanded.assign(actions.size(), false);
+        }
+
+        for (size_t i = 0; i < actions.size(); ++i) {
+            const auto& a = actions[i];
+            s_aiUi.actionNames[i] = a.name;
+            s_aiUi.actionPrompts[i] = a.promptTemplate;
+
+            // Action Execution Model Options: Option 0 is "默认模型" (Default Model)
+            s_aiUi.actionProfileOptionStrings[i].clear();
+            s_aiUi.actionProfileOptionViews[i].clear();
+            s_aiUi.actionProfileOptionStrings[i].push_back(L"默认模型");
+
+            int curSel = 0; // Default to Option 0 ("默认模型")
+            for (size_t pi = 0; pi < profiles.size(); ++pi) {
+                std::wstring opt = profiles[pi].displayName;
+                if (!profiles[pi].defaultModel.empty()) {
+                    std::wstring defM(profiles[pi].defaultModel.begin(), profiles[pi].defaultModel.end());
+                    opt += L" (" + defM + L")";
+                }
+                s_aiUi.actionProfileOptionStrings[i].push_back(std::move(opt));
+                if (profiles[pi].id == a.modelProfileId) {
+                    curSel = static_cast<int>(pi + 1);
+                }
+            }
+            s_aiUi.actionProfileIndices[i] = curSel;
+            for (const auto& optStr : s_aiUi.actionProfileOptionStrings[i]) {
+                s_aiUi.actionProfileOptionViews[i].push_back(optStr);
+            }
+
+            s_aiUi.actionScopeIndices[i] = static_cast<int>(a.scopeMode);
+        }
+    }
+
+    void BuildAiActionsTab(SettingsTab& tabAi, [[maybe_unused]] SettingsOverlay* overlay) {
+        tabAi.name = ((AppStrings::Language)g_config.Language == AppStrings::Language::ChineseSimplified) ? L"AI 动作" : L"AI Actions";
+        tabAi.icon = Icons::SuperResolution;
+
+        SyncFromAiManager();
+        auto& mgr = QuickView::AI::AiActionManager::Instance();
+        auto& profiles = mgr.GetProfiles();
+        auto& actions = mgr.GetActions();
+
+        // Section 1: Model Profiles Header
+        tabAi.items.push_back({ L"AI 模型服务商配置", OptionType::Header });
+        tabAi.items.push_back({ L"模型名称支持动态拉取或自由填入；API 密钥受 Windows DPAPI 系统安全保护。", OptionType::InfoLabel });
+
+        // Profiles Accordion Cards (Default: Only 1 compact card)
+        for (size_t i = 0; i < profiles.size(); ++i) {
+            auto& p = profiles[i];
+            bool isDefault = (p.id == mgr.GetDefaultProfileId());
+            std::wstring cardTitle = (isDefault ? L"★ [默认] " : L"") + 
+                ((!p.defaultModel.empty()) ? 
+                (p.displayName + L" - " + std::wstring(p.defaultModel.begin(), p.defaultModel.end())) : 
+                (p.displayName.empty() ? L"模型服务商配置" : p.displayName));
+
+            SettingsItem itemProfCard = { cardTitle, OptionType::AccordionCardHeader, nullptr };
+            itemProfCard.isActivated = s_aiUi.profileExpanded[i];
+            itemProfCard.pIntVal = reinterpret_cast<int*>(i);
+            itemProfCard.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                if (!it) return;
+                size_t pIdx = reinterpret_cast<size_t>(it->pIntVal);
+                if (pIdx < s_aiUi.profileExpanded.size()) {
+                    s_aiUi.profileExpanded[pIdx] = !s_aiUi.profileExpanded[pIdx];
+                }
+                if (ov) ov->RequestRebuild();
+            };
+            tabAi.items.push_back(itemProfCard);
+
+            if (s_aiUi.profileExpanded[i]) {
+                // 1. Provider Select ComboBox
+                SettingsItem itemProv;
+                itemProv.label = L"供应商名称";
+                itemProv.type = OptionType::ComboBox;
+                itemProv.pIntVal = &s_aiUi.profileProviderIndices[i];
+                itemProv.pStrVal = reinterpret_cast<std::wstring*>(i);
+                itemProv.options = s_aiUi.providerOptions;
+                itemProv.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t pIdx = reinterpret_cast<size_t>(it->pStrVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx < pr.size()) {
+                        int choice = *it->pIntVal;
+                        if (choice >= 0 && choice < static_cast<int>(std::size(s_providerPresets))) {
+                            const auto& preset = s_providerPresets[choice];
+                            pr[pIdx].displayName = preset.name;
+                            pr[pIdx].protocol = preset.protocol;
+                            if (!preset.defaultUrl.empty()) {
+                                pr[pIdx].baseUrl = preset.defaultUrl;
+                            }
+                            pr[pIdx].fetchedModels.clear();
+                            s_aiUi.profileProviderIndices[pIdx] = choice;
+                            if (pIdx < s_aiUi.profileUrls.size() && !preset.defaultUrl.empty()) {
+                                s_aiUi.profileUrls[pIdx] = Utf8ToWide(preset.defaultUrl);
+                            }
+                            OutputDebugStringW(L"[SettingsOverlay] Provider onChange: saving with displayName = ");
+                            OutputDebugStringW(preset.name.c_str());
+                            OutputDebugStringW(L"\n");
+                            m.SaveConfig();
+                        }
+                    }
+                    if (ov) ov->RequestRebuild();
+                };
+                tabAi.items.push_back(itemProv);
+
+                // 2. Base URL Input
+                SettingsItem itemUrl = { L"接口地址 (Base URL)", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.profileUrls[i] };
+                itemUrl.pIntVal = reinterpret_cast<int*>(i);
+                itemUrl.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it) return;
+                    size_t pIdx = reinterpret_cast<size_t>(it->pIntVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx < pr.size()) {
+                        pr[pIdx].baseUrl = WideToUtf8(s_aiUi.profileUrls[pIdx]);
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemUrl);
+
+                // 3. API Key Input (Masked in list, plain in popup dialog)
+                SettingsItem itemKey = { L"API 密钥 (DPAPI 加密保护)", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.profileMaskedKeys[i] };
+                itemKey.pIntVal = reinterpret_cast<int*>(i);
+                itemKey.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it) return;
+                    size_t pIdx = reinterpret_cast<size_t>(it->pIntVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx < pr.size()) {
+                        std::string utf8Key = WideToUtf8(s_aiUi.profileKeys[pIdx]);
+                        pr[pIdx].encryptedApiKey = QuickView::AI::AiActionManager::EncryptApiKey(utf8Key);
+                        m.SaveConfig();
+                        s_aiUi.profileMaskedKeys[pIdx] = FormatMaskedKey(s_aiUi.profileKeys[pIdx]);
+                    }
+                };
+                tabAi.items.push_back(itemKey);
+
+                // 4. Model Identifier (Hybrid Combobox: Auto-fetch online models + Custom input)
+                SettingsItem itemHybridModel;
+                std::wstring modelLabel = L"模型标识";
+                if (!p.defaultModel.empty()) {
+                    std::wstring defW(p.defaultModel.begin(), p.defaultModel.end());
+                    modelLabel += L" (" + defW + L")";
+                } else {
+                    modelLabel += L" [未配置，请拉取或输入]";
+                }
+                itemHybridModel.label = modelLabel;
+                itemHybridModel.type = OptionType::ComboBox;
+                itemHybridModel.pIntVal = &s_aiUi.profileHybridModelSelection[i];
+                itemHybridModel.options = s_aiUi.profileHybridModelOptionViews[i];
+                itemHybridModel.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t pIdx = static_cast<size_t>(it->pIntVal - s_aiUi.profileHybridModelSelection.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx >= pr.size()) return;
+
+                    int choice = *it->pIntVal;
+                    if (choice == 0) {
+                        // Custom Model Input Dialog (Compact titleless input dialog)
+                        std::wstring curModel(pr[pIdx].defaultModel.begin(), pr[pIdx].defaultModel.end());
+                        std::wstring newVal = AppContext::GetInstance().DialogCtrl->ShowInputDialog(
+                            ::g_mainHwnd, L"", L"", curModel, L"OK");
+                        if (!newVal.empty()) {
+                            int len = WideCharToMultiByte(CP_UTF8, 0, newVal.c_str(), -1, nullptr, 0, nullptr, nullptr);
+                            std::string utf8Val;
+                            if (len > 0) {
+                                utf8Val.resize(len - 1);
+                                WideCharToMultiByte(CP_UTF8, 0, newVal.c_str(), -1, utf8Val.data(), len, nullptr, nullptr);
+                            }
+                            pr[pIdx].defaultModel = utf8Val;
+                            if (pIdx < s_aiUi.profileModels.size()) {
+                                s_aiUi.profileModels[pIdx] = newVal;
+                            }
+                            m.SaveConfig();
+                        }
+                        if (ov) ov->RequestRebuild();
+                    } else if (pr[pIdx].fetchedModels.empty()) {
+                        // Trigger online discovery
+                        std::string plainKey = QuickView::AI::AiActionManager::DecryptApiKey(pr[pIdx].encryptedApiKey);
+                        if (plainKey.empty() && pIdx < s_aiUi.profileKeys.size()) {
+                            int len = WideCharToMultiByte(CP_UTF8, 0, s_aiUi.profileKeys[pIdx].c_str(), -1, nullptr, 0, nullptr, nullptr);
+                            if (len > 0) {
+                                plainKey.resize(len - 1);
+                                WideCharToMultiByte(CP_UTF8, 0, s_aiUi.profileKeys[pIdx].c_str(), -1, plainKey.data(), len, nullptr, nullptr);
+                            }
+                        }
+
+                        s_aiUi.profileIsFetchingModels[pIdx] = true;
+                        ::g_osd.Show(::g_mainHwnd, L"正在拉取大模型列表...", false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 3000);
+                        if (ov) ov->RequestRebuild();
+
+                        m.FetchModelsAsync(pr[pIdx].baseUrl, plainKey, pr[pIdx].protocol, [pIdx, ov](bool success, const std::vector<std::string>& models, const std::wstring& errMsg) {
+                            if (pIdx < s_aiUi.profileIsFetchingModels.size()) {
+                                s_aiUi.profileIsFetchingModels[pIdx] = false;
+                            }
+                            if (!success) {
+                                std::wstring msg = L"拉取模型失败: " + errMsg;
+                                ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 4000);
+                                if (ov) ov->RequestRebuild();
+                                return;
+                            }
+
+                            auto& mgr = QuickView::AI::AiActionManager::Instance();
+                            auto& profiles = mgr.GetProfiles();
+                            if (pIdx < profiles.size()) {
+                                profiles[pIdx].fetchedModels = models;
+                                if (!models.empty() && profiles[pIdx].defaultModel.empty()) {
+                                    profiles[pIdx].defaultModel = models[0];
+                                    if (pIdx < s_aiUi.profileModels.size()) {
+                                        s_aiUi.profileModels[pIdx] = Utf8ToWide(models[0]);
+                                    }
+                                }
+                                mgr.SaveConfig();
+                            }
+
+                            std::wstring msg = L"已成功拉取 " + std::to_wstring(models.size()) + L" 个可用模型";
+                            ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
+                            if (ov) ov->RequestRebuild();
+                        });
+                    } else if (choice >= 1 && choice <= static_cast<int>(pr[pIdx].fetchedModels.size())) {
+                        pr[pIdx].defaultModel = pr[pIdx].fetchedModels[choice - 1];
+                        if (pIdx < s_aiUi.profileModels.size()) {
+                            s_aiUi.profileModels[pIdx] = Utf8ToWide(pr[pIdx].defaultModel);
+                        }
+                        m.SaveConfig();
+                        if (ov) ov->RequestRebuild();
+                    }
+                };
+                tabAi.items.push_back(itemHybridModel);
+
+                // 5. Max Resolution ComboBox
+                SettingsItem itemRes;
+                itemRes.label = L"最大输入分辨率策略";
+                itemRes.type = OptionType::ComboBox;
+                itemRes.pIntVal = &s_aiUi.profileMaxResIndices[i];
+                itemRes.options = s_aiUi.maxResOptions;
+                itemRes.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t pIdx = static_cast<size_t>(it->pIntVal - s_aiUi.profileMaxResIndices.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx < pr.size()) {
+                        int choice = *it->pIntVal;
+                        if (choice == 0) pr[pIdx].maxResolution = QuickView::AI::MaxResolution::Original_4K;
+                        else if (choice == 1) pr[pIdx].maxResolution = QuickView::AI::MaxResolution::FHD_2K;
+                        else if (choice == 2) pr[pIdx].maxResolution = QuickView::AI::MaxResolution::Standard_1K;
+                        else pr[pIdx].maxResolution = QuickView::AI::MaxResolution::NoLimit;
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemRes);
+
+                // Default Profile Marker & Switch Button
+                if (isDefault) {
+                    SettingsItem itemDefStatus = { L"全局默认状态", OptionType::InfoLabel };
+                    itemDefStatus.label = L"★ 当前服务商为全局默认 (AI 动作默认调用此配置)";
+                    tabAi.items.push_back(itemDefStatus);
+                } else {
+                    SettingsItem itemSetDef = { L"设为默认服务商", OptionType::ActionButton };
+                    itemSetDef.buttonText = L"★ 设为全局默认服务商";
+                    itemSetDef.pIntVal = reinterpret_cast<int*>(i);
+                    itemSetDef.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                        if (!it) return;
+                        size_t pIdx = reinterpret_cast<size_t>(it->pIntVal);
+                        auto& m = QuickView::AI::AiActionManager::Instance();
+                        auto& pr = m.GetProfiles();
+                        if (pIdx < pr.size()) {
+                            m.SetDefaultProfileId(pr[pIdx].id);
+                            m.SaveConfig();
+                            ::g_osd.Show(::g_mainHwnd, (L"已将 " + pr[pIdx].displayName + L" 设为全局默认服务商").c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 2500);
+                            if (ov) ov->RequestRebuild();
+                        }
+                    };
+                    tabAi.items.push_back(itemSetDef);
+                }
+
+                // 6. Test Connection Button (Probe API connection and latency)
+                SettingsItem itemTestConn = { L"连通性探测", OptionType::ActionButton };
+                itemTestConn.buttonText = L"🔌 测试服务商连接与延迟";
+                itemTestConn.pIntVal = reinterpret_cast<int*>(i);
+                itemTestConn.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it) return;
+                    size_t pIdx = reinterpret_cast<size_t>(it->pIntVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx >= pr.size()) return;
+
+                    std::string plainKey = QuickView::AI::AiActionManager::DecryptApiKey(pr[pIdx].encryptedApiKey);
+                    if (plainKey.empty() && pIdx < s_aiUi.profileKeys.size()) {
+                        plainKey = WideToUtf8(s_aiUi.profileKeys[pIdx]);
+                    }
+
+                    ::g_osd.Show(::g_mainHwnd, L"正在测试服务商连接与鉴权...", false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 3000);
+
+                    m.TestConnectionAsync(pr[pIdx].baseUrl, plainKey, pr[pIdx].protocol, [](bool success, int statusCode, int latencyMs, const std::wstring& message) {
+                        if (success) {
+                            std::wstring msg = L"✓ 连接正常！延迟: " + std::to_wstring(latencyMs) + L"ms (HTTP " + std::to_wstring(statusCode) + L")";
+                            ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 4000);
+                        } else {
+                            std::wstring msg = L"✗ " + message + (latencyMs > 0 ? (L" (" + std::to_wstring(latencyMs) + L"ms)") : L"");
+                            ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 5000);
+                        }
+                    });
+                };
+                tabAi.items.push_back(itemTestConn);
+
+                // 7. Save Profile Button (Collapses card and saves profile)
+                SettingsItem itemSaveProf = { L"保存当前服务商", OptionType::ActionButton };
+                itemSaveProf.buttonText = L"✓ 保存配置";
+                itemSaveProf.pIntVal = reinterpret_cast<int*>(i);
+                itemSaveProf.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it) return;
+                    size_t pIdx = reinterpret_cast<size_t>(it->pIntVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx < pr.size()) {
+                        std::string targetUrl = (pIdx < s_aiUi.profileUrls.size()) ? WideToUtf8(s_aiUi.profileUrls[pIdx]) : pr[pIdx].baseUrl;
+                        std::string targetModel = (pIdx < s_aiUi.profileModels.size() && !s_aiUi.profileModels[pIdx].empty()) ? 
+                                                  WideToUtf8(s_aiUi.profileModels[pIdx]) : pr[pIdx].defaultModel;
+                        std::string targetKey = (pIdx < s_aiUi.profileKeys.size()) ? WideToUtf8(s_aiUi.profileKeys[pIdx]) : "";
+
+                        // 1. Check Base URL
+                        if (targetUrl.empty()) {
+                            ::g_osd.Show(::g_mainHwnd, L"保存失败: 接口地址 (Base URL) 不能为空", false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
+                            return;
+                        }
+
+                        // 2. Check API Key (Local providers can ignore key)
+                        bool isLocal = (pr[pIdx].protocol == QuickView::AI::ApiProtocol::ComfyUI || 
+                                        pr[pIdx].protocol == QuickView::AI::ApiProtocol::StabilityInpaint ||
+                                        targetUrl.find("127.0.0.1") != std::string::npos ||
+                                        targetUrl.find("localhost") != std::string::npos);
+                        if (!isLocal && targetKey.empty() && pr[pIdx].encryptedApiKey.empty()) {
+                            ::g_osd.Show(::g_mainHwnd, L"保存失败: 云端服务商 API 密钥不能为空", false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
+                            return;
+                        }
+
+                        // 3. Check Model Identifier
+                        if (targetModel.empty()) {
+                            ::g_osd.Show(::g_mainHwnd, L"保存失败: 请先下拉拉取/选择模型，或手动指定模型标识", false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
+                            return;
+                        }
+
+                        pr[pIdx].baseUrl = targetUrl;
+                        if (!targetKey.empty()) {
+                            pr[pIdx].encryptedApiKey = QuickView::AI::AiActionManager::EncryptApiKey(targetKey);
+                        }
+                        pr[pIdx].defaultModel = targetModel;
+                        if (pIdx < s_aiUi.profileModels.size()) {
+                            s_aiUi.profileModels[pIdx] = Utf8ToWide(targetModel);
+                        }
+                        m.SaveConfig();
+                        if (pIdx < s_aiUi.profileExpanded.size()) {
+                            s_aiUi.profileExpanded[pIdx] = false;
+                        }
+                        ::g_osd.Show(::g_mainHwnd, L"✓ 服务商配置已保存", false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 2500);
+                    }
+                    if (ov) ov->RequestRebuild();
+                };
+                tabAi.items.push_back(itemSaveProf);
+
+                // 9. Delete Profile Button (if more than 1 profile)
+                if (profiles.size() > 1) {
+                    SettingsItem itemDelProf = { L"管理服务商", OptionType::ActionButton };
+                    itemDelProf.buttonText = L"删除该服务商配置";
+                    itemDelProf.isDestructive = true;
+                    itemDelProf.pIntVal = reinterpret_cast<int*>(i);
+                    itemDelProf.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                        if (!it) return;
+                        size_t pIdx = reinterpret_cast<size_t>(it->pIntVal);
+                        auto& m = QuickView::AI::AiActionManager::Instance();
+                        auto& pr = m.GetProfiles();
+                        if (pIdx < pr.size() && pr.size() > 1) {
+                            pr.erase(pr.begin() + pIdx);
+                            m.SaveConfig();
+                            if (ov) ov->RequestRebuild();
+                        }
+                    };
+                    tabAi.items.push_back(itemDelProf);
+                }
+            }
+        }
+
+        // Section Separator: Ends accordion card bounding box so buttons below sit cleanly outside card shadows
+        tabAi.items.push_back({ L"", OptionType::Separator });
+
+        // Add Profile Button (Allow advanced users to add more if desired, default is just 1)
+        SettingsItem itemAddProf = { L"添加额外服务商", OptionType::ActionButton };
+        itemAddProf.buttonText = L"+ 添加新服务商配置";
+        itemAddProf.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+            auto& m = QuickView::AI::AiActionManager::Instance();
+            auto& pr = m.GetProfiles();
+            QuickView::AI::ModelProfile newP;
+            newP.id = "custom_profile_" + std::to_string(GetTickCount());
+            newP.displayName = L"自定义服务商";
+            newP.protocol = QuickView::AI::ApiProtocol::OpenAiChat;
+            newP.baseUrl = "https://api.openai.com/v1/";
+            newP.defaultModel = "";
+            newP.maxResolution = QuickView::AI::MaxResolution::Standard_1K;
+            newP.timeoutSeconds = 30;
+            newP.isCustom = true;
+            pr.push_back(newP);
+            m.SaveConfig();
+            if (ov) ov->RequestRebuild();
+        };
+        tabAi.items.push_back(itemAddProf);
+
+        // Section 2: AI Actions Header
+        tabAi.items.push_back({ L"自定义 AI 动作列表 (AI Actions)", OptionType::Header });
+
+        // Add Action Button
+        SettingsItem itemAddAct = { L"添加新动作", OptionType::ActionButton };
+        itemAddAct.buttonText = L"+ 新建 AI 动作";
+        itemAddAct.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+            auto& m = QuickView::AI::AiActionManager::Instance();
+            auto& acts = m.GetActions();
+            QuickView::AI::ActionDesc newAct;
+            newAct.id = "action_custom_" + std::to_string(GetTickCount());
+            newAct.name = L"新动作 " + std::to_wstring(acts.size() + 1);
+            newAct.promptTemplate = L"Describe or modify the image";
+            newAct.scopeMode = QuickView::AI::ScopeMode::Auto;
+            acts.push_back(newAct);
+            m.SaveConfig();
+            if (ov) ov->RequestRebuild();
+        };
+        tabAi.items.push_back(itemAddAct);
+
+        // Actions Accordion Cards
+        for (size_t i = 0; i < actions.size(); ++i) {
+            auto& a = actions[i];
+            wchar_t actNumBuf[16] = { 0 };
+            if (i < 9) swprintf_s(actNumBuf, L"[%d] ", static_cast<int>(i + 1));
+            else swprintf_s(actNumBuf, L"[•] ");
+
+            std::wstring actTitle = actNumBuf + a.name;
+            SettingsItem itemActCard = { actTitle, OptionType::AccordionCardHeader, nullptr };
+            itemActCard.isActivated = s_aiUi.actionExpanded[i];
+            itemActCard.pIntVal = reinterpret_cast<int*>(i);
+            itemActCard.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                if (!it) return;
+                size_t aIdx = reinterpret_cast<size_t>(it->pIntVal);
+                if (aIdx < s_aiUi.actionExpanded.size()) {
+                    s_aiUi.actionExpanded[aIdx] = !s_aiUi.actionExpanded[aIdx];
+                }
+                if (ov) ov->RequestRebuild();
+            };
+            tabAi.items.push_back(itemActCard);
+
+            if (s_aiUi.actionExpanded[i]) {
+                // Action Name Input
+                SettingsItem itemActName = { L"动作名称", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.actionNames[i] };
+                itemActName.pIntVal = reinterpret_cast<int*>(i);
+                itemActName.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it) return;
+                    size_t aIdx = reinterpret_cast<size_t>(it->pIntVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size()) {
+                        acts[aIdx].name = s_aiUi.actionNames[aIdx];
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemActName);
+
+                // Prompt Input (Multi-line enabled for expansive prompt engineering)
+                SettingsItem itemPrompt = { L"提示词模板", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.actionPrompts[i] };
+                itemPrompt.isMultiLine = true;
+                itemPrompt.pIntVal = reinterpret_cast<int*>(i);
+                itemPrompt.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it) return;
+                    size_t aIdx = reinterpret_cast<size_t>(it->pIntVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size()) {
+                        acts[aIdx].promptTemplate = s_aiUi.actionPrompts[aIdx];
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemPrompt);
+
+                // Action Execution Model (Option 0 is "默认模型")
+                SettingsItem itemActProfile;
+                itemActProfile.label = L"执行模型";
+                itemActProfile.type = OptionType::ComboBox;
+                itemActProfile.pIntVal = &s_aiUi.actionProfileIndices[i];
+                itemActProfile.options = s_aiUi.actionProfileOptionViews[i];
+                itemActProfile.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionProfileIndices.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    auto& pr = m.GetProfiles();
+                    if (aIdx < acts.size()) {
+                        int sel = *it->pIntVal;
+                        if (sel == 0 || sel > static_cast<int>(pr.size())) {
+                            acts[aIdx].modelProfileId = ""; // 默认模型
+                        } else {
+                            acts[aIdx].modelProfileId = pr[sel - 1].id;
+                        }
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemActProfile);
+
+                // Scope Mode
+                SettingsItem itemScope;
+                itemScope.label = L"作用范围模式";
+                itemScope.type = OptionType::ComboBox;
+                itemScope.pIntVal = &s_aiUi.actionScopeIndices[i];
+                itemScope.options = s_aiUi.scopeOptions;
+                itemScope.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionScopeIndices.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size()) {
+                        acts[aIdx].scopeMode = static_cast<QuickView::AI::ScopeMode>(*it->pIntVal);
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemScope);
+
+                // Delete Action Button
+                SettingsItem itemDelAct = { L"管理动作", OptionType::ActionButton };
+                itemDelAct.buttonText = L"删除该动作";
+                itemDelAct.isDestructive = true;
+                itemDelAct.pIntVal = reinterpret_cast<int*>(i);
+                itemDelAct.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it) return;
+                    size_t aIdx = reinterpret_cast<size_t>(it->pIntVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size() && acts.size() > 1) {
+                        acts.erase(acts.begin() + aIdx);
+                        m.SaveConfig();
+                        if (ov) ov->RequestRebuild();
+                    }
+                };
+                tabAi.items.push_back(itemDelAct);
+            }
+        }
+    }
+}
 
 void SettingsOverlay::RebuildMenu() {
     BuildMenu();
@@ -1118,8 +1890,11 @@ void SettingsOverlay::BuildMenu() {
         
         wchar_t appDataPath[MAX_PATH];
         SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appDataPath);
-        std::wstring appDataDir = std::wstring(appDataPath) + L"\\QuickView";
+        std::wstring appDataPathStr = appDataPath;
+        std::wstring appDataDir = appDataPathStr + L"\\QuickView";
         std::wstring appDataIni = appDataDir + L"\\QuickView.ini";
+        std::wstring appDataAiJson = appDataDir + L"\\ai_actions.json";
+        std::wstring exeAiJson = exeDir + L"\\ai_actions.json";
         
         if (g_config.PortableMode) {
             // User turned ON: Move config from AppData to ExeDir
@@ -1137,6 +1912,10 @@ void SettingsOverlay::BuildMenu() {
                 // 1. AppData exists: Copy to ExeDir (Overwrite), then delete AppData config
                 CopyFileW(appDataIni.c_str(), exeIni.c_str(), FALSE);
                 DeleteFileW(appDataIni.c_str());
+                if (GetFileAttributesW(appDataAiJson.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    CopyFileW(appDataAiJson.c_str(), exeAiJson.c_str(), FALSE);
+                    DeleteFileW(appDataAiJson.c_str());
+                }
                 SaveConfig(); // Update to ensure PortableMode=true is saved
             } else if (!exeExists) {
                 // 2. Both missing: Generate default config in ExeDir
@@ -1144,6 +1923,8 @@ void SettingsOverlay::BuildMenu() {
             }
             // 3. AppData missing, ExeDir exists: Do NOT overwrite (preserve existing portable config)
             
+            QuickView::AI::AiActionManager::Instance().ReloadConfig();
+
             // Clean up registry entries (portable mode should not use registry)
             overlay->UnregisterAssociations();
             
@@ -1164,10 +1945,15 @@ void SettingsOverlay::BuildMenu() {
                 // Copy ExeDir config to AppData (Overwrite existing to preserve current settings)
                 CopyFileW(exeIni.c_str(), appDataIni.c_str(), FALSE);
                 DeleteFileW(exeIni.c_str()); // Remove ExeDir config
+                if (GetFileAttributesW(exeAiJson.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    CopyFileW(exeAiJson.c_str(), appDataAiJson.c_str(), FALSE);
+                    DeleteFileW(exeAiJson.c_str());
+                }
             }
             
             // Save current config to AppData (ensures PortableMode=false is correctly persisted)
             SaveConfig();
+            QuickView::AI::AiActionManager::Instance().ReloadConfig();
             
             // Use deferred rebuild to update File Association button state
             overlay->m_pendingRebuild = true;
@@ -3370,6 +4156,11 @@ void SettingsOverlay::BuildMenu() {
 
     m_tabs.push_back(tabPlugins);
 
+    // --- AI Actions Tab ---
+    SettingsTab tabAiActions;
+    BuildAiActionsTab(tabAiActions, this);
+    m_tabs.push_back(tabAiActions);
+
     // --- 5. Advanced ---
     SettingsTab tabAdvanced;
     tabAdvanced.name = AppStrings::Settings_Tab_Advanced;
@@ -3520,12 +4311,15 @@ void SettingsOverlay::BuildMenu() {
          
          DeleteFileW((exeDir + L"\\QuickView.ini").c_str());
          DeleteFileW((appDataDir + L"\\QuickView.ini").c_str());
+         DeleteFileW((exeDir + L"\\ai_actions.json").c_str());
+         DeleteFileW((appDataDir + L"\\ai_actions.json").c_str());
          
          // 2. Reset In-Memory Config (Preserving UpdateChannel)
          int preservedUpdateChannel = g_config.UpdateChannel;
          g_config = AppConfig(); 
          g_config.UpdateChannel = preservedUpdateChannel;
          QuickView::PluginHost::Instance().ResetToDefaults();
+         QuickView::AI::AiActionManager::Instance().ResetToDefaults();
          extern void SaveConfig();
          SaveConfig();
          for (auto& binding : g_hotkeys) {
@@ -4072,6 +4866,7 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
         if (m_activeTab >= 0 && m_activeTab < (int)m_tabs.size()) {
             auto& currentTab = m_tabs[m_activeTab];
 
+            bool insideAccordionCard = false;
             for (size_t itemIdx = 0; itemIdx < currentTab.items.size(); ++itemIdx) {
                 auto& item = currentTab.items[itemIdx];
                 bool isFocused = m_isKeyboardNavActive && (static_cast<int>(itemIdx) == m_focusedItemIdx);
@@ -4084,13 +4879,23 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                     m_settingsContentHeight = contentY - startContentY;
                 }
 
+                if (item.type == OptionType::Separator || item.type == OptionType::Header) {
+                    insideAccordionCard = false;
+                }
+
+                const float indentLeft = insideAccordionCard ? (20.0f * s) : 0.0f;
+                const float indentRight = insideAccordionCard ? (14.0f * s) : 0.0f;
+                float rowContentX = contentX + indentLeft;
+                float rowContentW = contentW - indentLeft - indentRight;
+
                 // Calculate Rect for Hit Testing & Layout Anchor
-                item.rect = D2D1::RectF(contentX, contentY, contentX + contentW, contentY + rowHeight);
+                item.rect = D2D1::RectF(rowContentX, contentY, rowContentX + rowContentW, contentY + rowHeight);
                 item.interactRect = {};
                 item.interactRect2 = {};
 
             // 1. Separator Type (Clean page or section divider line)
             if (item.type == OptionType::Separator) {
+                insideAccordionCard = false;
                 contentY += 8.0f * s;
                 float origOpacity = m_brushBorder->GetOpacity();
                 m_brushBorder->SetOpacity(origOpacity * 0.45f);
@@ -4122,6 +4927,7 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
             }
             // 3. AccordionCardHeader Type (Level 1 Header - Rounded Card Container Accordion)
             else if (item.type == OptionType::AccordionCardHeader) {
+                insideAccordionCard = item.isActivated;
                 const float headerH = 40.0f * s;
                 const float cardRadius = 6.0f * s;
                 D2D1_RECT_F headerRect = D2D1::RectF(contentX, contentY, contentX + contentW, contentY + headerH);
@@ -4130,15 +4936,16 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
 
                 bool isExpanded = item.isActivated;
                 bool isEnabled = (item.pBoolVal ? *item.pBoolVal : false);
+                bool hasToggle = (item.pBoolVal != nullptr);
 
-                // Right Toggle Switch Geometry
+                // Right Toggle Switch Geometry (Only active if item has a boolean state)
                 const float toggleW = 44.0f * s;
                 const float toggleH = 22.0f * s;
                 const float togglePadRight = 14.0f * s;
                 const float toggleX = contentX + contentW - togglePadRight - toggleW;
                 const float toggleY = contentY + (headerH - toggleH) * 0.5f;
                 D2D1_RECT_F toggleRect = D2D1::RectF(toggleX, toggleY, toggleX + toggleW, toggleY + toggleH);
-                item.interactRect2 = toggleRect;
+                item.interactRect2 = hasToggle ? toggleRect : D2D1::RectF(0, 0, 0, 0);
 
                 // Calculate full container rect spanning all expanded items down to next Separator
                 float innerH = 0.0f;
@@ -4157,14 +4964,13 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                 float containerEndY = contentY + headerH + (isExpanded ? (innerH + 12.0f * s) : 0.0f);
                 D2D1_RECT_F fullContainerRect = D2D1::RectF(contentX, contentY, contentX + contentW, containerEndY);
 
-                // 1. Draw Rounded Translucent Card Background Container (Mathematically linked to Settings Modal Opacity)
-                float settingsOpacity = std::clamp(static_cast<float>(g_config.GlassModalsOpacity) / 100.0f, 0.10f, 1.0f);
-                float cardAlpha = IsLightThemeActive() ? (0.04f + settingsOpacity * 0.10f) : (0.12f + settingsOpacity * 0.36f);
-                D2D1_COLOR_F containerBg = D2D1::ColorF(0.0f, 0.0f, 0.0f, cardAlpha);
+                // 1. Draw Solid Rounded Card Container Background
+                D2D1_COLOR_F containerBg = IsLightThemeActive() ? D2D1::ColorF(0.95f, 0.95f, 0.97f, 1.0f) : D2D1::ColorF(0.125f, 0.125f, 0.145f, 1.0f);
                 ComPtr<ID2D1SolidColorBrush> brushContainerBg;
                 pRT->CreateSolidColorBrush(containerBg, &brushContainerBg);
                 if (brushContainerBg) {
                     pRT->FillRoundedRectangle(D2D1::RoundedRect(fullContainerRect, cardRadius, cardRadius), brushContainerBg.Get());
+                    pRT->DrawRoundedRectangle(D2D1::RoundedRect(fullContainerRect, cardRadius, cardRadius), m_brushBorder.Get(), 1.0f);
                 }
 
                 // If hovered on header bar (and not on toggle switch), draw header highlight
@@ -4185,48 +4991,50 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                 QuickView::UI::GeekIconRenderer::DrawVectorIcon(
                     pRT, *(isExpanded ? Icons::ComboUp : Icons::Chevron), arrowIconRect, isExpanded ? m_brushAccent.Get() : m_brushTextDim.Get());
 
-                // 3. Right Toggle Switch (Direct Single-Action Control)
-                if (item.isDisabled) {
-                    // Disabled Gray Switch
-                    ComPtr<ID2D1SolidColorBrush> brushDisabledBg;
-                    pRT->CreateSolidColorBrush(D2D1::ColorF(0.20f, 0.20f, 0.22f, 0.6f), &brushDisabledBg);
-                    if (brushDisabledBg) {
-                        pRT->FillRoundedRectangle(D2D1::RoundedRect(toggleRect, toggleH * 0.5f, toggleH * 0.5f), brushDisabledBg.Get());
-                    }
-                    float knobSize = toggleH - 4.0f * s;
-                    D2D1_ELLIPSE knob = D2D1::Ellipse(D2D1::Point2F(toggleX + 2.0f * s + knobSize * 0.5f, toggleY + 2.0f * s + knobSize * 0.5f), knobSize * 0.5f, knobSize * 0.5f);
-                    ComPtr<ID2D1SolidColorBrush> brushDisabledKnob;
-                    pRT->CreateSolidColorBrush(D2D1::ColorF(0.45f, 0.45f, 0.48f, 0.9f), &brushDisabledKnob);
-                    if (brushDisabledKnob) {
-                        pRT->FillEllipse(knob, brushDisabledKnob.Get());
-                    }
+                // 3. Right Toggle Switch (Only rendered if item has a boolean state)
+                if (hasToggle) {
+                    if (item.isDisabled) {
+                        // Disabled Gray Switch
+                        ComPtr<ID2D1SolidColorBrush> brushDisabledBg;
+                        pRT->CreateSolidColorBrush(D2D1::ColorF(0.20f, 0.20f, 0.22f, 0.6f), &brushDisabledBg);
+                        if (brushDisabledBg) {
+                            pRT->FillRoundedRectangle(D2D1::RoundedRect(toggleRect, toggleH * 0.5f, toggleH * 0.5f), brushDisabledBg.Get());
+                        }
+                        float knobSize = toggleH - 4.0f * s;
+                        D2D1_ELLIPSE knob = D2D1::Ellipse(D2D1::Point2F(toggleX + 2.0f * s + knobSize * 0.5f, toggleY + 2.0f * s + knobSize * 0.5f), knobSize * 0.5f, knobSize * 0.5f);
+                        ComPtr<ID2D1SolidColorBrush> brushDisabledKnob;
+                        pRT->CreateSolidColorBrush(D2D1::ColorF(0.45f, 0.45f, 0.48f, 0.9f), &brushDisabledKnob);
+                        if (brushDisabledKnob) {
+                            pRT->FillEllipse(knob, brushDisabledKnob.Get());
+                        }
 
-                    // Disabled Prompt Text Left of Toggle Switch
-                    if (!item.disabledText.empty()) {
-                        D2D1_RECT_F textRect = D2D1::RectF(contentX + 140.0f * s, contentY, toggleX - 12.0f * s, contentY + headerH);
-                        m_textFormatItem->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-                        m_textFormatItem->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                        pRT->DrawText(item.disabledText.c_str(), (UINT32)item.disabledText.length(), m_textFormatItem.Get(), textRect, m_brushTextDim.Get());
-                        m_textFormatItem->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                        // Disabled Prompt Text Left of Toggle Switch
+                        if (!item.disabledText.empty()) {
+                            D2D1_RECT_F textRect = D2D1::RectF(contentX + 140.0f * s, contentY, toggleX - 12.0f * s, contentY + headerH);
+                            m_textFormatItem->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+                            m_textFormatItem->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                            pRT->DrawText(item.disabledText.c_str(), (UINT32)item.disabledText.length(), m_textFormatItem.Get(), textRect, m_brushTextDim.Get());
+                            m_textFormatItem->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                        }
+                    } else {
+                        // Active Styled Toggle Switch
+                        DrawToggle(pRT, toggleRect, isEnabled, item.isHovered2);
                     }
-                } else {
-                    // Active Styled Toggle Switch
-                    DrawToggle(pRT, toggleRect, isEnabled, item.isHovered2);
                 }
 
-                // 4. Plugin Title Text (Matches Level 1 Header Font & Weight)
+                // 4. Card Title Text (Item Font Size, Bold)
                 float titleLeft = contentX + 30.0f * s;
-                float titleRight = toggleX - (item.isDisabled && !item.disabledText.empty() ? 180.0f * s : 16.0f * s);
+                float titleRight = hasToggle ? (toggleX - (item.isDisabled && !item.disabledText.empty() ? 180.0f * s : 16.0f * s)) : (contentX + contentW - 16.0f * s);
                 D2D1_RECT_F titleRect = D2D1::RectF(titleLeft, contentY, titleRight, contentY + headerH);
-                m_textFormatHeader->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-                m_textFormatHeader->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                pRT->DrawText(item.label.c_str(), (UINT32)item.label.length(), m_textFormatHeader.Get(), titleRect, isEnabled ? m_brushText.Get() : m_brushTextDim.Get());
+                m_textFormatItemBold->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                m_textFormatItemBold->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                pRT->DrawText(item.label.c_str(), (UINT32)item.label.length(), m_textFormatItemBold.Get(), titleRect, isEnabled ? m_brushText.Get() : m_brushTextDim.Get());
 
                 if (item.isNewOption) {
                     float titleTextW = 100.0f * s;
                     ComPtr<IDWriteTextLayout> titleLayout;
                     if (SUCCEEDED(m_dwriteFactory->CreateTextLayout(
-                            item.label.c_str(), (UINT32)item.label.length(), m_textFormatHeader.Get(),
+                            item.label.c_str(), (UINT32)item.label.length(), m_textFormatItemBold.Get(),
                             titleRight - titleLeft, headerH, &titleLayout))) {
                         DWRITE_TEXT_METRICS metrics = {};
                         if (SUCCEEDED(titleLayout->GetMetrics(&metrics))) {
@@ -4728,7 +5536,7 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                 rowFocusClr.a = 0.08f;
                 pRT->CreateSolidColorBrush(rowFocusClr, &brushFocusRow);
                 if (brushFocusRow) {
-                    D2D1_RECT_F rowHighlightRect = D2D1::RectF(contentX - 4.0f * s, contentY - 1.0f * s, contentX + contentW + 4.0f * s, contentY + rowHeight + 1.0f * s);
+                    D2D1_RECT_F rowHighlightRect = D2D1::RectF(rowContentX - 4.0f * s, contentY - 1.0f * s, rowContentX + rowContentW + 4.0f * s, contentY + rowHeight + 1.0f * s);
                     pRT->FillRoundedRectangle(D2D1::RoundedRect(rowHighlightRect, 4.0f * s, 4.0f * s), brushFocusRow.Get());
                 }
             }
@@ -4736,7 +5544,7 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
             // Label
             if (!item.label.empty()) {
                 float labelWidth = (LABEL_COLUMN_WIDTH - 20.0f) * s; 
-                D2D1_RECT_F labelRect = D2D1::RectF(contentX, contentY, contentX + labelWidth, contentY + rowHeight);
+                D2D1_RECT_F labelRect = D2D1::RectF(rowContentX, contentY, rowContentX + labelWidth, contentY + rowHeight);
                 pRT->DrawText(item.label.c_str(), (UINT32)item.label.length(), m_textFormatItem.Get(), labelRect, m_brushTextDim.Get());
 
                 // Measure Text Width for Badge and Tooltip positioning
@@ -4755,20 +5563,20 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                 if (item.isNewOption) {
                     badgeW = 24.0f * s;
                     float badgeH = 11.0f * s;
-                    float maxBadgeX = contentX + labelWidth - badgeW;
-                    float badgeX = std::min(contentX + textW + 5.0f * s, maxBadgeX);
+                    float maxBadgeX = rowContentX + labelWidth - badgeW;
+                    float badgeX = std::min(rowContentX + textW + 5.0f * s, maxBadgeX);
                     float badgeY = contentY + (rowHeight - badgeH) / 2.0f;
                     DrawNewBadge(pRT, badgeX, badgeY, s);
                 }
 
                 // Tooltip Icon (?)
                 if (item.tooltipText != nullptr && item.tooltipText[0] != L'\0') {
-                    float iconX = contentX + textW + 10.0f * s;
+                    float iconX = rowContentX + textW + 10.0f * s;
                     if (item.isNewOption) {
                         iconX += badgeW + 6.0f * s;
                     }
                     float iconSize = 24.0f * s;
-                    float maxIconX = contentX + (LABEL_COLUMN_WIDTH - 4.0f) * s - iconSize;
+                    float maxIconX = rowContentX + (LABEL_COLUMN_WIDTH - 4.0f) * s - iconSize;
                     iconX = std::min(iconX, maxIconX);
                     float iconY = contentY + (rowHeight - iconSize) / 2.0f;
                     item.tooltipIconRect = D2D1::RectF(iconX, iconY, iconX + iconSize, iconY + iconSize);
@@ -4792,11 +5600,11 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
 
             // Control Area
             float controlOffset = item.label.empty() ? 0.0f : (LABEL_COLUMN_WIDTH * s); 
-            float controlX = contentX + controlOffset;
-            float controlW = contentW - controlOffset;
+            float controlX = rowContentX + controlOffset;
+            float controlW = rowContentW - controlOffset;
             if (item.label.empty() && item.type == OptionType::Segment) {
-                float segW = (std::min)(280.0f * s, contentW);
-                controlX = contentX + (contentW - segW) * 0.5f;
+                float segW = (std::min)(280.0f * s, rowContentW);
+                controlX = rowContentX + (rowContentW - segW) * 0.5f;
                 controlW = segW;
             }
             float insetY = CONTROL_INSET_Y * s;
@@ -4928,9 +5736,12 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
 
                     std::wstring valText = item.pStrVal ? *item.pStrVal : L"";
                     D2D1_RECT_F textRect = D2D1::RectF(inputRect.left + 12.0f * s, inputRect.top, inputRect.right - 12.0f * s, inputRect.bottom);
+                    DWRITE_WORD_WRAPPING origWrap = m_textFormatItem->GetWordWrapping();
+                    m_textFormatItem->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
                     m_textFormatItem->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                     
                     pRT->DrawText(valText.c_str(), (UINT32)valText.length(), m_textFormatItem.Get(), textRect, m_brushText.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    m_textFormatItem->SetWordWrapping(origWrap);
                     break;
                 }
                 case OptionType::Slider: {
@@ -5370,10 +6181,28 @@ bool SettingsOverlay::OnMouseWheel(float delta) {
     // Fallback to Settings Scroll
     if (!m_visible) return false;
 
-    // Auto-collapse open dropdown when scrolling content
-                     if (m_pActiveCombo) {
+    // Dropdown list scrolling if mouse is over open ComboBox dropdown
+    if (m_pActiveCombo) {
+        D2D1_RECT_F dropRect = GetComboDropdownRect(m_pActiveCombo);
+        if (m_lastMouseX >= dropRect.left && m_lastMouseX <= dropRect.right &&
+            m_lastMouseY >= dropRect.top && m_lastMouseY <= dropRect.bottom) {
+            const float s = m_uiScale;
+            float itemH = ITEM_HEIGHT * s;
+            int count = (int)m_pActiveCombo->options.size();
+            int visibleItems = (int)std::round((dropRect.bottom - dropRect.top) / itemH);
+            int maxOffset = (std::max)(0, count - visibleItems);
+            if (delta < 0) { // Wheel Down
+                m_comboScrollOffset = (std::min)(m_comboScrollOffset + 1, maxOffset);
+            } else if (delta > 0) { // Wheel Up
+                m_comboScrollOffset = (std::max)(0, m_comboScrollOffset - 1);
+            }
+            return true;
+        }
+
+        // Auto-collapse open dropdown when scrolling outside content
         m_pActiveCombo = nullptr;
         m_comboHoverIdx = -1;
+        m_comboScrollOffset = 0;
     }
 
     // Scroll Settings Content (delta > 0 -> Scroll Up, delta < 0 -> Scroll Down)
@@ -6156,8 +6985,9 @@ SettingsAction SettingsOverlay::OnMouseMove(float x, float y) {
         return SettingsAction::RepaintStatic;
     }
 
-    // Active Combo Logic (Priority)
+    // Active Combo Logic (Priority Modal Behavior)
     if (m_pActiveCombo) {
+        m_pHoverItem = nullptr; // Block all background hover testing while dropdown is open
         D2D1_RECT_F dropRect = GetComboDropdownRect(m_pActiveCombo);
         const float s = m_uiScale;
         float itemH = ITEM_HEIGHT * s;
@@ -6165,16 +6995,31 @@ SettingsAction SettingsOverlay::OnMouseMove(float x, float y) {
         
         if (x >= dropRect.left && x <= dropRect.right && y >= dropRect.top && y <= dropRect.bottom) {
              g_currentCursor = ::LoadCursor(NULL, IDC_HAND);
-             int idx = (int)((y - dropRect.top) / itemH);
+             ::SetCursor(g_currentCursor);
+             int relIdx = (int)((y - dropRect.top) / itemH);
+             int idx = m_comboScrollOffset + relIdx;
              if (idx >= 0 && idx < count) {
                  if (m_comboHoverIdx != idx) {
                      m_comboHoverIdx = idx;
                      return SettingsAction::RepaintStatic;
                  }
+             } else {
+                 if (m_comboHoverIdx != -1) {
+                     m_comboHoverIdx = -1;
+                     return SettingsAction::RepaintStatic;
+                 }
              }
              return SettingsAction::None;
         } else {
-             m_comboHoverIdx = -1;
+             if (m_comboHoverIdx != -1) {
+                 m_comboHoverIdx = -1;
+                 g_currentCursor = ::LoadCursor(NULL, IDC_ARROW);
+                 ::SetCursor(g_currentCursor);
+                 return SettingsAction::RepaintStatic;
+             }
+             g_currentCursor = ::LoadCursor(NULL, IDC_ARROW);
+             ::SetCursor(g_currentCursor);
+             return SettingsAction::None;
         }
     }
 
@@ -6375,6 +7220,47 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
 
     if (!m_visible) return SettingsAction::None;
 
+    // Active Combo Processing (Exclusive Modal Priority: Process BEFORE HUD boundary check!)
+    if (m_pActiveCombo) {
+        if (m_pFocusedSlider) CommitInput();
+        D2D1_RECT_F dropRect = GetComboDropdownRect(m_pActiveCombo);
+        const float sc = m_uiScale;
+        float itemH = ITEM_HEIGHT * sc;
+        int count = (int)m_pActiveCombo->options.size();
+        
+        // Click inside Dropdown?
+        if (x >= dropRect.left && x <= dropRect.right && y >= dropRect.top && y <= dropRect.bottom) {
+             int relIdx = (int)((y - dropRect.top) / itemH);
+             int idx = m_comboScrollOffset + relIdx;
+             if (idx >= 0 && idx < count) {
+                 if (m_pActiveCombo->pIntVal) {
+                     *m_pActiveCombo->pIntVal = idx;
+                     [[maybe_unused]] int effectiveCmsMode = g_runtime.GetEffectiveCmsMode(g_config.ColorManagement);
+                     if (m_pActiveCombo->onChange) m_pActiveCombo->onChange(this, m_pActiveCombo);
+                 }
+                 m_pActiveCombo = nullptr; // Close
+                 m_comboHoverIdx = -1;
+                 m_comboScrollOffset = 0;
+                 return SettingsAction::RepaintAll;
+             }
+        }
+        
+        // Click inside the Button itself? (Toggle Close)
+        if (x >= m_pActiveCombo->rect.left && x <= m_pActiveCombo->rect.right && 
+            y >= m_pActiveCombo->rect.top && y <= m_pActiveCombo->rect.bottom) {
+            m_pActiveCombo = nullptr;
+            m_comboHoverIdx = -1;
+            m_comboScrollOffset = 0;
+            return SettingsAction::RepaintAll;
+        }
+
+        // Click outside -> Close (Modal consumption: absolutely prevent closing Settings!)
+        m_pActiveCombo = nullptr;
+        m_comboHoverIdx = -1;
+        m_comboScrollOffset = 0;
+        return SettingsAction::RepaintAll;
+    }
+
     float s = m_uiScale;
     float hudX = m_hudX;
     float hudY = m_hudY;
@@ -6450,41 +7336,6 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
         }
     }
 
-    // 3. Active Combo Processing
-    if (m_pActiveCombo) {
-        if (m_pFocusedSlider) CommitInput();
-        D2D1_RECT_F dropRect = GetComboDropdownRect(m_pActiveCombo);
-        const float sc = m_uiScale;
-        float itemH = ITEM_HEIGHT * sc;
-        int count = (int)m_pActiveCombo->options.size();
-        
-        // Click inside Dropdown?
-        if (x >= dropRect.left && x <= dropRect.right && y >= dropRect.top && y <= dropRect.bottom) {
-             int idx = (int)((y - dropRect.top) / itemH);
-             if (idx >= 0 && idx < count) {
-                 if (m_pActiveCombo->pIntVal) {
-                     if (*m_pActiveCombo->pIntVal != idx) {
-                         *m_pActiveCombo->pIntVal = idx;
-                         [[maybe_unused]] int effectiveCmsMode = g_runtime.GetEffectiveCmsMode(g_config.ColorManagement);
-                         if (m_pActiveCombo->onChange) m_pActiveCombo->onChange(this, m_pActiveCombo);
-                     }
-                 }
-                 m_pActiveCombo = nullptr; // Close
-                 return SettingsAction::RepaintAll;
-             }
-        }
-        
-        // Click inside the Button itself? (Toggle Close)
-        if (x >= m_pActiveCombo->rect.left && x <= m_pActiveCombo->rect.right && 
-            y >= m_pActiveCombo->rect.top && y <= m_pActiveCombo->rect.bottom) {
-            m_pActiveCombo = nullptr;
-            return SettingsAction::RepaintAll;
-        }
-
-        // Click outside -> Close
-        m_pActiveCombo = nullptr;
-    }
-
     // Commit any active in-place input if clicking outside its value capsule
     if (m_pFocusedSlider && (m_pHoverItem != m_pFocusedSlider || m_hoverSliderSubPart != 2)) {
         CommitInput();
@@ -6508,9 +7359,53 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
         if (m_pHoverItem->type == OptionType::ComboBox) {
              if (m_pActiveCombo == m_pHoverItem) {
                  m_pActiveCombo = nullptr;
+                 m_comboHoverIdx = -1;
+                 m_comboScrollOffset = 0;
              } else {
                  m_pActiveCombo = m_pHoverItem;
                  m_comboHoverIdx = -1;
+                 m_comboScrollOffset = 0;
+
+                 // Auto-trigger online discovery if opening model identifier combobox and models list is empty
+                 if (m_pHoverItem->pIntVal >= s_aiUi.profileHybridModelSelection.data() &&
+                     m_pHoverItem->pIntVal < s_aiUi.profileHybridModelSelection.data() + s_aiUi.profileHybridModelSelection.size()) {
+                     size_t pIdx = static_cast<size_t>(m_pHoverItem->pIntVal - s_aiUi.profileHybridModelSelection.data());
+                     auto& m = QuickView::AI::AiActionManager::Instance();
+                     auto& pr = m.GetProfiles();
+                     if (pIdx < pr.size() && pr[pIdx].fetchedModels.empty() && !s_aiUi.profileIsFetchingModels[pIdx]) {
+                         s_aiUi.profileIsFetchingModels[pIdx] = true;
+                         std::string plainKey = QuickView::AI::AiActionManager::DecryptApiKey(pr[pIdx].encryptedApiKey);
+                         if (plainKey.empty() && pIdx < s_aiUi.profileKeys.size()) {
+                             int len = WideCharToMultiByte(CP_UTF8, 0, s_aiUi.profileKeys[pIdx].c_str(), -1, nullptr, 0, nullptr, nullptr);
+                             if (len > 0) {
+                                 plainKey.resize(len - 1);
+                                 WideCharToMultiByte(CP_UTF8, 0, s_aiUi.profileKeys[pIdx].c_str(), -1, plainKey.data(), len, nullptr, nullptr);
+                             }
+                         }
+
+                         ::g_osd.Show(::g_mainHwnd, L"正在自动发现可用模型...", false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 2500);
+
+                         m.FetchModelsAsync(pr[pIdx].baseUrl, plainKey, pr[pIdx].protocol, [pIdx, this](bool success, const std::vector<std::string>& models, [[maybe_unused]] const std::wstring& errMsg) {
+                             if (pIdx < s_aiUi.profileIsFetchingModels.size()) {
+                                 s_aiUi.profileIsFetchingModels[pIdx] = false;
+                             }
+                             if (success) {
+                                 auto& mgr = QuickView::AI::AiActionManager::Instance();
+                                 auto& profiles = mgr.GetProfiles();
+                                 if (pIdx < profiles.size()) {
+                                     profiles[pIdx].fetchedModels = models;
+                                     if (!models.empty() && profiles[pIdx].defaultModel.empty()) {
+                                         profiles[pIdx].defaultModel = models[0];
+                                     }
+                                     mgr.SaveConfig();
+                                 }
+                                 std::wstring msg = L"已自动获取 " + std::to_wstring(models.size()) + L" 个在线模型";
+                                 ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
+                                 this->RequestRebuild();
+                             }
+                         });
+                     }
+                 }
              }
              return SettingsAction::RepaintAll;
         }
@@ -6629,14 +7524,80 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
             // Check for Input field click
             if (m_pHoverItem->isHovered && m_pHoverItem->pStrVal) {
                 SettingsItem* targetItem = m_pHoverItem;
-                std::wstring title = AppStrings::Dialog_FixedZoomTitle;
-                std::wstring msg = AppStrings::Dialog_FixedZoomMsg;
+                std::wstring title = L"";
+                std::wstring msg = L"";
+                if (targetItem->pStrVal == &g_config.FixedZoomLevels) {
+                    title = AppStrings::Dialog_FixedZoomTitle;
+                    msg = AppStrings::Dialog_FixedZoomMsg;
+                }
+
+                // If this is an API key field, use the plain unmasked key as initial text
+                std::wstring initialText = *targetItem->pStrVal;
+                bool isApiKeyField = false;
+                size_t keyProfileIdx = 0;
+                for (size_t ki = 0; ki < s_aiUi.profileMaskedKeys.size(); ++ki) {
+                    if (targetItem->pStrVal == &s_aiUi.profileMaskedKeys[ki]) {
+                        isApiKeyField = true;
+                        keyProfileIdx = ki;
+                        initialText = s_aiUi.profileKeys[ki];
+                        title = L"配置 API 密钥";
+                        msg = L"请输入服务商 API Key（数据将经 Windows DPAPI 本地硬件安全加密后写入磁盘）：";
+                        break;
+                    }
+                }
+
+                if (!isApiKeyField) {
+                    for (size_t ai = 0; ai < s_aiUi.actionPrompts.size(); ++ai) {
+                        if (targetItem->pStrVal == &s_aiUi.actionPrompts[ai]) {
+                            title = L"编辑提示词模板";
+                            msg = L"配置该 AI 动作生成的提示词内容（支持多行编辑，按 Ctrl+Enter 快捷提交）：";
+                            break;
+                        }
+                    }
+                    for (size_t ai = 0; ai < s_aiUi.actionNames.size(); ++ai) {
+                        if (targetItem->pStrVal == &s_aiUi.actionNames[ai]) {
+                            title = L"编辑动作名称";
+                            msg = L"请输入在 AI 动作面板中展示的友好名称：";
+                            break;
+                        }
+                    }
+                    for (size_t pi = 0; pi < s_aiUi.profileUrls.size(); ++pi) {
+                        if (targetItem->pStrVal == &s_aiUi.profileUrls[pi]) {
+                            title = L"配置接口地址";
+                            msg = L"请输入兼容 OpenAI / ComfyUI 格式的 API 基础端点地址 (Base URL)：";
+                            break;
+                        }
+                    }
+                }
+
+                if (title.empty() && !targetItem->label.empty()) {
+                    title = L"编辑 " + targetItem->label;
+                }
+
+                DialogResult dlgRes = DialogResult::None;
+                std::vector<DialogButton> buttons = {
+                    { DialogResult::Yes, AppStrings::Dialog_Button_OK ? AppStrings::Dialog_Button_OK : L"OK", true },
+                    { DialogResult::Cancel, AppStrings::Dialog_Cancel ? AppStrings::Dialog_Cancel : L"Cancel" }
+                };
                 std::wstring result = AppContext::GetInstance().DialogCtrl->ShowInputDialog(
-                    m_hwnd, title, msg, *targetItem->pStrVal, L"OK"
+                    m_hwnd, title, msg, initialText, buttons, dlgRes, targetItem->isMultiLine
                 );
                 
-                if (!result.empty() && targetItem->pStrVal) {
-                    *targetItem->pStrVal = result;
+                if (dlgRes == DialogResult::Yes) {
+                    if (isApiKeyField) {
+                        s_aiUi.profileKeys[keyProfileIdx] = result;
+                        s_aiUi.profileMaskedKeys[keyProfileIdx] = FormatMaskedKey(result);
+                        *targetItem->pStrVal = s_aiUi.profileMaskedKeys[keyProfileIdx];
+
+                        auto& m = QuickView::AI::AiActionManager::Instance();
+                        auto& pr = m.GetProfiles();
+                        if (keyProfileIdx < pr.size()) {
+                            pr[keyProfileIdx].encryptedApiKey = QuickView::AI::AiActionManager::EncryptApiKey(WideToUtf8(result));
+                            m.SaveConfig();
+                        }
+                    } else {
+                        *targetItem->pStrVal = result;
+                    }
                     if (targetItem->onChange) targetItem->onChange(this, targetItem);
                     return SettingsAction::RepaintAll;
                 }
@@ -6696,16 +7657,16 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
         }
         // AccordionCardHeader: Toggle expansion or toggle direct switch
         if (m_pHoverItem->type == OptionType::AccordionCardHeader) {
-            // 1. If clicking toggle switch on the right (interactRect2)
-            if (m_pHoverItem->isHovered2) {
-                if (!m_pHoverItem->isDisabled && m_pHoverItem->pBoolVal) {
+            // 1. If clicking toggle switch on the right (interactRect2) and item has a boolean state
+            if (m_pHoverItem->pBoolVal && m_pHoverItem->isHovered2) {
+                if (!m_pHoverItem->isDisabled) {
                     *m_pHoverItem->pBoolVal = !*m_pHoverItem->pBoolVal;
                     if (m_pHoverItem->onChange2) m_pHoverItem->onChange2(this, m_pHoverItem);
                     else if (m_pHoverItem->onChange) m_pHoverItem->onChange(this, m_pHoverItem);
                 }
                 return SettingsAction::RepaintAll;
             }
-            // 2. If clicking header bar / chevron arrow (interactRect)
+            // 2. If clicking header bar / chevron arrow / whole card
             if (m_pHoverItem->isHovered) {
                 m_pHoverItem->isActivated = !m_pHoverItem->isActivated;
                 if (m_pHoverItem->onChange) m_pHoverItem->onChange(this, m_pHoverItem);
@@ -6878,22 +7839,51 @@ D2D1_RECT_F SettingsOverlay::GetComboDropdownRect(const SettingsItem* item) cons
     if (!item) return D2D1::RectF(0, 0, 0, 0);
 
     const float s = m_uiScale;
-    float controlX = item->rect.left + LABEL_COLUMN_WIDTH * s;
-    float controlW = item->rect.right - controlX - 8.0f * s;
-    float dropY = item->rect.bottom;
+    float controlX = (item->interactRect.right > item->interactRect.left) ? 
+        item->interactRect.left : (item->rect.left + (item->label.empty() ? 0.0f : LABEL_COLUMN_WIDTH * s));
+    float controlW = (item->interactRect.right > item->interactRect.left) ?
+        (item->interactRect.right - item->interactRect.left) : (item->rect.right - controlX - 8.0f * s);
 
     float itemH = ITEM_HEIGHT * s;
     int count = (int)item->options.size();
-    int maxItems = 16;
-    int visibleItems = (count > maxItems) ? maxItems : count;
-    float dropH = visibleItems * itemH;
+    if (count <= 0) return D2D1::RectF(0, 0, 0, 0);
 
-    // Check if expanding downwards would overflow the HUD bottom
-    const float hudBottom = m_hudY + HUD_HEIGHT * s;
-    if (dropY + dropH > hudBottom) {
-        // Expand upwards: place dropdown list directly above the combobox (matching row boundaries)
-        dropY = item->rect.top - dropH;
+    float anchorTop = (item->interactRect.bottom > item->interactRect.top) ? item->interactRect.top : item->rect.top;
+    float anchorBottom = (item->interactRect.bottom > item->interactRect.top) ? item->interactRect.bottom : item->rect.bottom;
+
+    const float hudTop = m_hudY + 12.0f * s;
+    const float hudBottom = m_hudY + HUD_HEIGHT * s - 12.0f * s;
+
+    float spaceBelow = hudBottom - anchorBottom;
+    float spaceAbove = anchorTop - hudTop;
+
+    int maxItems = 10; // Avoid excessively tall dropdowns
+    int targetItems = (count > maxItems) ? maxItems : count;
+    float idealDropH = targetItems * itemH;
+
+    bool openUpwards = false;
+    float availableH = spaceBelow;
+
+    if (spaceBelow < idealDropH) {
+        if (spaceAbove > spaceBelow) {
+            openUpwards = true;
+            availableH = spaceAbove;
+        } else {
+            availableH = spaceBelow;
+        }
     }
+
+    int visibleItems = (int)(availableH / itemH);
+    if (visibleItems < 1) visibleItems = 1;
+    if (visibleItems > targetItems) visibleItems = targetItems;
+
+    float dropH = visibleItems * itemH;
+    const float gap = 4.0f * s;
+    float dropY = openUpwards ? (anchorTop - dropH - gap) : (anchorBottom + gap);
+
+    // Hard clamp within HUD bounds to guarantee no clipping
+    if (dropY < hudTop) dropY = hudTop;
+    if (dropY + dropH > hudBottom) dropH = (std::max)(itemH, hudBottom - dropY);
 
     return D2D1::RectF(controlX, dropY, controlX + controlW, dropY + dropH);
 }
@@ -6911,8 +7901,12 @@ void SettingsOverlay::DrawComboDropdown(ID2D1DeviceContext* pRT) {
     const float radius = 8.0f * s; // Rounded popup menu
     float itemH = ITEM_HEIGHT * s;
     int count = (int)m_pActiveCombo->options.size();
-    int maxItems = 16;
-    int visibleItems = (count > maxItems) ? maxItems : count;
+    int visibleItems = static_cast<int>(std::round((dropRect.bottom - dropRect.top) / itemH));
+    if (visibleItems <= 0) visibleItems = 1;
+    if (visibleItems > count) visibleItems = count;
+
+    int maxOffset = (std::max)(0, count - visibleItems);
+    int startIdx = std::clamp(m_comboScrollOffset, 0, maxOffset);
     
     // 1. Dropdown Container Background (100% Opaque solid panel background)
     if (m_brushBg) {
@@ -6926,8 +7920,6 @@ void SettingsOverlay::DrawComboDropdown(ID2D1DeviceContext* pRT) {
     // 3. Items (with clipping & inner item rounded highlights)
     pRT->PushAxisAlignedClip(dropRect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     
-    int startIdx = 0;
-    
     const DWRITE_WORD_WRAPPING origWrap = m_textFormatItem->GetWordWrapping();
     m_textFormatItem->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
 
@@ -6936,7 +7928,8 @@ void SettingsOverlay::DrawComboDropdown(ID2D1DeviceContext* pRT) {
         if (idx >= count) break;
         
         float y = dropY + i * itemH;
-        D2D1_RECT_F itemRect = D2D1::RectF(controlX + 3.0f * s, y + 2.0f * s, controlX + controlW - 3.0f * s, y + itemH - 2.0f * s);
+        float padRightEdge = (count > visibleItems) ? (10.0f * s) : (3.0f * s);
+        D2D1_RECT_F itemRect = D2D1::RectF(controlX + 3.0f * s, y + 2.0f * s, controlX + controlW - padRightEdge, y + itemH - 2.0f * s);
         float itemRadius = 4.0f * s;
         
         // Hover
@@ -6953,7 +7946,7 @@ void SettingsOverlay::DrawComboDropdown(ID2D1DeviceContext* pRT) {
         }
         
         // Text
-        D2D1_RECT_F textRect = D2D1::RectF(itemRect.left + 10.0f * s, y, itemRect.right - 10.0f * s, y + itemH);
+        D2D1_RECT_F textRect = D2D1::RectF(itemRect.left + 10.0f * s, y, itemRect.right - 6.0f * s, y + itemH);
         m_textFormatItem->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         ID2D1SolidColorBrush* textBrush = isHover ? m_brushWhite.Get() : m_brushText.Get();
         pRT->DrawText(m_pActiveCombo->options[idx].data(), (UINT32)m_pActiveCombo->options[idx].length(), 
@@ -6961,6 +7954,20 @@ void SettingsOverlay::DrawComboDropdown(ID2D1DeviceContext* pRT) {
     }
     
     m_textFormatItem->SetWordWrapping(origWrap);
+
+    // Scrollbar indicator if items overflow
+    if (count > visibleItems && maxOffset > 0) {
+        float scrollTrackH = dropRect.bottom - dropRect.top - 8.0f * s;
+        float thumbH = (std::max)(16.0f * s, scrollTrackH * ((float)visibleItems / (float)count));
+        float thumbY = dropRect.top + 4.0f * s + (scrollTrackH - thumbH) * ((float)startIdx / (float)maxOffset);
+        float thumbW = 3.0f * s;
+        float thumbX = dropRect.right - 6.0f * s;
+        D2D1_RECT_F thumbRect = D2D1::RectF(thumbX, thumbY, thumbX + thumbW, thumbY + thumbH);
+        if (m_brushAccent) {
+            pRT->FillRoundedRectangle(D2D1::RoundedRect(thumbRect, 1.5f * s, 1.5f * s), m_brushAccent.Get());
+        }
+    }
+
     pRT->PopAxisAlignedClip();
 }
 

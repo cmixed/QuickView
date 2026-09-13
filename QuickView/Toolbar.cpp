@@ -47,6 +47,7 @@ Toolbar::Toolbar() {
       {ToolbarButtonID::CompareZoomOut, Icons::ZoomOut, {}, true, false},
       {ToolbarButtonID::CompareSyncZoom, Icons::Link, {}, true, true},
       {ToolbarButtonID::CompareSyncPan, Icons::Pan, {}, true, true},
+      {ToolbarButtonID::CompareSave, Icons::Save, {}, true, false},
       {ToolbarButtonID::CompareExit, Icons::ExitToolbar, {}, true, false},
       // Animation mode buttons (hidden in normal mode)
       {ToolbarButtonID::AnimPrevFrame, Icons::SkipBack, {}, true, false},
@@ -224,6 +225,7 @@ void Toolbar::UpdateLayout(float winW, float winH) {
       {ToolbarButtonID::CompareSyncPan},
       {ToolbarButtonID::CompareSyncZoom},
       {ToolbarButtonID::CompareLayout},
+      {ToolbarButtonID::CompareSave},
       {ToolbarButtonID::CompareExit},  // Core
   };
   static constexpr ResponsiveHideGroup kAnimHideOrder[] = {
@@ -584,6 +586,8 @@ const wchar_t *GetTooltipText(const ToolbarButton &btn) {
     return btn.isToggled ? AppStrings::Toolbar_Tooltip_CompareSyncZoomOn : AppStrings::Toolbar_Tooltip_CompareSyncZoomOff;
   case ToolbarButtonID::CompareSyncPan:
     return btn.isToggled ? AppStrings::Toolbar_Tooltip_CompareSyncPanOn : AppStrings::Toolbar_Tooltip_CompareSyncPanOff;
+  case ToolbarButtonID::CompareSave:
+    return L"保存/导出图像";
   case ToolbarButtonID::CompareExit:
     return AppStrings::Toolbar_Tooltip_CompareExit;
   case ToolbarButtonID::AnimPlayPause:

@@ -98,6 +98,7 @@ struct SettingsItem {
     float progress = -1.0f; // < 0.0f: disabled, 0.0f ~ 1.0f: semi-transparent progress fill
     bool isSuccess = false; // Green indicator
     bool isFailed = false;  // Red indicator
+    bool isMultiLine = false; // Multi-line input mode for dialog
 };
 
 struct SettingsTab {
@@ -227,6 +228,7 @@ private:
     float m_sliderDragStartVal = 0.0f;
     SettingsItem* m_pActiveCombo = nullptr; 
     int m_comboHoverIdx = -1;
+    int m_comboScrollOffset = 0;
 
     // In-place Capsule Input
     SettingsItem* m_pFocusedSlider = nullptr;
@@ -274,6 +276,7 @@ private:
     ComPtr<IDWriteTextFormat> m_textFormatItem;
     ComPtr<IDWriteTextFormat> m_textFormatBadge;
     ComPtr<IDWriteTextFormat> m_textFormatStepper;
+    ComPtr<IDWriteTextFormat> m_textFormatItemBold;
 
     std::wstring m_debugInfo;
 

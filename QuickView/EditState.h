@@ -218,6 +218,7 @@ enum class HotkeyAction : uint8_t {
     OverlayTogglePassthrough, // Toggle Passthrough Mode
     Help,              // Toggle Help Overlay
     SuperResolution,   // AI Super-Resolution (Default: Shift+S)
+    AiAction,          // AI Actions Palette & Execution (Default: A)
     Exit,              // Exit App / Restore Screen
     Undo,              // Undo last operation (Ctrl+Z)
     PanUp,
@@ -289,6 +290,7 @@ inline std::wstring_view HotkeyActionToString(HotkeyAction action) noexcept {
         case HotkeyAction::OverlayTogglePassthrough: return L"OverlayTogglePassthrough";
         case HotkeyAction::Help: return L"Help";
         case HotkeyAction::SuperResolution: return L"SuperResolution";
+        case HotkeyAction::AiAction: return L"AiAction";
         case HotkeyAction::ToggleSlideshow: return L"ToggleSlideshow";
         case HotkeyAction::ToggleSettings: return L"ToggleSettings";
         case HotkeyAction::Exit: return L"Exit";
@@ -343,6 +345,7 @@ inline HotkeyAction StringToHotkeyAction(std::wstring_view sv) noexcept {
     if (sv == L"ToggleCompare") return HotkeyAction::ToggleCompare;
     if (sv == L"ComparePair") return HotkeyAction::ComparePair;
     if (sv == L"SuperResolution") return HotkeyAction::SuperResolution;
+    if (sv == L"AiAction") return HotkeyAction::AiAction;
     if (sv == L"Rate0") return HotkeyAction::Rate0;
     if (sv == L"Rate1") return HotkeyAction::Rate1;
     if (sv == L"Rate2") return HotkeyAction::Rate2;

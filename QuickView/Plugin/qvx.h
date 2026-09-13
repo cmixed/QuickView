@@ -25,7 +25,8 @@ typedef enum QVX_InterfaceID {
     QVX_IFACE_SUPER_RESOLUTION = 1, // Super-Resolution / Neural Upscaling
     QVX_IFACE_CODEC            = 2, // Image/Animation Codec (Reserved)
     QVX_IFACE_FILTER           = 3, // Compute/Color Filter (Reserved)
-    QVX_IFACE_VFS              = 4  // Virtual File System / Archive (Reserved)
+    QVX_IFACE_VFS              = 4, // Virtual File System / Archive (Reserved)
+    QVX_IFACE_AI_ACTION        = 5  // AI Action & Local Inference Engine (Reserved)
 } QVX_InterfaceID;
 
 // Plugin capabilities and property flags

@@ -23,6 +23,9 @@ static constexpr const char* CURRENT_MODULE = "Main";
 #include "ColorMath.h"
 #include "ExportPanel.h"
 #include "ImageExporter.h"
+#include "AiActionTypes.h"
+#include "AiActionManager.h"
+#include "AiActionOverlay.h"
 using namespace ColorMath;
 
 // --- Controller Refactoring Constants & Declarations ---
@@ -302,6 +305,9 @@ FlushMenuThemesFn LoadFlushMenuThemes() {
 PaneContext g_panes[2];
 FileNavigator& g_navigator = g_panes[0].navigator;
 std::wstring& g_imagePath = g_panes[0].path;
+std::wstring GetCurrentActiveImagePath() {
+    return g_imagePath;
+}
 CImageLoader::ImageMetadata& g_currentMetadata = g_panes[0].metadata;
 ViewState& g_viewState = g_panes[0].view;
 static bool g_isImageDirty = true; // Feature: Conditional Image Repaint (DComp Optimization)
@@ -379,6 +385,7 @@ std::array<HotkeyBinding, static_cast<size_t>(HotkeyAction::Count)> g_hotkeys = 
     HotkeyBinding{ HotkeyAction::OverlayTogglePassthrough, KeyCombo{ VK_ESCAPE, 2 }, KeyCombo{ VK_ESCAPE, 2 } }, // Shift + Esc
     HotkeyBinding{ HotkeyAction::Help, KeyCombo{ VK_F1, 0 }, KeyCombo{ VK_F1, 0 } },
     HotkeyBinding{ HotkeyAction::SuperResolution, KeyCombo{ 'S', 2 }, KeyCombo{ 'S', 2 } }, // AI Super-Resolution (Shift + S)
+    HotkeyBinding{ HotkeyAction::AiAction, KeyCombo{ 'A', 0 }, KeyCombo{ 'A', 0 } }, // AI Actions (A)
     HotkeyBinding{ HotkeyAction::Exit, KeyCombo{ VK_ESCAPE, 0 }, KeyCombo{ VK_ESCAPE, 0 } },
     HotkeyBinding{ HotkeyAction::Undo, KeyCombo{ 'Z', 1 }, KeyCombo{ 'Z', 1 } },
     HotkeyBinding{ HotkeyAction::PanUp, KeyCombo{ VK_UP, 1 }, KeyCombo{ VK_UP, 1 } },
@@ -1387,6 +1394,7 @@ static void ApplyUIScale(float scale) {
     g_toolbar.SetUIScale(g_uiScale);
     g_settingsOverlay.SetUIScale(g_uiScale);
     g_helpOverlay.SetUIScale(g_uiScale);
+    QuickView::UI::AiActionOverlay::Instance().SetUIScale(g_uiScale);
 }
 
 static float ResolveUIScale(UINT dpi) {
@@ -2982,7 +2990,8 @@ DialogLayout CalculateDialogLayout(D2D1_SIZE_F size) {
 
     DialogLayout layout;
     const float s = g_uiScale;
-    float dlgW = 350.0f * s;
+    bool isMulti = AppContext::GetInstance().Dialog.IsMultiLineInput;
+    float dlgW = (isMulti ? 520.0f : 350.0f) * s;
     const size_t nb = AppContext::GetInstance().Dialog.Buttons.size();
 
     // Dynamically adjust button size and gap based on button count & text length to keep the modal compact.
@@ -3008,36 +3017,41 @@ DialogLayout CalculateDialogLayout(D2D1_SIZE_F size) {
 
     // Calculate required height based on DirectWrite measured text layout
     float titleHeight = 28.0f * s;
-    float titleTextW = MeasureStringWidth(AppContext::GetInstance().Dialog.Title.c_str(), 17.0f * s, DWRITE_FONT_WEIGHT_BOLD);
-    int titleLines = (int)std::ceil(titleTextW / availTextWidth);
-    if (titleLines < 1) titleLines = 1;
-    if (titleLines > 3) titleLines = 3;  // Max 3 lines
+    int titleLines = 0;
+    if (!AppContext::GetInstance().Dialog.Title.empty()) {
+        float titleTextW = MeasureStringWidth(AppContext::GetInstance().Dialog.Title.c_str(), 17.0f * s, DWRITE_FONT_WEIGHT_BOLD);
+        titleLines = (int)std::ceil(titleTextW / availTextWidth);
+        if (titleLines < 1) titleLines = 1;
+        if (titleLines > 3) titleLines = 3;  // Max 3 lines
+    }
     
     // Estimate message wrapping and explicit line breaks (\n) via DirectWrite font metrics
     float messageHeight = 20.0f * s;
     const std::wstring& msgStr = AppContext::GetInstance().Dialog.Message;
     int msgLines = 0;
-    size_t startPos = 0;
-    while (startPos < msgStr.length()) {
-        size_t nextPos = msgStr.find(L'\n', startPos);
-        std::wstring line = (nextPos == std::wstring::npos) ? 
-            msgStr.substr(startPos) : 
-            msgStr.substr(startPos, nextPos - startPos);
-        
-        float lineW = MeasureStringWidth(line.c_str(), 12.0f * s);
-        int subLines = (int)std::ceil(lineW / availTextWidth);
-        if (subLines < 1) subLines = 1;
-        msgLines += subLines;
+    if (!msgStr.empty()) {
+        size_t startPos = 0;
+        while (startPos < msgStr.length()) {
+            size_t nextPos = msgStr.find(L'\n', startPos);
+            std::wstring line = (nextPos == std::wstring::npos) ? 
+                msgStr.substr(startPos) : 
+                msgStr.substr(startPos, nextPos - startPos);
+            
+            float lineW = MeasureStringWidth(line.c_str(), 12.0f * s);
+            int subLines = (int)std::ceil(lineW / availTextWidth);
+            if (subLines < 1) subLines = 1;
+            msgLines += subLines;
 
-        if (nextPos == std::wstring::npos) break;
-        startPos = nextPos + 1;
+            if (nextPos == std::wstring::npos) break;
+            startPos = nextPos + 1;
+        }
+        if (msgLines < 1) msgLines = 1;
+        if (msgLines > 8) msgLines = 8;
     }
-    if (msgLines < 1) msgLines = 1;
-    if (msgLines > 8) msgLines = 8;
     
     float contentHeight = (titleLines * titleHeight) + (msgLines * messageHeight);
     float qualityHeight = !AppContext::GetInstance().Dialog.QualityText.empty() ? 28.0f * s : 0.0f; // Add space for quality text
-    float inputHeight = AppContext::GetInstance().Dialog.HasInput ? 45.0f * s : 0.0f; // [Input Mode] Space for edit box
+    float inputHeight = AppContext::GetInstance().Dialog.HasInput ? (isMulti ? 160.0f * s : 45.0f * s) : 0.0f; // [Input Mode] Space for edit box
     float choiceHeight = AppContext::GetInstance().Dialog.HasChoice ? 48.0f * s : 0.0f; // [Choice Mode] Space for ComboBox
     float checkboxHeight = 0.0f;
     if (AppContext::GetInstance().Dialog.HasCheckbox && AppContext::GetInstance().Dialog.HasCheckbox2) {
@@ -3046,11 +3060,13 @@ DialogLayout CalculateDialogLayout(D2D1_SIZE_F size) {
         checkboxHeight = 36.0f * s;
     }
     float buttonsHeight = 50.0f * s;
-    float padding = 32.0f * s; 
+    float padding = (titleLines == 0 && msgLines == 0) ? 16.0f * s : 32.0f * s; 
     
     float dlgH = padding + contentHeight + qualityHeight + inputHeight + choiceHeight + checkboxHeight + buttonsHeight + 10.0f * s; 
-    if (dlgH < 150.0f * s) dlgH = 150.0f * s;
-    if (dlgH > 520.0f * s) dlgH = 520.0f * s;
+    float minH = (titleLines == 0 && msgLines == 0) ? 115.0f * s : 150.0f * s;
+    if (dlgH < minH) dlgH = minH;
+    float maxAllowedDlgH = (isMulti ? 620.0f : 520.0f) * s;
+    if (dlgH > maxAllowedDlgH) dlgH = maxAllowedDlgH;
     
     auto clamp = [](float v, float minV, float maxV) {
         if (v < minV) return minV;
@@ -3076,7 +3092,9 @@ DialogLayout CalculateDialogLayout(D2D1_SIZE_F size) {
     float currentY = top + padding + contentHeight;
     
     if (AppContext::GetInstance().Dialog.HasInput) {
-        layout.Input = D2D1::RectF(left + 25.0f * s, currentY + 10.0f * s, left + dlgW - 25.0f * s, currentY + 40.0f * s);
+        float inTop = currentY + 10.0f * s;
+        float inBottom = isMulti ? (inTop + 140.0f * s) : (currentY + 40.0f * s);
+        layout.Input = D2D1::RectF(left + 25.0f * s, inTop, left + dlgW - 25.0f * s, inBottom);
         currentY += inputHeight;
     }
 
@@ -7853,7 +7871,9 @@ static void EnsureBootHydrated(HWND hwnd) {
     if (g_renderEngine) {
         g_settingsOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
         g_helpOverlay.Init(g_renderEngine->GetDeviceContext(), hwnd);
+        QuickView::UI::AiActionOverlay::Instance().Init(g_renderEngine->GetDeviceContext(), hwnd);
     }
+    QuickView::AI::AiActionManager::Instance().Init();
     
     UpdateManager::Get().Init(GetAppVersionUTF8());
     UpdateManager::Get().SetCallback([](bool found, [[maybe_unused]] const VersionInfo& info, void* context) {
@@ -10307,6 +10327,17 @@ case WM_DESTROY: {
               }
           }
           
+          if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+              if (QuickView::UI::AiActionOverlay::Instance().OnMouseMove((float)pt.x, (float)pt.y)) {
+                  if (QuickView::UI::AiActionOverlay::Instance().GetHoverIndex() != -1) {
+                      g_currentCursor = LoadCursor(nullptr, IDC_HAND);
+                  } else {
+                      g_currentCursor = LoadCursor(nullptr, IDC_ARROW);
+                  }
+                  SetCursor(g_currentCursor);
+                  return 0;
+              }
+          }
           if (g_settingsOverlay.IsVisible()) {
               g_currentCursor = LoadCursor(nullptr, IDC_ARROW);
               SettingsAction action = g_settingsOverlay.OnMouseMove((float)pt.x, (float)pt.y);
@@ -11244,6 +11275,9 @@ SKIP_EDGE_NAV:;
     case WM_LBUTTONDOWN: {
         POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
 
+        if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+            if (QuickView::UI::AiActionOverlay::Instance().OnLButtonDown((float)pt.x, (float)pt.y)) return 0;
+        }
         if (QuickView::PrintPreviewUI::GetInstance().IsVisible()) {
             if (QuickView::PrintPreviewUI::GetInstance().OnLButtonDown(pt.x, pt.y)) return 0;
         }
@@ -11728,6 +11762,10 @@ SKIP_EDGE_NAV:;
     case WM_LBUTTONUP: {
         POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
 
+        if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+            return 0;
+        }
+
         if (GetTickCount() - g_lastOverlayCloseTime < 350) {
             GetPaneContext(PaneSlot::Primary).view.EdgeHoverState = 0;
             GetPaneContext(PaneSlot::Primary).view.EdgeHoverLeft = 0;
@@ -11976,6 +12014,15 @@ SKIP_EDGE_NAV:;
                         SendMessage(hwnd, WM_COMMAND, IDM_OPEN, 0);
                     }
                     break;
+                case ToolbarButtonID::CompareSave: {
+                    auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+                    int targetW = 0, targetH = 0;
+                    GetExportBaseVisualDimensions(primaryPane, targetW, targetH);
+                    std::wstring targetPath = !primaryPane.path.empty() ? primaryPane.path : g_imagePath;
+                    QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, QuickView::PendingAction::None);
+                    RequestRepaint(PaintLayer::All);
+                    break;
+                }
                 case ToolbarButtonID::CompareExit:
                     AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
                     ReturnToPairFaceAfterCompareExit(hwnd);
@@ -12316,6 +12363,10 @@ SKIP_EDGE_NAV:;
         if (QuickView::ExportPanel::GetInstance().IsVisible()) {
             short rawDelta = GET_WHEEL_DELTA_WPARAM(wParam);
             if (QuickView::ExportPanel::GetInstance().OnMouseWheel(rawDelta)) return 0;
+            
+            if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+                if (QuickView::UI::AiActionOverlay::Instance().OnMouseWheel((float)GET_WHEEL_DELTA_WPARAM(wParam))) return 0;
+            }
         }
 
         float wheelDelta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / (float)WHEEL_DELTA;
@@ -12706,6 +12757,11 @@ SKIP_EDGE_NAV:;
     case WM_SYSKEYDOWN:
     case WM_KEYDOWN: {
         EnsureBootHydrated(hwnd);
+        if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+            if (QuickView::UI::AiActionOverlay::Instance().OnKeyDown(wParam)) {
+                return 0;
+            }
+        }
         if (wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL) {
             if (g_cropState.IsActive) {
                 RequestRepaint(PaintLayer::All);
@@ -13023,6 +13079,10 @@ SKIP_EDGE_NAV:;
     
     case WM_RBUTTONUP: {
         EnsureBootHydrated(hwnd);
+        if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+            QuickView::UI::AiActionOverlay::Instance().Hide();
+            return 0;
+        }
         if (g_settingsOverlay.IsVisible()) {
             return 0;
         }
@@ -18227,6 +18287,11 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
                 RequestRepaint(PaintLayer::All);
             }
         }
+        return true;
+
+    case HotkeyAction::AiAction:
+        QuickView::UI::AiActionOverlay::Instance().Toggle();
+        RequestRepaint(PaintLayer::Static);
         return true;
 
     case HotkeyAction::SaveAs:
