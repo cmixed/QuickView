@@ -153,6 +153,7 @@ void Toolbar::UpdateLayout(float winW, float winH) {
     case ToolbarButtonID::CompareSyncZoom:
     case ToolbarButtonID::CompareSyncPan:
     case ToolbarButtonID::CompareRawToggle:
+    case ToolbarButtonID::CompareSave:
     case ToolbarButtonID::CompareExit:
       return true;
     default:
@@ -587,7 +588,7 @@ const wchar_t *GetTooltipText(const ToolbarButton &btn) {
   case ToolbarButtonID::CompareSyncPan:
     return btn.isToggled ? AppStrings::Toolbar_Tooltip_CompareSyncPanOn : AppStrings::Toolbar_Tooltip_CompareSyncPanOff;
   case ToolbarButtonID::CompareSave:
-    return L"保存/导出图像";
+    return AppStrings::Toolbar_Tooltip_CompareSave;
   case ToolbarButtonID::CompareExit:
     return AppStrings::Toolbar_Tooltip_CompareExit;
   case ToolbarButtonID::AnimPlayPause:

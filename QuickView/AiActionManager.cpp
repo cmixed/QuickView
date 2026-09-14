@@ -53,7 +53,70 @@ static std::string BinaryToBase64(const uint8_t* data, size_t len) {
     return b64;
 }
 
-static bool LoadAndEncodeActiveImage(const std::wstring& filePath, MaxResolution maxRes, std::string& outBase64, std::string& outMimeType) {
+static bool DownloadImageFromUrl(const std::wstring& wUrl, std::vector<uint8_t>& outBytes) {
+    if (wUrl.empty()) return false;
+    URL_COMPONENTS urlComp{};
+    urlComp.dwStructSize = sizeof(urlComp);
+    urlComp.dwSchemeLength = static_cast<DWORD>(-1);
+    urlComp.dwHostNameLength = static_cast<DWORD>(-1);
+    urlComp.dwUrlPathLength = static_cast<DWORD>(-1);
+
+    if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.size()), 0, &urlComp)) return false;
+
+    std::wstring host(urlComp.lpszHostName, urlComp.dwHostNameLength);
+    std::wstring path(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
+
+    HINTERNET hSession = WinHttpOpen(L"QuickView-AI-Download/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) return false;
+
+    HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), urlComp.nPort, 0);
+    if (!hConnect) {
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hReq = WinHttpOpenRequest(hConnect, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!hReq) {
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    WinHttpSetTimeouts(hReq, 5000, 5000, 30000, 30000);
+
+    bool ok = false;
+    if (WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+        WinHttpReceiveResponse(hReq, nullptr)) {
+        DWORD statusCode = 0;
+        DWORD dwSize = sizeof(statusCode);
+        WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &dwSize, WINHTTP_NO_HEADER_INDEX);
+        if (statusCode == 200) {
+            DWORD bytesAvailable = 0;
+            while (WinHttpQueryDataAvailable(hReq, &bytesAvailable) && bytesAvailable > 0) {
+                size_t curSize = outBytes.size();
+                outBytes.resize(curSize + bytesAvailable);
+                DWORD bytesRead = 0;
+                if (WinHttpReadData(hReq, outBytes.data() + curSize, bytesAvailable, &bytesRead) && bytesRead > 0) {
+                    outBytes.resize(curSize + bytesRead);
+                } else {
+                    outBytes.resize(curSize);
+                    break;
+                }
+            }
+            ok = !outBytes.empty();
+        }
+    }
+
+    WinHttpCloseHandle(hReq);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return ok;
+}
+
+static bool LoadAndEncodeActiveImage(const std::wstring& filePath, MaxResolution maxRes, std::string& outBase64, std::string& outMimeType, uint32_t& outWidth, uint32_t& outHeight) {
+    outWidth = 0;
+    outHeight = 0;
     if (filePath.empty() || !PathFileExistsW(filePath.c_str())) return false;
 
     std::wstring ext = PathFindExtensionW(filePath.c_str());
@@ -77,6 +140,24 @@ static bool LoadAndEncodeActiveImage(const std::wstring& filePath, MaxResolution
             if (ext == L".jpg" || ext == L".jpeg") outMimeType = "image/jpeg";
             else if (ext == L".webp") outMimeType = "image/webp";
             else outMimeType = "image/png";
+
+            // Query dimensions via WIC cheaply
+            IWICImagingFactory* pFactory = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFactory)))) {
+                IWICBitmapDecoder* pDec = nullptr;
+                if (SUCCEEDED(pFactory->CreateDecoderFromFilename(filePath.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &pDec))) {
+                    IWICBitmapFrameDecode* pFr = nullptr;
+                    if (SUCCEEDED(pDec->GetFrame(0, &pFr))) {
+                        UINT w = 0, h = 0;
+                        pFr->GetSize(&w, &h);
+                        outWidth = w;
+                        outHeight = h;
+                        pFr->Release();
+                    }
+                    pDec->Release();
+                }
+                pFactory->Release();
+            }
             return !outBase64.empty();
         }
     }
@@ -95,6 +176,8 @@ static bool LoadAndEncodeActiveImage(const std::wstring& filePath, MaxResolution
         if (SUCCEEDED(pDecoder->GetFrame(0, &pFrame))) {
             UINT origW = 0, origH = 0;
             pFrame->GetSize(&origW, &origH);
+            outWidth = origW;
+            outHeight = origH;
 
             UINT targetW = origW;
             UINT targetH = origH;
@@ -162,118 +245,207 @@ static bool LoadAndEncodeActiveImage(const std::wstring& filePath, MaxResolution
     return success;
 }
 
-std::wstring AiActionManager::FormatAiErrorMessage(DWORD statusCode, std::string_view responseBody) {
-    std::wstring mainTitle;
-    std::wstring serverDetail;
-    std::wstring actionAdvice;
+void AiActionManager::ExtractSemanticError(
+    DWORD statusCode, std::string_view responseBody,
+    std::wstring& outTitle, std::wstring& outDetail, std::wstring& outAdvice) {
 
+    // 1. Standardized English Status Code Titles & Actionable Advice
     switch (statusCode) {
-    case 429:
-        mainTitle = L"API 配额超限或请求过于频繁 (HTTP 429)";
-        actionAdvice = L"提示: 请检查账户余额或 API 额度，或稍后重试。";
-        break;
-    case 503:
-        mainTitle = L"服务暂时不可用 (HTTP 503)";
-        actionAdvice = L"提示: 服务商模型正处于高峰排队中或代理故障，建议稍后重试或切换模型 (如 gemini-2.5-flash)。";
-        break;
-    case 404:
-        mainTitle = L"服务端未找到该资源或模型 (HTTP 404)";
-        actionAdvice = L"提示: 所选模型名称未在该端点上线，请在设置中重新拉取并选择有效模型。";
+    case 400:
+        outTitle = L"Bad Request (HTTP 400)";
+        outAdvice = L"Hint: Check request parameters, prompt syntax, or image dimensions.";
         break;
     case 401:
-        mainTitle = L"API 密钥无效或已过期 (HTTP 401)";
-        actionAdvice = L"提示: 请检查密钥是否输入正确或已被服务端吊销。";
+        outTitle = L"Invalid or Expired API Key (HTTP 401)";
+        outAdvice = L"Hint: Check and update your API key in Model Profiles settings.";
         break;
     case 403:
-        mainTitle = L"接口访问被拒绝 (HTTP 403)";
-        actionAdvice = L"提示: 当前账户无权调用该模型，请检查权限或换用其他模型。";
+        outTitle = L"Access Denied / Forbidden (HTTP 403)";
+        outAdvice = L"Hint: Your account or key lacks permission to call this model.";
+        break;
+    case 404:
+        outTitle = L"Model or Endpoint Not Found (HTTP 404)";
+        outAdvice = L"Hint: Verify endpoint Base URL, route path, or selected model identifier.";
         break;
     case 413:
-        mainTitle = L"图片数据体积超出限制 (HTTP 413)";
-        actionAdvice = L"提示: 建议在模型设置中将最大分辨率调为 1024px 或 2048px。";
+        outTitle = L"Payload Too Large (HTTP 413)";
+        outAdvice = L"Hint: Lower Max Resolution in Model Profiles to 1024px or 2048px.";
+        break;
+    case 429:
+        outTitle = L"Rate Limit Exceeded or Quota Exhausted (HTTP 429)";
+        outAdvice = L"Hint: Check your API account balance/billing or wait before retrying.";
+        break;
+    case 500:
+        outTitle = L"Internal Server Error (HTTP 500)";
+        outAdvice = L"Hint: An internal crash or exception occurred inside the AI backend.";
+        break;
+    case 503:
+        outTitle = L"Service Temporarily Unavailable (HTTP 503)";
+        outAdvice = L"Hint: Remote AI server is overloaded or undergoing maintenance.";
         break;
     default: {
         wchar_t buf[64] = { 0 };
-        swprintf_s(buf, L"服务端响应异常 (HTTP %lu)", statusCode);
-        mainTitle = buf;
-        actionAdvice = L"提示: 请检查接口地址与网络代理连通性。";
+        swprintf_s(buf, L"AI Request Failed (HTTP %lu)", statusCode);
+        outTitle = buf;
+        outAdvice = L"Hint: Check endpoint connectivity, proxy settings, or firewall.";
         break;
     }
     }
 
-    if (!responseBody.empty()) {
-        yyjson_doc* respDoc = yyjson_read(responseBody.data(), responseBody.size(), 0);
-        if (respDoc) {
-            yyjson_val* rRoot = yyjson_doc_get_root(respDoc);
-            // Unwrap array if returned as array, e.g. [{ "error": ... }]
-            if (rRoot && yyjson_is_arr(rRoot) && yyjson_arr_size(rRoot) > 0) {
-                rRoot = yyjson_arr_get(rRoot, 0);
-            }
+    outDetail.clear();
+    if (responseBody.empty()) return;
 
-            if (rRoot && yyjson_is_obj(rRoot)) {
-                const char* mStr = nullptr;
-                yyjson_val* vErr = yyjson_obj_get(rRoot, "error");
-                if (vErr) {
-                    if (yyjson_is_str(vErr)) {
-                        mStr = yyjson_get_str(vErr);
-                    } else if (yyjson_is_obj(vErr)) {
-                        yyjson_val* vMsg = yyjson_obj_get(vErr, "message");
-                        if (vMsg && yyjson_is_str(vMsg)) mStr = yyjson_get_str(vMsg);
-                        if (!mStr) {
-                            yyjson_val* vStat = yyjson_obj_get(vErr, "status");
-                            if (vStat && yyjson_is_str(vStat)) mStr = yyjson_get_str(vStat);
-                        }
+    // 2. Universal Semantic Heuristic Extraction (Language- & Framework-Agnostic)
+    yyjson_doc* doc = yyjson_read(responseBody.data(), responseBody.size(), 0);
+    if (doc) {
+        yyjson_val* root = yyjson_doc_get_root(doc);
+        if (root && yyjson_is_arr(root) && yyjson_arr_size(root) > 0) {
+            root = yyjson_arr_get(root, 0);
+        }
+
+        if (root && yyjson_is_obj(root)) {
+            const char* bestDetail = nullptr;
+            const char* fallbackGeneric = nullptr;
+
+            auto evaluateCandidate = [&](const char* candidate) {
+                if (!candidate || candidate[0] == '\0') return;
+                bool isGeneric = (strstr(candidate, "Exception") != nullptr ||
+                                  strstr(candidate, "Error") != nullptr ||
+                                  strcmp(candidate, "Not Found") == 0 ||
+                                  strcmp(candidate, "Internal Server Error") == 0);
+                if (isGeneric) {
+                    if (!fallbackGeneric) fallbackGeneric = candidate;
+                } else {
+                    if (!bestDetail || strlen(candidate) > strlen(bestDetail)) {
+                        bestDetail = candidate;
                     }
                 }
-                if (!mStr) {
-                    yyjson_val* vMsg = yyjson_obj_get(rRoot, "message");
-                    if (vMsg && yyjson_is_str(vMsg)) mStr = yyjson_get_str(vMsg);
-                }
-                if (!mStr) {
-                    yyjson_val* vDetail = yyjson_obj_get(rRoot, "detail");
-                    if (vDetail && yyjson_is_str(vDetail)) mStr = yyjson_get_str(vDetail);
-                }
+            };
 
-                if (mStr) {
-                    serverDetail = Utf8ToWide(mStr);
+            // Heuristic Key Candidates with Priority
+            static const char* const kPriorityKeys[] = {
+                "message", "detail", "msg", "description", "reason", "error_description"
+            };
+
+            for (const char* key : kPriorityKeys) {
+                yyjson_val* v = yyjson_obj_get(root, key);
+                if (!v) continue;
+                if (yyjson_is_str(v)) {
+                    evaluateCandidate(yyjson_get_str(v));
+                } else if (yyjson_is_arr(v) && yyjson_arr_size(v) > 0) {
+                    // e.g. FastAPI validation errors: "detail": [{"msg": "...", "loc": ...}]
+                    yyjson_val* first = yyjson_arr_get(v, 0);
+                    if (yyjson_is_obj(first)) {
+                        for (const char* subKey : kPriorityKeys) {
+                            yyjson_val* subV = yyjson_obj_get(first, subKey);
+                            if (subV && yyjson_is_str(subV)) {
+                                evaluateCandidate(yyjson_get_str(subV));
+                                break;
+                            }
+                        }
+                    } else if (yyjson_is_str(first)) {
+                        evaluateCandidate(yyjson_get_str(first));
+                    }
                 }
             }
-            yyjson_doc_free(respDoc);
-        }
 
-        // If not JSON or failed to extract, check for clean plain text snippet (e.g. gateway error)
-        if (serverDetail.empty()) {
-            std::string textSnippet;
-            for (char c : responseBody) {
-                if (c == '\r' || c == '\n' || c == '\t') textSnippet += ' ';
-                else if (static_cast<unsigned char>(c) >= 32) textSnippet += c;
-                if (textSnippet.size() >= 120) break;
+            // Inspect nested "error" object (e.g. OpenAI / Anthropic / Gemini: {"error": {"message": "..."}})
+            yyjson_val* vErr = yyjson_obj_get(root, "error");
+            if (vErr) {
+                if (yyjson_is_obj(vErr)) {
+                    for (const char* key : kPriorityKeys) {
+                        yyjson_val* subV = yyjson_obj_get(vErr, key);
+                        if (subV && yyjson_is_str(subV)) {
+                            evaluateCandidate(yyjson_get_str(subV));
+                            break;
+                        }
+                    }
+                } else if (yyjson_is_str(vErr)) {
+                    evaluateCandidate(yyjson_get_str(vErr));
+                }
             }
-            // Ensure we don't accidentally dump raw unparsed JSON syntax
-            if (!textSnippet.empty() && textSnippet.find('{') == std::string::npos && textSnippet.find('[') == std::string::npos) {
-                serverDetail = Utf8ToWide(textSnippet);
+
+            const char* finalStr = bestDetail ? bestDetail : fallbackGeneric;
+            if (finalStr) {
+                outDetail = Utf8ToWide(finalStr);
+                if (outDetail.find(L"Unhandled generated data mime type") != std::wstring::npos) {
+                    outTitle = L"Gemini Compatibility Layer Bug (HTTP 400)";
+                    outAdvice = L"Hint: Gemini's /chat/completions cannot return raw image data. Set Provider Protocol to 'Google Gemini (Native REST)' in Settings.";
+                }
             }
         }
+        yyjson_doc_free(doc);
     }
 
-    // Combine into clean, human-readable formatted message
-    std::wstring formatted = L"AI 执行失败: " + mainTitle;
-    if (!serverDetail.empty()) {
-        while (!serverDetail.empty() && (serverDetail.front() == L' ' || serverDetail.front() == L'\n' || serverDetail.front() == L'\r')) {
-            serverDetail.erase(serverDetail.begin());
+    // 3. Fallback: Plaintext snippet (e.g. Nginx 502 HTML / Gateway text)
+    if (outDetail.empty()) {
+        std::string snippet;
+        for (char c : responseBody) {
+            if (c == '\r' || c == '\n' || c == '\t') snippet += ' ';
+            else if (static_cast<unsigned char>(c) >= 32 && static_cast<unsigned char>(c) < 127) snippet += c;
+            if (snippet.size() >= 160) break;
         }
-        while (!serverDetail.empty() && (serverDetail.back() == L' ' || serverDetail.back() == L'\n' || serverDetail.back() == L'\r')) {
-            serverDetail.pop_back();
-        }
-        if (!serverDetail.empty()) {
-            formatted += L"\n详情: " + serverDetail;
+        if (!snippet.empty() && snippet.find('{') == std::string::npos && snippet.find('<') == std::string::npos) {
+            outDetail = Utf8ToWide(snippet);
         }
     }
-    if (!actionAdvice.empty()) {
-        formatted += L"\n" + actionAdvice;
-    }
+}
 
-    return formatted;
+std::wstring AiActionManager::FormatAiErrorMessage(DWORD statusCode, std::string_view responseBody) {
+    std::wstring title, detail, advice;
+    ExtractSemanticError(statusCode, responseBody, title, detail, advice);
+
+    std::wstring result = title;
+    if (!detail.empty()) {
+        result += L"\nDetail: " + detail;
+    }
+    if (!advice.empty()) {
+        result += L"\n" + advice;
+    }
+    return result;
+}
+
+void AiActionManager::ShowAiErrorDialog(HWND hwndParent, const ExecutionResult& result) {
+    TASKDIALOGCONFIG tc{};
+    tc.cbSize = sizeof(tc);
+    tc.hwndParent = hwndParent ? hwndParent : GetActiveWindow();
+    tc.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT | TDF_EXPAND_FOOTER_AREA;
+    tc.pszWindowTitle = L"QuickView - AI Action Failure";
+    tc.pszMainIcon = TD_ERROR_ICON;
+
+    std::wstring mainTitle = result.mainTitle.empty() ? L"AI Action Execution Failed" : result.mainTitle;
+    tc.pszMainInstruction = mainTitle.c_str();
+
+    std::wstring content;
+    if (!result.detailMessage.empty()) {
+        content = L"Error Details:\n" + result.detailMessage;
+    }
+    if (!result.actionAdvice.empty()) {
+        if (!content.empty()) content += L"\n\n";
+        content += result.actionAdvice;
+    }
+    if (content.empty()) {
+        content = result.errorMessage.empty() ? L"An unexpected error occurred during AI execution." : result.errorMessage;
+    }
+    tc.pszContent = content.c_str();
+
+    std::wstring expandedInfo;
+    if (!result.rawResponseBody.empty()) {
+        std::string rawTrunc = result.rawResponseBody;
+        if (rawTrunc.size() > 4096) {
+            rawTrunc.resize(4096);
+            rawTrunc += "\n... [Server response truncated, 4096 bytes shown]";
+        }
+        expandedInfo = Utf8ToWide(rawTrunc);
+    } else {
+        expandedInfo = L"(No response body returned from server)";
+    }
+    tc.pszExpandedInformation = expandedInfo.c_str();
+    tc.pszCollapsedControlText = L"Show Raw Server Response (Ctrl+C to copy all)";
+    tc.pszExpandedControlText = L"Hide Raw Server Response";
+    tc.dwCommonButtons = TDCBF_CLOSE_BUTTON;
+
+    TaskDialogIndirect(&tc, nullptr, nullptr, nullptr);
 }
 
 AiActionManager& AiActionManager::Instance() {
@@ -316,55 +488,80 @@ void AiActionManager::InitDefaultTemplates() {
     ModelProfile primary;
     primary.id = "primary_profile";
     primary.displayName = L"Google Gemini";
-    primary.protocol = ApiProtocol::OpenAiChat;
-    primary.baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/";
+    primary.protocol = ApiProtocol::GeminiNative;
+    primary.baseUrl = "https://generativelanguage.googleapis.com/v1beta/";
     primary.defaultModel = "";
     primary.maxResolution = MaxResolution::Original_4K;
-    primary.timeoutSeconds = 45;
+    primary.timeoutSeconds = 600;
     primary.isCustom = false;
     m_profiles.push_back(primary);
 
     m_defaultProfileId = primary.id;
 
-    // --- Default Actions (Numbered 1..5) ---
+    // --- Default Actions (Numbered 1..5 for Professional Designers) ---
+    // 1. AI 智能细节增强与画质精修 (AI Enhance & Texture Refine)
     ActionDesc act1;
-    act1.id = "action_remove_bg";
-    act1.name = L"智能消除背景";
-    act1.modelProfileId = ""; // Default
-    act1.promptTemplate = L"Remove the background cleanly, make it pure white or transparent while preserving main subject sharp edges";
+    act1.id = "action_ai_enhance";
+    act1.name = L"AI Detail Enhancement & Texture Refine";
+    act1.modelProfileId = "";
+    act1.promptTemplate = L"masterpiece, highly detailed, sharp focus, pristine textures, professional photography, natural lighting, crystal clear details, 8k uhd, masterwork";
+    act1.negativePrompt = L"blurry, noise, low quality, artifacts, distorted, deformed, oversaturated, watermark, bad quality, grainy";
     act1.scopeMode = ScopeMode::Auto;
+    act1.denoisingStrength = 0.35f; // Crucial: 0.35 preserves exact shapes & subject geometry!
+    act1.samplingSteps = 25;
+    act1.cfgScale = 7.0f;
     m_actions.push_back(act1);
 
+    // 2. 无痕消除与智能去水印 (Smart Inpaint & Watermark Removal)
     ActionDesc act2;
-    act2.id = "action_inpaint_fill";
-    act2.name = L"局部修补与重绘";
+    act2.id = "action_inpaint_watermark";
+    act2.name = L"Smart Inpaint & Object Removal";
     act2.modelProfileId = "";
-    act2.promptTemplate = L"Seamlessly remove the selected object and naturally reconstruct the background with high fidelity";
+    act2.promptTemplate = L"flawless seamless background fill, natural continuation of texture, pristine clean surface, smooth transition, high quality restoration, uninterrupted surface";
+    act2.negativePrompt = L"text, watermark, logo, signature, letters, numbers, copyright, visible seams, blur, smear, artifacts, boundary lines";
     act2.scopeMode = ScopeMode::CropAndBlend;
+    act2.denoisingStrength = 0.70f; // High inpaint strength within the selected crop bounding box
+    act2.samplingSteps = 30;
+    act2.cfgScale = 7.5f;
     m_actions.push_back(act2);
 
+    // 3. 商业摄影影棚布光 (Commercial Studio Lighting & Render)
     ActionDesc act3;
-    act3.id = "action_anime_style";
-    act3.name = L"转二次元动漫风格";
+    act3.id = "action_studio_lighting";
+    act3.name = L"Studio Lighting & Commercial Render";
     act3.modelProfileId = "";
-    act3.promptTemplate = L"Transform this image into a high quality Japanese anime illustration with vibrant colors and cel-shading";
+    act3.promptTemplate = L"commercial product photography, professional studio softbox lighting, octane render, soft ambient occlusion, elegant shadows, raytracing reflections, premium presentation";
+    act3.negativePrompt = L"harsh flash, flat lighting, amateur snapshot, bad lighting, cluttered background, underexposed, overexposed, noise";
     act3.scopeMode = ScopeMode::ForceFullImage;
+    act3.denoisingStrength = 0.40f;
+    act3.samplingSteps = 25;
+    act3.cfgScale = 7.0f;
     m_actions.push_back(act3);
 
+    // 4. 概念设计草图真实化渲染 (Design Sketch to Photorealism)
     ActionDesc act4;
-    act4.id = "action_cyberpunk";
-    act4.name = L"赛博朋克霓虹风格";
+    act4.id = "action_sketch_to_photo";
+    act4.name = L"Sketch & Concept to Photorealism";
     act4.modelProfileId = "";
-    act4.promptTemplate = L"Reimagine this image with cyberpunk aesthetics, glowing neon signs, rainy reflections, and futuristic details";
+    act4.promptTemplate = L"photorealistic industrial and architectural prototype rendering, physical based rendering, realistic materials, metal and glass textures, pristine finish, canon 5d photography";
+    act4.negativePrompt = L"sketch, lineart, drawing, cartoon, unrealistic, low resolution, 2d, illustration";
     act4.scopeMode = ScopeMode::ForceFullImage;
+    act4.denoisingStrength = 0.55f;
+    act4.samplingSteps = 30;
+    act4.cfgScale = 8.0f;
     m_actions.push_back(act4);
 
+    // 5. 日漫与插画风格化转换 (Anime & Illustration Stylization)
     ActionDesc act5;
-    act5.id = "action_super_detail";
-    act5.name = L"超高清细节增强";
+    act5.id = "action_anime_style";
+    act5.name = L"Anime & Illustration Stylization";
     act5.modelProfileId = "";
-    act5.promptTemplate = L"Enhance image sharpness and fine textures, highly detailed, master photography quality";
-    act5.scopeMode = ScopeMode::Auto;
+    act5.promptTemplate = L"masterpiece anime illustration, Makoto Shinkai aesthetic, vibrant clean colors, beautiful atmospheric lighting, crisp lineart, cel shading, delicate details";
+    act5.negativePrompt = L"photo, photorealistic, 3d render, messy lines, bad anatomy, bad quality, realistic skin";
+    act5.scopeMode = ScopeMode::ForceFullImage;
+    act5.denoisingStrength = 0.50f;
+    act5.samplingSteps = 25;
+    act5.cfgScale = 7.5f;
     m_actions.push_back(act5);
 
     m_lastActionId = act1.id;
@@ -567,6 +764,19 @@ bool AiActionManager::LoadConfig() {
                 const char* nStr = yyjson_get_str(name);
                 if (nStr) a.name = Utf8ToWide(nStr);
             }
+
+            // Smooth migration for legacy Chinese default action names to standard English
+            if (a.id == "action_ai_enhance" && (a.name.empty() || a.name == L"AI 画质精修与细节增强")) {
+                a.name = L"AI Detail Enhancement & Texture Refine";
+            } else if (a.id == "action_inpaint_watermark" && (a.name.empty() || a.name == L"无痕消除与智能去水印")) {
+                a.name = L"Smart Inpaint & Object Removal";
+            } else if (a.id == "action_studio_lighting" && (a.name.empty() || a.name == L"商业摄影影棚布光渲染")) {
+                a.name = L"Studio Lighting & Commercial Render";
+            } else if (a.id == "action_sketch_to_photo" && (a.name.empty() || a.name == L"设计线稿与草图写实渲染")) {
+                a.name = L"Sketch & Concept to Photorealism";
+            } else if (a.id == "action_anime_style" && (a.name.empty() || a.name == L"日漫插画与艺术风格化")) {
+                a.name = L"Anime & Illustration Stylization";
+            }
             yyjson_val* prof = yyjson_obj_get(aVal, "profile_id");
             if (prof) a.modelProfileId = yyjson_get_str(prof);
 
@@ -575,8 +785,28 @@ bool AiActionManager::LoadConfig() {
                 const char* pStr = yyjson_get_str(prompt);
                 if (pStr) a.promptTemplate = Utf8ToWide(pStr);
             }
+            yyjson_val* neg = yyjson_obj_get(aVal, "negative_prompt");
+            if (neg) {
+                const char* nStr = yyjson_get_str(neg);
+                if (nStr) a.negativePrompt = Utf8ToWide(nStr);
+            }
             yyjson_val* scope = yyjson_obj_get(aVal, "scope_mode");
             if (scope) a.scopeMode = static_cast<ScopeMode>(yyjson_get_int(scope));
+
+            yyjson_val* denoise = yyjson_obj_get(aVal, "denoising_strength");
+            if (denoise) {
+                if (yyjson_is_real(denoise)) a.denoisingStrength = static_cast<float>(yyjson_get_real(denoise));
+                else if (yyjson_is_int(denoise)) a.denoisingStrength = static_cast<float>(yyjson_get_int(denoise));
+            }
+            yyjson_val* steps = yyjson_obj_get(aVal, "sampling_steps");
+            if (steps) a.samplingSteps = yyjson_get_int(steps);
+            yyjson_val* cfg = yyjson_obj_get(aVal, "cfg_scale");
+            if (cfg) {
+                if (yyjson_is_real(cfg)) a.cfgScale = static_cast<float>(yyjson_get_real(cfg));
+                else if (yyjson_is_int(cfg)) a.cfgScale = static_cast<float>(yyjson_get_int(cfg));
+            }
+            yyjson_val* aspect = yyjson_obj_get(aVal, "aspect_ratio");
+            if (aspect) a.aspectRatio = static_cast<OutputAspectRatio>(yyjson_get_int(aspect));
 
             m_actions.push_back(a);
         }
@@ -640,7 +870,14 @@ bool AiActionManager::SaveConfig() {
         std::string utf8Prompt = WideToUtf8(a.promptTemplate);
         yyjson_mut_obj_add_strcpy(doc, aVal, "prompt", utf8Prompt.c_str());
 
+        std::string utf8Neg = WideToUtf8(a.negativePrompt);
+        yyjson_mut_obj_add_strcpy(doc, aVal, "negative_prompt", utf8Neg.c_str());
+
         yyjson_mut_obj_add_int(doc, aVal, "scope_mode", static_cast<int>(a.scopeMode));
+        yyjson_mut_obj_add_int(doc, aVal, "aspect_ratio", static_cast<int>(a.aspectRatio));
+        yyjson_mut_obj_add_real(doc, aVal, "denoising_strength", a.denoisingStrength);
+        yyjson_mut_obj_add_int(doc, aVal, "sampling_steps", a.samplingSteps);
+        yyjson_mut_obj_add_real(doc, aVal, "cfg_scale", a.cfgScale);
         yyjson_mut_arr_append(vActions, aVal);
     }
 
@@ -853,7 +1090,7 @@ uint64_t AiActionManager::ExecuteAction(
         if (onComplete) {
             ExecutionResult err;
             err.success = false;
-            err.errorMessage = L"未找到可用的 AI 模型预设，请检查设置。";
+            err.errorMessage = AppStrings::AiError_NoAvailableProfile;
             onComplete(err);
         }
         return 0;
@@ -892,6 +1129,53 @@ void AiActionManager::CancelCurrentTask() {
     }
 }
 
+static void ComputeTargetDimensions(
+    OutputAspectRatio ratio, uint32_t srcW, uint32_t srcH,
+    int& outW, int& outH) {
+    switch (ratio) {
+        case OutputAspectRatio::Square_1_1:
+            outW = 1024;
+            outH = 1024;
+            break;
+        case OutputAspectRatio::Landscape_16_9:
+            outW = 1344;
+            outH = 768;
+            break;
+        case OutputAspectRatio::Portrait_9_16:
+            outW = 768;
+            outH = 1344;
+            break;
+        case OutputAspectRatio::Standard_4_3:
+            outW = 1152;
+            outH = 864;
+            break;
+        case OutputAspectRatio::Vertical_3_4:
+            outW = 864;
+            outH = 1152;
+            break;
+        case OutputAspectRatio::Auto:
+        default:
+            if (srcW > 0 && srcH > 0) {
+                float aspect = static_cast<float>(srcW) / static_cast<float>(srcH);
+                if (aspect >= 1.0f) {
+                    outW = (std::min<int>)(static_cast<int>(srcW), 1024);
+                    outH = static_cast<int>(std::round(outW / aspect));
+                } else {
+                    outH = (std::min<int>)(static_cast<int>(srcH), 1024);
+                    outW = static_cast<int>(std::round(outH * aspect));
+                }
+                outW = (outW / 64) * 64;
+                outH = (outH / 64) * 64;
+                outW = (std::max)(256, (std::min)(outW, 1536));
+                outH = (std::max)(256, (std::min)(outH, 1536));
+            } else {
+                outW = 1024;
+                outH = 1024;
+            }
+            break;
+    }
+}
+
 void AiActionManager::WorkerThread(
     uint64_t taskId, ActionDesc action, ModelProfile profile,
     HWND /*hwnd*/, std::function<void(const ExecutionResult&)> callback) {
@@ -912,7 +1196,7 @@ void AiActionManager::WorkerThread(
 
     std::string apiKey = DecryptApiKey(profile.encryptedApiKey);
     if (!isLocal && apiKey.empty()) {
-        result.errorMessage = L"API 密钥为空，请先在【设置 -> AI 动作 -> 模型服务商】中配置该服务商的 API 密钥。";
+        result.errorMessage = AppStrings::AiError_ApiKeyEmpty;
         m_isRunning.store(false);
         if (callback) callback(result);
         return;
@@ -920,12 +1204,18 @@ void AiActionManager::WorkerThread(
 
     // Determine target model
     std::string targetModel = profile.defaultModel;
-    if (targetModel.empty()) {
-        result.errorMessage = L"未配置模型标识，请先在【设置 -> AI 动作 -> 模型服务商】中拉取或输入有效模型。";
+    if (targetModel.empty() && profile.protocol != ApiProtocol::StabilityInpaint && profile.protocol != ApiProtocol::ComfyUI) {
+        result.errorMessage = AppStrings::AiError_ModelEmpty;
         m_isRunning.store(false);
         if (callback) callback(result);
         return;
     }
+
+    // Load and encode active image (if any)
+    std::string imageBase64;
+    std::string imageMimeType;
+    uint32_t imgW = 0, imgH = 0;
+    bool hasImage = LoadAndEncodeActiveImage(GetCurrentActiveImagePath(), profile.maxResolution, imageBase64, imageMimeType, imgW, imgH);
 
     // Parse URL
     std::wstring wUrl;
@@ -945,7 +1235,7 @@ void AiActionManager::WorkerThread(
     urlComp.dwUrlPathLength = 1024;
 
     if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.size()), 0, &urlComp)) {
-        result.errorMessage = L"无效的 Base URL 格式。";
+        result.errorMessage = AppStrings::AiError_InvalidUrl;
         m_isRunning.store(false);
         if (callback) callback(result);
         return;
@@ -955,11 +1245,51 @@ void AiActionManager::WorkerThread(
     std::wstring fullPath = urlPath;
     if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
 
-    if (profile.protocol == ApiProtocol::OpenAiChat) {
-        if (fullPath.find(L"chat/completions") == std::wstring::npos) {
-            fullPath += L"chat/completions";
+    bool isAnthropic = (wUrl.find(L"api.anthropic.com") != std::wstring::npos);
+
+    ApiProtocol effectiveProtocol = profile.protocol;
+
+    if (effectiveProtocol == ApiProtocol::StabilityInpaint) {
+        size_t pos = fullPath.find(L"sdapi");
+        if (pos != std::wstring::npos) {
+            fullPath = fullPath.substr(0, pos);
         }
-    } else if (profile.protocol == ApiProtocol::OpenAiImagesGenerate) {
+        if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
+        if (hasImage) {
+            fullPath += L"sdapi/v1/img2img";
+        } else {
+            fullPath += L"sdapi/v1/txt2img";
+        }
+    } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
+        size_t openaiPos = fullPath.find(L"openai");
+        if (openaiPos != std::wstring::npos) {
+            fullPath = fullPath.substr(0, openaiPos);
+        }
+        size_t pos = fullPath.find(L"models");
+        if (pos != std::wstring::npos) {
+            fullPath = fullPath.substr(0, pos);
+        }
+        if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
+        if (fullPath == L"/") {
+            fullPath = L"/v1beta/";
+        }
+        fullPath += L"models/" + Utf8ToWide(targetModel);
+        if (targetModel.rfind("imagen-", 0) == 0) {
+            fullPath += L":predict";
+        } else {
+            fullPath += L":generateContent";
+        }
+    } else if (effectiveProtocol == ApiProtocol::OpenAiChat) {
+        if (isAnthropic) {
+            if (fullPath.find(L"messages") == std::wstring::npos) {
+                fullPath += L"messages";
+            }
+        } else {
+            if (fullPath.find(L"chat/completions") == std::wstring::npos) {
+                fullPath += L"chat/completions";
+            }
+        }
+    } else if (effectiveProtocol == ApiProtocol::OpenAiImagesGenerate) {
         if (fullPath.find(L"images/generations") == std::wstring::npos) {
             fullPath += L"images/generations";
         }
@@ -974,18 +1304,34 @@ void AiActionManager::WorkerThread(
         std::lock_guard<std::mutex> lock(m_taskMutex);
         m_activeSession = WinHttpOpen(L"QuickView-AI/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!m_activeSession) {
-            result.errorMessage = L"初始化 WinHTTP 失败。";
+            result.errorMessage = AppStrings::AiError_InitWinHttpFailed;
             m_isRunning.store(false);
             if (callback) callback(result);
             return;
         }
 
-        DWORD timeoutMs = profile.timeoutSeconds * 1000;
-        WinHttpSetTimeouts(m_activeSession, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+        // Tiered & Adaptive Timeout Strategy:
+        // 1. DNS Resolve: 5s (fail fast on bad domain)
+        // 2. TCP/TLS Connect: 10s (fail fast on network block)
+        // 3. Send Request: 30s (upload high-res image data)
+        // 4. Receive Response:
+        //    - Local (SD WebUI / Forge / ComfyUI): 0 (INFINITE timeout).
+        //      Since local models have real-time progress bars and user can press Esc to cancel at any time,
+        //      we never prematurely abort a slow local generation (e.g. low VRAM, hi-res fix, 50+ steps).
+        //    - Cloud (Gemini, Claude, Grok, SiliconFlow): at least 600s (10 minutes)
+        //      to prevent aborting queued/slow cloud generations and wasting user tokens/quota.
+        DWORD resolveTimeoutMs = 5000;
+        DWORD connectTimeoutMs = 10000;
+        DWORD sendTimeoutMs = 30000;
+        DWORD receiveTimeoutMs = 0; // 0 = INFINITE in WinHTTP
+        if (profile.timeoutSeconds > 0) {
+            receiveTimeoutMs = static_cast<DWORD>(profile.timeoutSeconds) * 1000;
+        }
+        WinHttpSetTimeouts(m_activeSession, resolveTimeoutMs, connectTimeoutMs, sendTimeoutMs, receiveTimeoutMs);
 
         m_activeConnect = WinHttpConnect(m_activeSession, hostName, urlComp.nPort, 0);
         if (!m_activeConnect) {
-            result.errorMessage = L"连接服务器失败，请检查网络或 Endpoint。";
+            result.errorMessage = AppStrings::AiError_ConnectFailed;
             m_isRunning.store(false);
             if (callback) callback(result);
             return;
@@ -994,35 +1340,79 @@ void AiActionManager::WorkerThread(
         DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
         m_activeRequest = WinHttpOpenRequest(m_activeConnect, L"POST", fullPath.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
         if (!m_activeRequest) {
-            result.errorMessage = L"创建 HTTP 请求失败。";
+            result.errorMessage = AppStrings::AiError_CreateReqFailed;
             m_isRunning.store(false);
             if (callback) callback(result);
             return;
         }
     }
 
-    // Load and encode active image (if any)
-    std::string imageBase64;
-    std::string imageMimeType;
-    bool hasImage = LoadAndEncodeActiveImage(GetCurrentActiveImagePath(), profile.maxResolution, imageBase64, imageMimeType);
-
     // Build JSON Payload via yyjson
     yyjson_mut_doc* doc = yyjson_mut_doc_new(nullptr);
     yyjson_mut_val* root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);
 
-    yyjson_mut_obj_add_str(doc, root, "model", targetModel.c_str());
-
     // Prompt UTF-8
     std::string utf8Prompt = WideToUtf8(action.promptTemplate);
+    if (effectiveProtocol != ApiProtocol::StabilityInpaint && !action.negativePrompt.empty()) {
+        std::string utf8Neg = WideToUtf8(action.negativePrompt);
+        utf8Prompt += "\n[Negative constraints: please strictly avoid the following: " + utf8Neg + "]";
+    }
+    if (effectiveProtocol != ApiProtocol::StabilityInpaint && effectiveProtocol != ApiProtocol::OpenAiImagesGenerate && action.aspectRatio != OutputAspectRatio::Auto) {
+        const char* ratioDesc = nullptr;
+        switch (action.aspectRatio) {
+            case OutputAspectRatio::Square_1_1: ratioDesc = "1:1 square"; break;
+            case OutputAspectRatio::Landscape_16_9: ratioDesc = "16:9 widescreen landscape"; break;
+            case OutputAspectRatio::Portrait_9_16: ratioDesc = "9:16 vertical portrait"; break;
+            case OutputAspectRatio::Standard_4_3: ratioDesc = "4:3 standard landscape"; break;
+            case OutputAspectRatio::Vertical_3_4: ratioDesc = "3:4 vertical standard"; break;
+            default: break;
+        }
+        if (ratioDesc) {
+            utf8Prompt += "\n[Composition constraint: framing and aspect ratio must strictly be " + std::string(ratioDesc) + " format.]";
+        }
+    }
 
-    if (profile.protocol == ApiProtocol::OpenAiImagesGenerate) {
+    if (effectiveProtocol == ApiProtocol::StabilityInpaint) {
         yyjson_mut_obj_add_str(doc, root, "prompt", utf8Prompt.c_str());
-        yyjson_mut_obj_add_int(doc, root, "n", 1);
-        yyjson_mut_obj_add_str(doc, root, "response_format", "b64_json");
-        yyjson_mut_obj_add_str(doc, root, "size", "1024x1024");
-    } else {
-        // Chat Completions Format (Multi-modal Vision support)
+        if (!action.negativePrompt.empty()) {
+            std::string utf8Neg = WideToUtf8(action.negativePrompt);
+            yyjson_mut_obj_add_str(doc, root, "negative_prompt", utf8Neg.c_str());
+        }
+        int actualSteps = (action.samplingSteps >= 5 && action.samplingSteps <= 150) ? action.samplingSteps : 25;
+        yyjson_mut_obj_add_int(doc, root, "steps", actualSteps);
+        double actualCfg = (action.cfgScale >= 1.0f && action.cfgScale <= 30.0f) ? static_cast<double>(action.cfgScale) : 7.0;
+        yyjson_mut_obj_add_real(doc, root, "cfg_scale", actualCfg);
+
+        int targetW = 1024;
+        int targetH = 1024;
+        ComputeTargetDimensions(action.aspectRatio, imgW, imgH, targetW, targetH);
+        yyjson_mut_obj_add_int(doc, root, "width", targetW);
+        yyjson_mut_obj_add_int(doc, root, "height", targetH);
+
+        if (hasImage) {
+            yyjson_mut_val* initArr = yyjson_mut_arr(doc);
+            yyjson_mut_arr_append(initArr, yyjson_mut_str(doc, imageBase64.c_str()));
+            yyjson_mut_obj_add_val(doc, root, "init_images", initArr);
+            double actualDenoise = (action.denoisingStrength > 0.0f && action.denoisingStrength <= 1.0f) ?
+                                   static_cast<double>(action.denoisingStrength) : 0.35;
+            yyjson_mut_obj_add_real(doc, root, "denoising_strength", actualDenoise);
+        }
+
+        if (!targetModel.empty() && targetModel != "default") {
+            std::string cleanModel = targetModel;
+            size_t bracketPos = cleanModel.rfind(" [");
+            if (bracketPos != std::string::npos && cleanModel.back() == ']') {
+                cleanModel = cleanModel.substr(0, bracketPos);
+            }
+            yyjson_mut_val* overrideSettings = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, overrideSettings, "sd_model_checkpoint", cleanModel.c_str());
+            yyjson_mut_obj_add_val(doc, root, "override_settings", overrideSettings);
+        }
+    } else if (isAnthropic) {
+        yyjson_mut_obj_add_str(doc, root, "model", targetModel.c_str());
+        yyjson_mut_obj_add_int(doc, root, "max_tokens", 2048);
+
         yyjson_mut_val* msgs = yyjson_mut_arr(doc);
         yyjson_mut_obj_add_val(doc, root, "messages", msgs);
 
@@ -1030,17 +1420,160 @@ void AiActionManager::WorkerThread(
         yyjson_mut_obj_add_str(doc, userMsg, "role", "user");
 
         if (hasImage) {
-            // Standard OpenAI Vision format: array with text + image_url
             yyjson_mut_val* contentArr = yyjson_mut_arr(doc);
             yyjson_mut_obj_add_val(doc, userMsg, "content", contentArr);
 
-            // 1. Text Prompt
+            yyjson_mut_val* imgObj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, imgObj, "type", "image");
+            yyjson_mut_val* srcObj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, srcObj, "type", "base64");
+            yyjson_mut_obj_add_str(doc, srcObj, "media_type", imageMimeType.c_str());
+            yyjson_mut_obj_add_str(doc, srcObj, "data", imageBase64.c_str());
+            yyjson_mut_obj_add_val(doc, imgObj, "source", srcObj);
+            yyjson_mut_arr_append(contentArr, imgObj);
+
+            yyjson_mut_val* txtObj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, txtObj, "type", "text");
+            yyjson_mut_obj_add_str(doc, txtObj, "text", utf8Prompt.c_str());
+            yyjson_mut_arr_append(contentArr, txtObj);
+        } else {
+            yyjson_mut_obj_add_str(doc, userMsg, "content", utf8Prompt.c_str());
+        }
+        yyjson_mut_arr_append(msgs, userMsg);
+    } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
+        if (targetModel.rfind("imagen-", 0) == 0) {
+            // Google Imagen 3 Predict Schema
+            yyjson_mut_val* instancesArr = yyjson_mut_arr(doc);
+            yyjson_mut_val* instObj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, instObj, "prompt", utf8Prompt.c_str());
+            yyjson_mut_arr_append(instancesArr, instObj);
+            yyjson_mut_obj_add_val(doc, root, "instances", instancesArr);
+
+            yyjson_mut_val* paramsObj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_int(doc, paramsObj, "sampleCount", 1);
+
+            const char* geminiAspect = "1:1";
+            switch (action.aspectRatio) {
+                case OutputAspectRatio::Landscape_16_9: geminiAspect = "16:9"; break;
+                case OutputAspectRatio::Portrait_9_16:  geminiAspect = "9:16"; break;
+                case OutputAspectRatio::Standard_4_3:   geminiAspect = "4:3"; break;
+                case OutputAspectRatio::Vertical_3_4:   geminiAspect = "3:4"; break;
+                case OutputAspectRatio::Square_1_1:     geminiAspect = "1:1"; break;
+                case OutputAspectRatio::Auto:
+                default:
+                    if (imgW > 0 && imgH > 0) {
+                        float aspect = static_cast<float>(imgW) / static_cast<float>(imgH);
+                        if (aspect >= 1.5f) geminiAspect = "16:9";
+                        else if (aspect >= 1.15f) geminiAspect = "4:3";
+                        else if (aspect <= 0.65f) geminiAspect = "9:16";
+                        else if (aspect <= 0.85f) geminiAspect = "3:4";
+                        else geminiAspect = "1:1";
+                    }
+                    break;
+            }
+            yyjson_mut_obj_add_str(doc, paramsObj, "aspectRatio", geminiAspect);
+            if (!action.negativePrompt.empty()) {
+                std::string utf8Neg = WideToUtf8(action.negativePrompt);
+                yyjson_mut_obj_add_str(doc, paramsObj, "negative_prompt", utf8Neg.c_str());
+            }
+            yyjson_mut_obj_add_val(doc, root, "parameters", paramsObj);
+        } else {
+            // Google Gemini generateContent Schema (Nano Banana Pro / Gemini 2.0 / Gemini 3 Pro)
+            yyjson_mut_val* contentsArr = yyjson_mut_arr(doc);
+            yyjson_mut_val* contentItem = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, contentItem, "role", "user");
+
+            yyjson_mut_val* partsArr = yyjson_mut_arr(doc);
+
+            // 1. Text prompt part
+            yyjson_mut_val* textPart = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, textPart, "text", utf8Prompt.c_str());
+            yyjson_mut_arr_append(partsArr, textPart);
+
+            // 2. Multimodal Image part (if active image present)
+            if (hasImage) {
+                yyjson_mut_val* imgPart = yyjson_mut_obj(doc);
+                yyjson_mut_val* inlineData = yyjson_mut_obj(doc);
+                yyjson_mut_obj_add_str(doc, inlineData, "mimeType", imageMimeType.c_str());
+                yyjson_mut_obj_add_str(doc, inlineData, "data", imageBase64.c_str());
+                yyjson_mut_obj_add_val(doc, imgPart, "inlineData", inlineData);
+                yyjson_mut_arr_append(partsArr, imgPart);
+            }
+
+            yyjson_mut_obj_add_val(doc, contentItem, "parts", partsArr);
+            yyjson_mut_arr_append(contentsArr, contentItem);
+            yyjson_mut_obj_add_val(doc, root, "contents", contentsArr);
+
+            // Generation config: request both image and text modality
+            yyjson_mut_val* genConfig = yyjson_mut_obj(doc);
+            yyjson_mut_val* respModalities = yyjson_mut_arr(doc);
+            yyjson_mut_arr_add_strcpy(doc, respModalities, "IMAGE");
+            yyjson_mut_arr_add_strcpy(doc, respModalities, "TEXT");
+            yyjson_mut_obj_add_val(doc, genConfig, "responseModalities", respModalities);
+            yyjson_mut_obj_add_val(doc, root, "generationConfig", genConfig);
+        }
+    } else if (effectiveProtocol == ApiProtocol::OpenAiImagesGenerate) {
+        yyjson_mut_obj_add_str(doc, root, "model", targetModel.c_str());
+        yyjson_mut_obj_add_str(doc, root, "prompt", utf8Prompt.c_str());
+        yyjson_mut_obj_add_int(doc, root, "n", 1);
+        yyjson_mut_obj_add_str(doc, root, "response_format", "b64_json");
+
+        const char* dalleSize = "1024x1024";
+        switch (action.aspectRatio) {
+            case OutputAspectRatio::Landscape_16_9:
+            case OutputAspectRatio::Standard_4_3:
+                dalleSize = "1792x1024";
+                break;
+            case OutputAspectRatio::Portrait_9_16:
+            case OutputAspectRatio::Vertical_3_4:
+                dalleSize = "1024x1792";
+                break;
+            case OutputAspectRatio::Square_1_1:
+                dalleSize = "1024x1024";
+                break;
+            case OutputAspectRatio::Auto:
+            default:
+                if (imgW > 0 && imgH > 0) {
+                    float aspect = static_cast<float>(imgW) / static_cast<float>(imgH);
+                    if (aspect >= 1.3f) dalleSize = "1792x1024";
+                    else if (aspect <= 0.77f) dalleSize = "1024x1792";
+                    else dalleSize = "1024x1024";
+                } else {
+                    dalleSize = "1024x1024";
+                }
+                break;
+        }
+        yyjson_mut_obj_add_str(doc, root, "size", dalleSize);
+
+        // Compatible extensions for 3rd-party image platforms (SiliconFlow, DashScope, Flux, etc.)
+        if (!action.negativePrompt.empty()) {
+            std::string utf8Neg = WideToUtf8(action.negativePrompt);
+            yyjson_mut_obj_add_str(doc, root, "negative_prompt", utf8Neg.c_str());
+        }
+        if (action.samplingSteps > 0) {
+            yyjson_mut_obj_add_int(doc, root, "steps", action.samplingSteps);
+            yyjson_mut_obj_add_int(doc, root, "num_inference_steps", action.samplingSteps);
+        }
+        if (action.cfgScale > 0.0f) {
+            yyjson_mut_obj_add_real(doc, root, "guidance_scale", static_cast<double>(action.cfgScale));
+        }
+    } else {
+        yyjson_mut_obj_add_str(doc, root, "model", targetModel.c_str());
+        yyjson_mut_val* msgs = yyjson_mut_arr(doc);
+        yyjson_mut_obj_add_val(doc, root, "messages", msgs);
+
+        yyjson_mut_val* userMsg = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, userMsg, "role", "user");
+
+        if (hasImage) {
+            yyjson_mut_val* contentArr = yyjson_mut_arr(doc);
+            yyjson_mut_obj_add_val(doc, userMsg, "content", contentArr);
+
             yyjson_mut_val* textObj = yyjson_mut_obj(doc);
             yyjson_mut_obj_add_str(doc, textObj, "type", "text");
             yyjson_mut_obj_add_str(doc, textObj, "text", utf8Prompt.c_str());
             yyjson_mut_arr_append(contentArr, textObj);
 
-            // 2. Image URL (Data URL Base64)
             yyjson_mut_val* imgObj = yyjson_mut_obj(doc);
             yyjson_mut_obj_add_str(doc, imgObj, "type", "image_url");
             yyjson_mut_val* urlChild = yyjson_mut_obj(doc);
@@ -1049,7 +1582,6 @@ void AiActionManager::WorkerThread(
             yyjson_mut_obj_add_val(doc, imgObj, "image_url", urlChild);
             yyjson_mut_arr_append(contentArr, imgObj);
         } else {
-            // Pure text prompt
             yyjson_mut_obj_add_str(doc, userMsg, "content", utf8Prompt.c_str());
         }
         yyjson_mut_arr_append(msgs, userMsg);
@@ -1061,13 +1593,19 @@ void AiActionManager::WorkerThread(
 
     // Build Headers
     std::wstring headers = L"Content-Type: application/json\r\n";
-    if (!apiKey.empty()) {
-        std::wstring wKey;
-        int kLen = MultiByteToWideChar(CP_UTF8, 0, apiKey.c_str(), -1, nullptr, 0);
-        if (kLen > 0) {
-            wKey.resize(kLen - 1);
-            MultiByteToWideChar(CP_UTF8, 0, apiKey.c_str(), -1, wKey.data(), kLen);
+    if (isAnthropic) {
+        if (!apiKey.empty()) {
+            std::wstring wKey = Utf8ToWide(apiKey);
+            headers += L"x-api-key: " + wKey + L"\r\n";
         }
+        headers += L"anthropic-version: 2023-06-01\r\n";
+    } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
+        if (!apiKey.empty()) {
+            std::wstring wKey = Utf8ToWide(apiKey);
+            headers += L"x-goog-api-key: " + wKey + L"\r\n";
+        }
+    } else if (!apiKey.empty()) {
+        std::wstring wKey = Utf8ToWide(apiKey);
         headers += L"Authorization: Bearer " + wKey + L"\r\n";
     }
 
@@ -1078,9 +1616,26 @@ void AiActionManager::WorkerThread(
 
     if (!bSend || !WinHttpReceiveResponse(m_activeRequest, nullptr)) {
         DWORD dwErr = GetLastError();
-        wchar_t errBuf[128] = { 0 };
-        swprintf_s(errBuf, L"网络请求发送失败 (Error: %lu)。请检查代理设置或网络状态。", dwErr);
-        result.errorMessage = errBuf;
+        if (dwErr == ERROR_WINHTTP_TIMEOUT) {
+            result.mainTitle = L"Network Request Timeout (12002)";
+            result.detailMessage = L"The remote server did not respond within the configured timeout period.";
+            result.actionAdvice = L"Hint: Increase timeout in Model Profiles settings, or lower sampling steps/resolution.";
+        } else if (dwErr == ERROR_WINHTTP_CANNOT_CONNECT) {
+            result.mainTitle = L"Connection Failed (12029)";
+            result.detailMessage = L"Failed to connect to the target endpoint server.";
+            result.actionAdvice = L"Hint: Ensure local service (e.g. SD WebUI / Forge / ComfyUI) is running, or check proxy settings.";
+        } else if (dwErr == ERROR_WINHTTP_NAME_NOT_RESOLVED) {
+            result.mainTitle = L"DNS Resolution Failed (12007)";
+            result.detailMessage = L"The hostname in Base URL could not be resolved by DNS.";
+            result.actionAdvice = L"Hint: Verify endpoint address, network connection, or system proxy.";
+        } else {
+            wchar_t buf[128] = { 0 };
+            swprintf_s(buf, L"Network Transport Error (%lu)", dwErr);
+            result.mainTitle = buf;
+            result.detailMessage = L"A low-level WinHTTP transport error occurred.";
+            result.actionAdvice = L"Hint: Check network connectivity, VPN, or endpoint availability.";
+        }
+        result.errorMessage = result.mainTitle + L"\n" + result.detailMessage + L"\n" + result.actionAdvice;
         m_isRunning.store(false);
         if (callback) callback(result);
         return;
@@ -1111,6 +1666,7 @@ void AiActionManager::WorkerThread(
 
     // Handle Error Status Code
     if (statusCode != 200) {
+        ExtractSemanticError(statusCode, responseBody, result.mainTitle, result.detailMessage, result.actionAdvice);
         result.errorMessage = FormatAiErrorMessage(statusCode, responseBody);
         m_isRunning.store(false);
         if (callback) callback(result);
@@ -1122,23 +1678,143 @@ void AiActionManager::WorkerThread(
     if (respDoc) {
         yyjson_val* rRoot = yyjson_doc_get_root(respDoc);
         if (rRoot) {
-            // 1. Try standard OpenAI image generation structure: data[0].b64_json
-            yyjson_val* vData = yyjson_obj_get(rRoot, "data");
-            if (vData && yyjson_is_arr(vData) && yyjson_arr_size(vData) > 0) {
-                yyjson_val* first = yyjson_arr_get(vData, 0);
-                yyjson_val* b64 = yyjson_obj_get(first, "b64_json");
-                if (b64 && yyjson_is_str(b64)) {
-                    const char* b64Str = yyjson_get_str(b64);
-                    DWORD binLen = 0;
-                    if (CryptStringToBinaryA(b64Str, static_cast<DWORD>(strlen(b64Str)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
-                        result.resultImageData.resize(binLen);
-                        CryptStringToBinaryA(b64Str, static_cast<DWORD>(strlen(b64Str)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
+            // 0. Try Google Gemini generateContent structure: candidates[0].content.parts[].inlineData
+            yyjson_val* vCandidates = yyjson_obj_get(rRoot, "candidates");
+            if (vCandidates && yyjson_is_arr(vCandidates) && yyjson_arr_size(vCandidates) > 0) {
+                yyjson_val* firstCand = yyjson_arr_get(vCandidates, 0);
+                yyjson_val* cContent = yyjson_obj_get(firstCand, "content");
+                if (cContent) {
+                    yyjson_val* cParts = yyjson_obj_get(cContent, "parts");
+                    if (cParts && yyjson_is_arr(cParts)) {
+                        size_t pIdx, pMax;
+                        yyjson_val* part;
+                        yyjson_arr_foreach(cParts, pIdx, pMax, part) {
+                            yyjson_val* inData = yyjson_obj_get(part, "inlineData");
+                            if (!inData) inData = yyjson_obj_get(part, "inline_data");
+                            if (inData) {
+                                yyjson_val* b64Val = yyjson_obj_get(inData, "data");
+                                if (b64Val && yyjson_is_str(b64Val)) {
+                                    const char* actualB64 = yyjson_get_str(b64Val);
+                                    DWORD binLen = 0;
+                                    if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
+                                        result.resultImageData.resize(binLen);
+                                        CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
+                                        result.success = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (result.textContent.empty()) {
+                                yyjson_val* tVal = yyjson_obj_get(part, "text");
+                                if (tVal && yyjson_is_str(tVal)) {
+                                    result.textContent = Utf8ToWide(yyjson_get_str(tVal));
+                                }
+                            }
+                        }
+                        if (result.success) {
+                            // Successfully extracted image from Gemini
+                        } else if (!result.textContent.empty()) {
+                            result.success = true;
+                        }
+                    }
+                }
+            }
+
+            // 0.5. Try Google Imagen 3 predict structure: predictions[0].bytesBase64Encoded
+            if (!result.success) {
+                yyjson_val* vPreds = yyjson_obj_get(rRoot, "predictions");
+                if (vPreds && yyjson_is_arr(vPreds) && yyjson_arr_size(vPreds) > 0) {
+                    yyjson_val* firstPred = yyjson_arr_get(vPreds, 0);
+                    yyjson_val* b64Val = yyjson_obj_get(firstPred, "bytesBase64Encoded");
+                    if (b64Val && yyjson_is_str(b64Val)) {
+                        const char* actualB64 = yyjson_get_str(b64Val);
+                        DWORD binLen = 0;
+                        if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
+                            result.resultImageData.resize(binLen);
+                            CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
+                            result.success = true;
+                        }
+                    }
+                }
+            }
+
+            // 1. Try SD WebUI structure: images[0] (Base64 PNG string)
+            if (!result.success) {
+                yyjson_val* vImages = yyjson_obj_get(rRoot, "images");
+                if (vImages && yyjson_is_arr(vImages) && yyjson_arr_size(vImages) > 0) {
+                    yyjson_val* firstImg = yyjson_arr_get(vImages, 0);
+                    if (firstImg && yyjson_is_str(firstImg)) {
+                        const char* b64Str = yyjson_get_str(firstImg);
+                        const char* actualB64 = strstr(b64Str, ";base64,");
+                        if (actualB64) actualB64 += 8;
+                        else actualB64 = b64Str;
+                        DWORD binLen = 0;
+                        if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
+                            result.resultImageData.resize(binLen);
+                            CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
+                            result.success = true;
+                        }
+                    }
+                }
+            }
+
+            // 2. Try standard OpenAI / SiliconFlow image generation structure: data[0].b64_json or data[0].url
+            if (!result.success) {
+                yyjson_val* vData = yyjson_obj_get(rRoot, "data");
+                if (vData && yyjson_is_arr(vData) && yyjson_arr_size(vData) > 0) {
+                    yyjson_val* first = yyjson_arr_get(vData, 0);
+                    yyjson_val* b64 = yyjson_obj_get(first, "b64_json");
+                    if (b64 && yyjson_is_str(b64)) {
+                        const char* b64Str = yyjson_get_str(b64);
+                        DWORD binLen = 0;
+                        if (CryptStringToBinaryA(b64Str, static_cast<DWORD>(strlen(b64Str)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
+                            result.resultImageData.resize(binLen);
+                            CryptStringToBinaryA(b64Str, static_cast<DWORD>(strlen(b64Str)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
+                            result.success = true;
+                        }
+                    } else {
+                        yyjson_val* vUrl = yyjson_obj_get(first, "url");
+                        if (vUrl && yyjson_is_str(vUrl)) {
+                            std::wstring imgUrl = Utf8ToWide(yyjson_get_str(vUrl));
+                            if (DownloadImageFromUrl(imgUrl, result.resultImageData)) {
+                                result.success = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Try SiliconFlow images array with url: images[0].url
+            if (!result.success) {
+                yyjson_val* vImages = yyjson_obj_get(rRoot, "images");
+                if (vImages && yyjson_is_arr(vImages) && yyjson_arr_size(vImages) > 0) {
+                    yyjson_val* firstImg = yyjson_arr_get(vImages, 0);
+                    if (firstImg && yyjson_is_obj(firstImg)) {
+                        yyjson_val* vUrl = yyjson_obj_get(firstImg, "url");
+                        if (vUrl && yyjson_is_str(vUrl)) {
+                            std::wstring imgUrl = Utf8ToWide(yyjson_get_str(vUrl));
+                            if (DownloadImageFromUrl(imgUrl, result.resultImageData)) {
+                                result.success = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Try Anthropic response structure: content[0].text
+            if (!result.success && isAnthropic) {
+                yyjson_val* vContent = yyjson_obj_get(rRoot, "content");
+                if (vContent && yyjson_is_arr(vContent) && yyjson_arr_size(vContent) > 0) {
+                    yyjson_val* firstBlock = yyjson_arr_get(vContent, 0);
+                    yyjson_val* vText = yyjson_obj_get(firstBlock, "text");
+                    if (vText && yyjson_is_str(vText)) {
+                        result.textContent = Utf8ToWide(yyjson_get_str(vText));
                         result.success = true;
                     }
                 }
             }
 
-            // 2. Try Chat Completions structure: choices[0].message.content
+            // 5. Try Chat Completions structure: choices[0].message.content
             if (!result.success) {
                 yyjson_val* vChoices = yyjson_obj_get(rRoot, "choices");
                 if (vChoices && yyjson_is_arr(vChoices) && yyjson_arr_size(vChoices) > 0) {
@@ -1179,7 +1855,7 @@ void AiActionManager::WorkerThread(
     }
 
     if (!result.success) {
-        result.errorMessage = L"API 响应成功，但未解析到有效的图片或文字数据。";
+        result.errorMessage = AppStrings::AiError_NoValidDataReturned;
     }
 
     m_isRunning.store(false);
@@ -1191,18 +1867,17 @@ void AiActionManager::WorkerThread(
 void AiActionManager::FetchModelsAsync(
     std::string baseUrl,
     std::string apiKey,
-    ApiProtocol /*protocol*/,
+    ApiProtocol protocol,
     std::function<void(bool success, const std::vector<std::string>& models, const std::wstring& errorMsg)> onComplete)
 {
-    std::thread([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), onComplete = std::move(onComplete)]() {
+    std::thread([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() {
         std::vector<std::string> models;
 
         if (baseUrl.empty()) {
-            if (onComplete) onComplete(false, {}, L"接口地址 (Base URL) 为空");
+            if (onComplete) onComplete(false, {}, AppStrings::AiError_InvalidUrl);
             return;
         }
 
-        // Parse URL
         URL_COMPONENTS urlComp{};
         urlComp.dwStructSize = sizeof(urlComp);
         urlComp.dwSchemeLength = static_cast<DWORD>(-1);
@@ -1211,25 +1886,63 @@ void AiActionManager::FetchModelsAsync(
 
         std::wstring wUrl(baseUrl.begin(), baseUrl.end());
         if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.length()), 0, &urlComp)) {
-            if (onComplete) onComplete(false, {}, L"无效的 URL 格式");
+            if (onComplete) onComplete(false, {}, AppStrings::AiError_InvalidUrl);
             return;
         }
 
         std::wstring host(urlComp.lpszHostName, urlComp.dwHostNameLength);
         std::wstring path(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
         if (path.empty() || path.back() != L'/') path += L'/';
-        path += L"models";
+
+        bool isAnthropic = (host.find(L"api.anthropic.com") != std::wstring::npos);
+
+        ApiProtocol effectiveProtocol = protocol;
+
+        if (effectiveProtocol == ApiProtocol::StabilityInpaint) {
+            size_t pos = path.find(L"sdapi");
+            if (pos != std::wstring::npos) {
+                path = path.substr(0, pos);
+            }
+            if (path.empty() || path.back() != L'/') path += L'/';
+            path += L"sdapi/v1/sd-models";
+        } else if (effectiveProtocol == ApiProtocol::ComfyUI) {
+            size_t pos = path.find(L"object_info");
+            if (pos != std::wstring::npos) {
+                path = path.substr(0, pos);
+            }
+            if (path.empty() || path.back() != L'/') path += L'/';
+            path += L"object_info/CheckpointLoaderSimple";
+        } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
+            size_t openaiPos = path.find(L"openai");
+            if (openaiPos != std::wstring::npos) {
+                path = path.substr(0, openaiPos);
+            }
+            size_t modelsPos = path.find(L"models");
+            if (modelsPos != std::wstring::npos) {
+                path = path.substr(0, modelsPos);
+            }
+            if (path.empty() || path.back() != L'/') path += L'/';
+            if (path == L"/") {
+                path = L"/v1beta/";
+            }
+            path += L"models";
+        } else {
+            if (path.empty() || path.back() != L'/') path += L'/';
+            if (path.find(L"models") == std::wstring::npos) {
+                path += L"models";
+            }
+        }
 
         HINTERNET hSession = WinHttpOpen(L"QuickView-AI-Fetch/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession) {
-            if (onComplete) onComplete(false, {}, L"初始化网络会话失败");
+            if (onComplete) onComplete(false, {}, AppStrings::AiError_InitWinHttpFailed);
             return;
         }
 
         HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), urlComp.nPort, 0);
         if (!hConnect) {
             WinHttpCloseHandle(hSession);
-            if (onComplete) onComplete(false, {}, L"连接服务器失败");
+            if (onComplete) onComplete(false, {}, AppStrings::AiError_ConnectFailed);
             return;
         }
 
@@ -1238,7 +1951,7 @@ void AiActionManager::FetchModelsAsync(
         if (!hReq) {
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
-            if (onComplete) onComplete(false, {}, L"创建 HTTP 请求失败");
+            if (onComplete) onComplete(false, {}, AppStrings::AiError_CreateReqFailed);
             return;
         }
 
@@ -1246,8 +1959,17 @@ void AiActionManager::FetchModelsAsync(
         WinHttpSetTimeouts(hReq, 5000, 5000, 15000, 15000);
 
         std::wstring headers;
-        if (!apiKey.empty()) {
-            headers = L"Authorization: Bearer " + std::wstring(apiKey.begin(), apiKey.end()) + L"\r\n";
+        if (isAnthropic) {
+            if (!apiKey.empty()) {
+                headers = L"x-api-key: " + Utf8ToWide(apiKey) + L"\r\n";
+            }
+            headers += L"anthropic-version: 2023-06-01\r\n";
+        } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
+            if (!apiKey.empty()) {
+                headers = L"x-goog-api-key: " + Utf8ToWide(apiKey) + L"\r\n";
+            }
+        } else if (!apiKey.empty()) {
+            headers = L"Authorization: Bearer " + Utf8ToWide(apiKey) + L"\r\n";
         }
 
         BOOL sent = WinHttpSendRequest(hReq,
@@ -1259,7 +1981,7 @@ void AiActionManager::FetchModelsAsync(
             WinHttpCloseHandle(hReq);
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
-            if (onComplete) onComplete(false, {}, L"网络请求超时或无响应");
+            if (onComplete) onComplete(false, {}, AppStrings::AiError_RequestTimeout);
             return;
         }
 
@@ -1282,36 +2004,82 @@ void AiActionManager::FetchModelsAsync(
         WinHttpCloseHandle(hSession);
 
         if (statusCode != 200) {
-            if (onComplete) onComplete(false, {}, L"服务商返回错误 (HTTP " + std::to_wstring(statusCode) + L")");
+            if (onComplete) onComplete(false, {}, std::wstring(AppStrings::AiError_HttpStatusPrefix) + std::to_wstring(statusCode) + L")");
             return;
         }
 
         // Parse JSON via yyjson
         yyjson_doc* doc = yyjson_read(respBody.c_str(), respBody.size(), 0);
         if (!doc) {
-            if (onComplete) onComplete(false, {}, L"无法解析服务商返回的 JSON 数据");
+            if (onComplete) onComplete(false, {}, AppStrings::AiError_JsonParseFailed);
             return;
         }
 
         yyjson_val* root = yyjson_doc_get_root(doc);
         if (root) {
-            yyjson_val* dataArr = yyjson_obj_get(root, "data");
-            if (!dataArr || !yyjson_is_arr(dataArr)) {
-                dataArr = yyjson_obj_get(root, "models");
-            }
-
-            if (dataArr && yyjson_is_arr(dataArr)) {
-                size_t idx, max;
+            if (effectiveProtocol == ApiProtocol::StabilityInpaint && yyjson_is_arr(root)) {
+                // SD WebUI / Forge format: array of objects with "title" or "model_name"
+                size_t idx, max = yyjson_arr_size(root);
                 yyjson_val* item;
-                yyjson_arr_foreach(dataArr, idx, max, item) {
-                    yyjson_val* idVal = yyjson_obj_get(item, "id");
-                    if (!idVal) idVal = yyjson_obj_get(item, "name");
-                    if (idVal && yyjson_is_str(idVal)) {
-                        std::string idStr = yyjson_get_str(idVal);
-                        if (idStr.rfind("models/", 0) == 0) {
-                            idStr = idStr.substr(7);
+                yyjson_arr_foreach(root, idx, max, item) {
+                    if (yyjson_is_obj(item)) {
+                        yyjson_val* tVal = yyjson_obj_get(item, "title");
+                        if (!tVal || !yyjson_is_str(tVal)) {
+                            tVal = yyjson_obj_get(item, "model_name");
                         }
-                        models.push_back(std::move(idStr));
+                        if (tVal && yyjson_is_str(tVal)) {
+                            std::string mName = yyjson_get_str(tVal);
+                            // Clean up optional trailing hash like " [879db523c3]" for clean, user-friendly display
+                            size_t bracketPos = mName.rfind(" [");
+                            if (bracketPos != std::string::npos && mName.back() == ']') {
+                                mName = mName.substr(0, bracketPos);
+                            }
+                            models.emplace_back(std::move(mName));
+                        }
+                    }
+                }
+            } else if (effectiveProtocol == ApiProtocol::ComfyUI) {
+                yyjson_val* cpNode = yyjson_obj_get(root, "CheckpointLoaderSimple");
+                if (cpNode) {
+                    yyjson_val* inObj = yyjson_obj_get(cpNode, "input");
+                    if (inObj) {
+                        yyjson_val* reqObj = yyjson_obj_get(inObj, "required");
+                        if (reqObj) {
+                            yyjson_val* ckptArr = yyjson_obj_get(reqObj, "ckpt_name");
+                            if (ckptArr && yyjson_is_arr(ckptArr) && yyjson_arr_size(ckptArr) > 0) {
+                                yyjson_val* namesArr = yyjson_arr_get(ckptArr, 0);
+                                if (namesArr && yyjson_is_arr(namesArr)) {
+                                    size_t idx, max = yyjson_arr_size(namesArr);
+                                    yyjson_val* item;
+                                    yyjson_arr_foreach(namesArr, idx, max, item) {
+                                        if (yyjson_is_str(item)) {
+                                            models.emplace_back(yyjson_get_str(item));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                yyjson_val* dataArr = yyjson_obj_get(root, "data");
+                if (!dataArr || !yyjson_is_arr(dataArr)) {
+                    dataArr = yyjson_obj_get(root, "models");
+                }
+
+                if (dataArr && yyjson_is_arr(dataArr)) {
+                    size_t idx, max;
+                    yyjson_val* item;
+                    yyjson_arr_foreach(dataArr, idx, max, item) {
+                        yyjson_val* idVal = yyjson_obj_get(item, "id");
+                        if (!idVal) idVal = yyjson_obj_get(item, "name");
+                        if (idVal && yyjson_is_str(idVal)) {
+                            std::string idStr = yyjson_get_str(idVal);
+                            if (idStr.rfind("models/", 0) == 0) {
+                                idStr = idStr.substr(7);
+                            }
+                            models.push_back(std::move(idStr));
+                        }
                     }
                 }
             }
@@ -1322,7 +2090,7 @@ void AiActionManager::FetchModelsAsync(
         models.erase(std::unique(models.begin(), models.end()), models.end());
 
         if (models.empty()) {
-            if (onComplete) onComplete(false, {}, L"接口返回成功，但未解析到可用模型列表");
+            if (onComplete) onComplete(false, {}, AppStrings::AiError_NoModelsFound);
         } else {
             if (onComplete) onComplete(true, models, L"");
         }
@@ -1332,12 +2100,12 @@ void AiActionManager::FetchModelsAsync(
 void AiActionManager::TestConnectionAsync(
     std::string baseUrl,
     std::string apiKey,
-    ApiProtocol /*protocol*/,
+    ApiProtocol protocol,
     std::function<void(bool success, int statusCode, int latencyMs, const std::wstring& message)> onComplete)
 {
-    std::thread([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), onComplete = std::move(onComplete)]() {
+    std::thread([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() {
         if (baseUrl.empty()) {
-            if (onComplete) onComplete(false, 0, 0, L"接口地址 (Base URL) 为空");
+            if (onComplete) onComplete(false, 0, 0, AppStrings::AiError_InvalidUrl);
             return;
         }
 
@@ -1349,27 +2117,65 @@ void AiActionManager::TestConnectionAsync(
 
         std::wstring wUrl(baseUrl.begin(), baseUrl.end());
         if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.length()), 0, &urlComp)) {
-            if (onComplete) onComplete(false, 0, 0, L"无效的 URL 格式");
+            if (onComplete) onComplete(false, 0, 0, AppStrings::AiError_InvalidUrl);
             return;
         }
 
         std::wstring host(urlComp.lpszHostName, urlComp.dwHostNameLength);
         std::wstring path(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
         if (path.empty() || path.back() != L'/') path += L'/';
-        path += L"models";
+
+        bool isAnthropic = (host.find(L"api.anthropic.com") != std::wstring::npos);
+
+        ApiProtocol effectiveProtocol = protocol;
+
+        if (effectiveProtocol == ApiProtocol::StabilityInpaint) {
+            size_t pos = path.find(L"sdapi");
+            if (pos != std::wstring::npos) {
+                path = path.substr(0, pos);
+            }
+            if (path.empty() || path.back() != L'/') path += L'/';
+            path += L"sdapi/v1/sd-models";
+        } else if (effectiveProtocol == ApiProtocol::ComfyUI) {
+            size_t pos = path.find(L"system_stats");
+            if (pos != std::wstring::npos) {
+                path = path.substr(0, pos);
+            }
+            if (path.empty() || path.back() != L'/') path += L'/';
+            path += L"system_stats";
+        } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
+            size_t openaiPos = path.find(L"openai");
+            if (openaiPos != std::wstring::npos) {
+                path = path.substr(0, openaiPos);
+            }
+            size_t modelsPos = path.find(L"models");
+            if (modelsPos != std::wstring::npos) {
+                path = path.substr(0, modelsPos);
+            }
+            if (path.empty() || path.back() != L'/') path += L'/';
+            if (path == L"/") {
+                path = L"/v1beta/";
+            }
+            path += L"models";
+        } else {
+            if (path.empty() || path.back() != L'/') path += L'/';
+            if (path.find(L"models") == std::wstring::npos) {
+                path += L"models";
+            }
+        }
 
         auto startTime = std::chrono::steady_clock::now();
 
         HINTERNET hSession = WinHttpOpen(L"QuickView-AI-Probe/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession) {
-            if (onComplete) onComplete(false, 0, 0, L"初始化网络会话失败");
+            if (onComplete) onComplete(false, 0, 0, AppStrings::AiError_InitWinHttpFailed);
             return;
         }
 
         HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), urlComp.nPort, 0);
         if (!hConnect) {
             WinHttpCloseHandle(hSession);
-            if (onComplete) onComplete(false, 0, 0, L"无法连接到目标主机");
+            if (onComplete) onComplete(false, 0, 0, AppStrings::AiError_ConnectFailed);
             return;
         }
 
@@ -1378,7 +2184,7 @@ void AiActionManager::TestConnectionAsync(
         if (!hReq) {
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
-            if (onComplete) onComplete(false, 0, 0, L"创建 HTTP 请求句柄失败");
+            if (onComplete) onComplete(false, 0, 0, AppStrings::AiError_CreateReqFailed);
             return;
         }
 
@@ -1386,8 +2192,17 @@ void AiActionManager::TestConnectionAsync(
         WinHttpSetTimeouts(hReq, 3000, 4000, 10000, 10000);
 
         std::wstring headers;
-        if (!apiKey.empty()) {
-            headers = L"Authorization: Bearer " + std::wstring(apiKey.begin(), apiKey.end()) + L"\r\n";
+        if (isAnthropic) {
+            if (!apiKey.empty()) {
+                headers = L"x-api-key: " + Utf8ToWide(apiKey) + L"\r\n";
+            }
+            headers += L"anthropic-version: 2023-06-01\r\n";
+        } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
+            if (!apiKey.empty()) {
+                headers = L"x-goog-api-key: " + Utf8ToWide(apiKey) + L"\r\n";
+            }
+        } else if (!apiKey.empty()) {
+            headers = L"Authorization: Bearer " + Utf8ToWide(apiKey) + L"\r\n";
         }
 
         BOOL sent = WinHttpSendRequest(hReq,
@@ -1399,7 +2214,7 @@ void AiActionManager::TestConnectionAsync(
             WinHttpCloseHandle(hReq);
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
-            if (onComplete) onComplete(false, 0, 0, L"网络请求超时或主机无响应");
+            if (onComplete) onComplete(false, 0, 0, AppStrings::AiError_RequestTimeout);
             return;
         }
 
@@ -1415,13 +2230,114 @@ void AiActionManager::TestConnectionAsync(
         WinHttpCloseHandle(hSession);
 
         if (statusCode >= 200 && statusCode < 300) {
-            if (onComplete) onComplete(true, static_cast<int>(statusCode), latencyMs, L"连接正常且凭据鉴权通过");
+            if (onComplete) onComplete(true, static_cast<int>(statusCode), latencyMs, AppStrings::AiTest_ConnSuccess);
         } else if (statusCode == 401 || statusCode == 403) {
-            if (onComplete) onComplete(false, static_cast<int>(statusCode), latencyMs, L"API 密钥无效或未授权 (HTTP " + std::to_wstring(statusCode) + L")");
+            if (onComplete) onComplete(false, static_cast<int>(statusCode), latencyMs, std::wstring(AppStrings::AiTest_AuthFailedPrefix) + std::to_wstring(statusCode) + L")");
         } else {
-            if (onComplete) onComplete(false, static_cast<int>(statusCode), latencyMs, L"服务器返回 HTTP " + std::to_wstring(statusCode));
+            if (onComplete) onComplete(false, static_cast<int>(statusCode), latencyMs, std::wstring(AppStrings::AiTest_HttpErrorPrefix) + std::to_wstring(statusCode));
         }
     }).detach();
+}
+
+bool AiActionManager::PollSdProgress(std::string_view baseUrl, SdProgressInfo& outInfo) {
+    if (baseUrl.empty()) return false;
+    URL_COMPONENTS urlComp{};
+    urlComp.dwStructSize = sizeof(urlComp);
+    urlComp.dwHostNameLength = static_cast<DWORD>(-1);
+    urlComp.dwUrlPathLength = static_cast<DWORD>(-1);
+
+    std::wstring wUrl = Utf8ToWide(baseUrl);
+    if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.length()), 0, &urlComp)) {
+        return false;
+    }
+
+    std::wstring host(urlComp.lpszHostName, urlComp.dwHostNameLength);
+    std::wstring path(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
+    if (path.empty() || path.back() != L'/') path += L'/';
+    path += L"sdapi/v1/progress?skip_current_image=true";
+
+    HINTERNET hSession = WinHttpOpen(L"QuickView-Poll/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) return false;
+
+    // Fast timeouts for polling: 500ms resolve, 500ms connect, 500ms send, 1000ms receive
+    WinHttpSetTimeouts(hSession, 500, 500, 500, 1000);
+
+    HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), urlComp.nPort, 0);
+    if (!hConnect) {
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hReq = WinHttpOpenRequest(hConnect, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!hReq) {
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    BOOL sent = WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
+    if (!sent || !WinHttpReceiveResponse(hReq, nullptr)) {
+        WinHttpCloseHandle(hReq);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    DWORD statusCode = 0;
+    DWORD dwSize = sizeof(statusCode);
+    WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &dwSize, WINHTTP_NO_HEADER_INDEX);
+    if (statusCode != 200) {
+        WinHttpCloseHandle(hReq);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    std::string resp;
+    DWORD dwDownloaded = 0;
+    char buf[2048];
+    while (WinHttpReadData(hReq, buf, sizeof(buf), &dwDownloaded) && dwDownloaded > 0) {
+        resp.append(buf, dwDownloaded);
+        if (resp.size() > 65536) break; // sanity limit
+    }
+
+    WinHttpCloseHandle(hReq);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+
+    if (resp.empty()) return false;
+
+    yyjson_doc* doc = yyjson_read(resp.data(), resp.size(), 0);
+    if (!doc) return false;
+    yyjson_val* root = yyjson_doc_get_root(doc);
+    if (root && yyjson_is_obj(root)) {
+        yyjson_val* vProg = yyjson_obj_get(root, "progress");
+        if (vProg && yyjson_is_real(vProg)) {
+            outInfo.progress = static_cast<float>(yyjson_get_real(vProg));
+        } else if (vProg && yyjson_is_int(vProg)) {
+            outInfo.progress = static_cast<float>(yyjson_get_int(vProg));
+        }
+
+        yyjson_val* vEta = yyjson_obj_get(root, "eta_relative");
+        if (vEta && yyjson_is_real(vEta)) {
+            outInfo.eta = static_cast<float>(yyjson_get_real(vEta));
+        }
+
+        yyjson_val* vState = yyjson_obj_get(root, "state");
+        if (vState && yyjson_is_obj(vState)) {
+            yyjson_val* vStep = yyjson_obj_get(vState, "sampling_step");
+            if (vStep && yyjson_is_int(vStep)) {
+                outInfo.currentStep = yyjson_get_int(vStep);
+            }
+            yyjson_val* vSteps = yyjson_obj_get(vState, "sampling_steps");
+            if (vSteps && yyjson_is_int(vSteps)) {
+                outInfo.totalSteps = yyjson_get_int(vSteps);
+            }
+        }
+    }
+    yyjson_doc_free(doc);
+    return true;
 }
 
 } // namespace QuickView::AI

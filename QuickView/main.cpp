@@ -5580,18 +5580,23 @@ bool CheckUnsavedChanges(HWND hwnd, QuickView::PendingAction pending = QuickView
     auto& primaryPane = GetPaneContext(PaneSlot::Primary);
     if (g_config.ShouldAutoSave(primaryPane.editState.Quality)) return SaveCurrentImage(false);
 
-    // 1. Direct routing to ExportPanel for active Crop Mode or applied Crop modifications
-    if (g_cropState.IsActive || primaryPane.editState.HasCrop) {
+    // 1. Direct routing to ExportPanel for active Crop Mode, applied Crop modifications, or modified in-memory frame (AI generated, etc.)
+    if (g_cropState.IsActive || primaryPane.editState.HasCrop || (primaryPane.editState.IsDirty && primaryPane.currentFrame)) {
         int targetW = 0;
         int targetH = 0;
-        GetExportBaseVisualDimensions(primaryPane, targetW, targetH);
+        if (primaryPane.currentFrame) {
+            targetW = primaryPane.currentFrame->width;
+            targetH = primaryPane.currentFrame->height;
+        } else {
+            GetExportBaseVisualDimensions(primaryPane, targetW, targetH);
+        }
         std::wstring targetPath = !primaryPane.path.empty() ? primaryPane.path : g_imagePath;
 
-        if (pending == QuickView::PendingAction::None) {
+        if (pending == QuickView::PendingAction::None && (g_cropState.IsActive || primaryPane.editState.HasCrop)) {
             pending = QuickView::PendingAction::ExitCropMode;
         }
 
-        QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, pending);
+        QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, pending, PaneSlot::Primary, primaryPane.currentFrame);
         RequestRepaint(PaintLayer::All);
         return false; // Intercept navigation until user completes ExportPanel action
     }
@@ -6396,6 +6401,13 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
         return;
     }
 
+    // [AI Action & Compare Mode Guard] Never auto-trigger super resolution during AI action or in Compare Mode
+    if (!forceManual) {
+        if (IsCompareModeActive() || QuickView::AI::AiActionManager::Instance().IsRunning()) {
+            return;
+        }
+    }
+
     auto& primaryPane = GetPaneContext(PaneSlot::Primary);
     if (!primaryPane.resource || primaryPane.path.empty()) return;
 
@@ -6785,6 +6797,11 @@ static bool CanFastSwitchSuperResolution(HWND hwnd) {
 // [QVX-SR] Centralized Debounced Super-Resolution Scheduler
 void ScheduleDebouncedSuperResolution(HWND hwnd) {
     if (!hwnd || !g_renderEngine) return;
+    // [AI Action & Compare Mode Guard] Never auto-trigger super resolution during AI action or in Compare Mode
+    if (IsCompareModeActive() || QuickView::AI::AiActionManager::Instance().IsRunning()) {
+        KillTimer(hwnd, TIMER_ID_SR_DEBOUNCE);
+        return;
+    }
     if (QuickView::PluginHost::Instance().IsSrPluginEnabled() && QuickView::PluginHost::Instance().IsSrAutoTriggerEnabled()) {
         if (CanFastSwitchSuperResolution(hwnd)) {
             // [Zero-Latency] Cached promoted SR texture or native 1.0x frame is already available;
@@ -8989,6 +9006,110 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             g_osd.EndPersistentTask(hwnd, msg, false, D2D1::ColorF(0.4f, 1.0f, 0.4f), 3000);
         } else if (FAILED(res->hr) && res->requestId == s_srRequestSeq.load()) {
             g_osd.EndPersistentTask(hwnd, AppStrings::OSD_SrFailed, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+        }
+        return 0;
+    }
+
+    // [AI Action] Image Generation / Inpainting completed
+    case QuickView::AI::WM_AI_ACTION_COMPLETED: {
+        KillTimer(hwnd, TIMER_ID_SR_DEBOUNCE);
+        auto* aiRes = reinterpret_cast<QuickView::AI::AsyncAiImageResult*>(lParam);
+        if (!aiRes) return 0;
+        std::unique_ptr<QuickView::AI::AsyncAiImageResult> autoDelete(aiRes);
+
+        auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+        if (aiRes->imageData.empty() || !primaryPane.resource) {
+            g_osd.EndPersistentTask(hwnd, L"AI 生成结果为空", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            return 0;
+        }
+
+        IWICImagingFactory* wic = g_renderEngine ? g_renderEngine->GetWICFactory() : nullptr;
+        if (!wic) {
+            g_osd.EndPersistentTask(hwnd, L"初始化图像解码器失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            return 0;
+        }
+
+        ComPtr<IStream> stream;
+        stream.Attach(SHCreateMemStream(aiRes->imageData.data(), static_cast<UINT>(aiRes->imageData.size())));
+        if (!stream) {
+            g_osd.EndPersistentTask(hwnd, L"读取图像内存流失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            return 0;
+        }
+
+        ComPtr<IWICBitmapDecoder> decoder;
+        if (FAILED(wic->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder)) || !decoder) {
+            g_osd.EndPersistentTask(hwnd, L"解析 AI 图像格式失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            return 0;
+        }
+
+        ComPtr<IWICBitmapFrameDecode> frame;
+        if (FAILED(decoder->GetFrame(0, &frame)) || !frame) {
+            g_osd.EndPersistentTask(hwnd, L"解码 AI 图像帧失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            return 0;
+        }
+
+        UINT bw = 0, bh = 0;
+        frame->GetSize(&bw, &bh);
+        if (bw == 0 || bh == 0) return 0;
+
+        ComPtr<IWICFormatConverter> converter;
+        if (FAILED(wic->CreateFormatConverter(&converter)) || !converter) return 0;
+        if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
+                                         WICBitmapDitherTypeNone, nullptr, 0.0f,
+                                         WICBitmapPaletteTypeCustom))) {
+            return 0;
+        }
+
+        ComPtr<ID2D1Bitmap> newBitmap;
+        if (SUCCEEDED(g_renderEngine->CreateBitmapFromWIC(converter.Get(), &newBitmap)) && newBitmap) {
+            // Enter Compare Mode: Left is original snapshot, Primary (Right) becomes AI generated image
+            if (AppContext::GetInstance().CompareCtrl) {
+                AppContext::GetInstance().CompareCtrl->EnterSrCompareMode(hwnd);
+                primaryPane.resource.bitmap = newBitmap;
+                primaryPane.metadata.Width = bw;
+                primaryPane.metadata.Height = bh;
+                AppContext::GetInstance().CompareCtrl->MarkDirty();
+            } else {
+                primaryPane.resource.bitmap = newBitmap;
+                primaryPane.metadata.Width = bw;
+                primaryPane.metadata.Height = bh;
+            }
+
+            primaryPane.editState.IsDirty = true;
+            primaryPane.editState.Quality = EditQuality::Lossy;
+
+            // Cache raw frame for potential manual super-resolution or export
+            UINT stride = bw * 4;
+            size_t byteCount = static_cast<size_t>(stride) * static_cast<size_t>(bh);
+            uint8_t* rawPixels = static_cast<uint8_t*>(std::malloc(byteCount));
+            if (rawPixels) {
+                if (SUCCEEDED(converter->CopyPixels(nullptr, stride, static_cast<UINT>(byteCount), rawPixels))) {
+                    auto aiFrame = std::make_shared<QuickView::RawImageFrame>();
+                    aiFrame->width = bw;
+                    aiFrame->height = bh;
+                    aiFrame->stride = stride;
+                    aiFrame->format = QuickView::PixelFormat::BGRA8888;
+                    aiFrame->quality = QuickView::DecodeQuality::Preview;
+                    aiFrame->pixels = rawPixels;
+                    aiFrame->memoryDeleter = QuickView::MemoryDeleter::FromFree();
+                    primaryPane.currentFrame = aiFrame;
+                } else {
+                    std::free(rawPixels);
+                }
+            }
+
+            RECT rcClient{};
+            GetClientRect(hwnd, &rcClient);
+            float winW = (float)rcClient.right;
+            float winH = (float)rcClient.bottom;
+            RenderImageToDComp(hwnd, primaryPane.resource, true);
+            SyncDCompState(hwnd, winW, winH, false);
+            RequestRepaint(PaintLayer::All);
+
+            const wchar_t* succMsg = AppStrings::OSD_AiGenerationSuccess ? AppStrings::OSD_AiGenerationSuccess : L"AI 处理完成！已进入卷帘对比模式";
+            g_osd.EndPersistentTask(hwnd, succMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 3000);
+        } else {
+            g_osd.EndPersistentTask(hwnd, L"创建 GPU 纹理失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
         }
         return 0;
     }
@@ -12015,15 +12136,20 @@ SKIP_EDGE_NAV:;
                     }
                     break;
                 case ToolbarButtonID::CompareSave: {
-                    auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+                    ComparePane activeCompare = AppContext::GetInstance().Compare.activePane;
+                    PaneSlot activeSlot = (activeCompare == ComparePane::Left) ? PaneSlot::Left : PaneSlot::Primary;
+                    auto& targetPane = GetPaneContext(activeSlot);
                     int targetW = 0, targetH = 0;
-                    GetExportBaseVisualDimensions(primaryPane, targetW, targetH);
-                    std::wstring targetPath = !primaryPane.path.empty() ? primaryPane.path : g_imagePath;
-                    QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, QuickView::PendingAction::None);
+                    GetExportBaseVisualDimensions(targetPane, targetW, targetH);
+                    std::wstring targetPath = !targetPane.path.empty() ? targetPane.path : g_imagePath;
+                    QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, QuickView::PendingAction::None, activeSlot, targetPane.currentFrame);
                     RequestRepaint(PaintLayer::All);
                     break;
                 }
                 case ToolbarButtonID::CompareExit:
+                    if (!CheckUnsavedChanges(hwnd)) {
+                        break;
+                    }
                     AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
                     ReturnToPairFaceAfterCompareExit(hwnd);
                     RequestRepaint(PaintLayer::All);
@@ -12759,6 +12885,13 @@ SKIP_EDGE_NAV:;
         EnsureBootHydrated(hwnd);
         if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
             if (QuickView::UI::AiActionOverlay::Instance().OnKeyDown(wParam)) {
+                return 0;
+            }
+        }
+        if (wParam == VK_ESCAPE) {
+            if (QuickView::AI::AiActionManager::Instance().IsRunning()) {
+                QuickView::AI::AiActionManager::Instance().CancelCurrentTask();
+                g_osd.EndPersistentTask(hwnd, L"AI 任务已取消", false, D2D1::ColorF(D2D1::ColorF::LightSalmon), 1500);
                 return 0;
             }
         }
@@ -13559,13 +13692,14 @@ SKIP_EDGE_NAV:;
             break;
         }
         case IDM_SAVE_AS: {
-            std::wstring targetPath = !contextPath.empty() ? contextPath : (!GetPaneContext(PaneSlot::Primary).path.empty() ? GetPaneContext(PaneSlot::Primary).path : g_imagePath);
+            PaneSlot activeSlot = (IsCompareModeActive() && AppContext::GetInstance().Compare.activePane == ComparePane::Left) ? PaneSlot::Left : PaneSlot::Primary;
+            const auto& pane = GetPaneContext(activeSlot);
+            std::wstring targetPath = !contextPath.empty() ? contextPath : (!pane.path.empty() ? pane.path : g_imagePath);
             if (!targetPath.empty()) {
-                const auto& pane = GetPaneContext(PaneSlot::Primary);
                 int targetW = 0;
                 int targetH = 0;
                 GetExportBaseVisualDimensions(pane, targetW, targetH);
-                QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath);
+                QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, QuickView::PendingAction::None, activeSlot, pane.currentFrame);
                 RequestRepaint(PaintLayer::All);
             }
             break;
@@ -18197,6 +18331,9 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
 
     case HotkeyAction::ToggleCompare:
         if (IsCompareModeActive()) {
+            if (!CheckUnsavedChanges(hwnd)) {
+                return true;
+            }
             AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
             ReturnToPairFaceAfterCompareExit(hwnd);
         } else {
@@ -18476,6 +18613,9 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
             return true;
         }
         if (IsCompareModeActive()) {
+            if (!CheckUnsavedChanges(hwnd)) {
+                return true;
+            }
             AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
             RequestRepaint(PaintLayer::All);
             return true;

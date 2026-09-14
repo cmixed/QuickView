@@ -73,6 +73,22 @@ struct OSDState {
         }
     }
 
+    void UpdatePersistentTask(HWND hwnd, const std::wstring& msg, float progress = -1.0f) {
+        PersistentTask.Message = msg;
+        if (progress >= 0.0f) {
+            PersistentTask.Progress = progress;
+        }
+        Message = msg;
+        if (progress >= 0.0f) {
+            Progress = progress;
+        }
+        StartTime = GetTickCount();
+        if (hwnd) {
+            SetTimer(hwnd, 994, 30, nullptr);
+            RequestRepaint(QuickView::PaintLayer::Dynamic);
+        }
+    }
+
     void EndPersistentTask(HWND hwnd, const std::wstring& completionMsg = L"", bool error = false, D2D1_COLOR_F color = D2D1::ColorF(0.4f, 1.0f, 0.4f), DWORD durationMs = 2000) {
         PersistentTask.IsActive = false;
         PersistentTask.Progress = -1.0f;

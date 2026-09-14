@@ -986,28 +986,61 @@ int* BindEnum(T* ptr) { return reinterpret_cast<int*>(ptr); }
 // AI Actions & Model Profiles Tab Builder
 // ============================================================================
 namespace {
+    static inline bool IsSimplifiedChinese() {
+        return g_config.Language == (int)AppStrings::Language::ChineseSimplified ||
+               (g_config.Language == (int)AppStrings::Language::Auto && PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE);
+    }
+
     struct ProviderPreset {
         std::wstring name;
         QuickView::AI::ApiProtocol protocol;
         std::string defaultUrl;
     };
     static const ProviderPreset s_providerPresets[] = {
-        { L"Google Gemini", QuickView::AI::ApiProtocol::OpenAiChat, "https://generativelanguage.googleapis.com/v1beta/openai/" },
+        { L"Google Gemini", QuickView::AI::ApiProtocol::GeminiNative, "https://generativelanguage.googleapis.com/v1beta/" },
         { L"OpenAI (ChatGPT)", QuickView::AI::ApiProtocol::OpenAiChat, "https://api.openai.com/v1/" },
+        { L"OpenAI (DALL-E 3)", QuickView::AI::ApiProtocol::OpenAiImagesGenerate, "https://api.openai.com/v1/" },
         { L"Anthropic Claude", QuickView::AI::ApiProtocol::OpenAiChat, "https://api.anthropic.com/v1/" },
         { L"xAI Grok", QuickView::AI::ApiProtocol::OpenAiChat, "https://api.x.ai/v1/" },
-        { L"SiliconFlow (硅基流动)", QuickView::AI::ApiProtocol::OpenAiImagesGenerate, "https://api.siliconflow.cn/v1/" },
-        { L"阿里百炼 (DashScope)", QuickView::AI::ApiProtocol::OpenAiChat, "https://dashscope.aliyuncs.com/compatible-mode/v1/" },
-        { L"本地 ComfyUI", QuickView::AI::ApiProtocol::ComfyUI, "http://127.0.0.1:8188/" },
-        { L"本地 SD WebUI / Forge", QuickView::AI::ApiProtocol::StabilityInpaint, "http://127.0.0.1:7860/" },
-        { L"自定义 (Custom Endpoint)", QuickView::AI::ApiProtocol::OpenAiChat, "" }
+        { L"SiliconFlow", QuickView::AI::ApiProtocol::OpenAiImagesGenerate, "https://api.siliconflow.cn/v1/" },
+        { L"Alibaba Cloud DashScope", QuickView::AI::ApiProtocol::OpenAiChat, "https://dashscope.aliyuncs.com/compatible-mode/v1/" },
+        { L"Local ComfyUI", QuickView::AI::ApiProtocol::ComfyUI, "http://127.0.0.1:8188/" },
+        { L"Local SD WebUI / Forge", QuickView::AI::ApiProtocol::StabilityInpaint, "http://127.0.0.1:7860/" },
+        { L"Custom Endpoint", QuickView::AI::ApiProtocol::OpenAiChat, "" }
     };
+
+    static inline int ProtocolToUiIndex(QuickView::AI::ApiProtocol p) {
+        switch (p) {
+            case QuickView::AI::ApiProtocol::GeminiNative: return 0;
+            case QuickView::AI::ApiProtocol::OpenAiChat: return 1;
+            case QuickView::AI::ApiProtocol::OpenAiImagesGenerate: return 2;
+            case QuickView::AI::ApiProtocol::OpenAiImagesEdit: return 3;
+            case QuickView::AI::ApiProtocol::StabilityInpaint: return 4;
+            case QuickView::AI::ApiProtocol::ComfyUI: return 5;
+            case QuickView::AI::ApiProtocol::CustomJsonPost: return 6;
+            default: return 1;
+        }
+    }
+
+    static inline QuickView::AI::ApiProtocol UiIndexToProtocol(int idx) {
+        switch (idx) {
+            case 0: return QuickView::AI::ApiProtocol::GeminiNative;
+            case 1: return QuickView::AI::ApiProtocol::OpenAiChat;
+            case 2: return QuickView::AI::ApiProtocol::OpenAiImagesGenerate;
+            case 3: return QuickView::AI::ApiProtocol::OpenAiImagesEdit;
+            case 4: return QuickView::AI::ApiProtocol::StabilityInpaint;
+            case 5: return QuickView::AI::ApiProtocol::ComfyUI;
+            case 6: return QuickView::AI::ApiProtocol::CustomJsonPost;
+            default: return QuickView::AI::ApiProtocol::OpenAiChat;
+        }
+    }
 
     struct AiUiState {
         std::vector<std::wstring> profileUrls;
         std::vector<std::wstring> profileKeys;
         std::vector<std::wstring> profileModels;
         std::vector<int> profileProviderIndices;
+        std::vector<int> profileProtocolIndices;
         std::vector<int> profileMaxResIndices;
         std::vector<bool> profileExpanded;
         std::vector<std::vector<std::wstring>> profileFetchedModels;
@@ -1022,6 +1055,7 @@ namespace {
 
         std::vector<std::wstring> actionNames;
         std::vector<std::wstring> actionPrompts;
+        std::vector<std::wstring> actionNegativePrompts;
         std::vector<int> actionProfileIndices;
         std::vector<std::vector<std::wstring>> actionProfileOptionStrings;
         std::vector<std::vector<std::wstring_view>> actionProfileOptionViews;
@@ -1031,13 +1065,20 @@ namespace {
         int defaultProfileIndex = 0;
         std::vector<std::wstring> profileNames;
         std::vector<std::wstring_view> profileNameViews;
-        std::vector<std::wstring_view> providerOptions = {
-            L"Google Gemini", L"OpenAI (ChatGPT)", L"Anthropic Claude", L"xAI Grok",
-            L"SiliconFlow (硅基流动)", L"阿里百炼 (DashScope)", L"本地 ComfyUI",
-            L"本地 SD WebUI / Forge", L"自定义 (Custom Endpoint)"
-        };
-        std::vector<std::wstring_view> maxResOptions = { L"4K / 原图优先 (4096px)", L"2K 高清 (2048px)", L"1K 标准 (1024px)", L"原始尺寸 (不限制)" };
-        std::vector<std::wstring_view> scopeOptions = { L"自适应 (选区优先)", L"强制全图", L"局部修补 (贴回羽化)" };
+        std::vector<std::wstring_view> providerOptions;
+        std::vector<std::wstring_view> protocolOptions;
+        std::vector<std::wstring_view> maxResOptions;
+        std::vector<std::wstring_view> scopeOptions;
+        std::vector<int> profileTimeoutIndices;
+        std::vector<int> actionDenoiseIndices;
+        std::vector<int> actionStepsIndices;
+        std::vector<int> actionCfgIndices;
+        std::vector<int> actionAspectIndices;
+        std::vector<std::wstring_view> timeoutOptions;
+        std::vector<std::wstring_view> denoiseOptions;
+        std::vector<std::wstring_view> stepsOptions;
+        std::vector<std::wstring_view> cfgOptions;
+        std::vector<std::wstring_view> aspectRatioOptions;
     };
     static AiUiState s_aiUi;
 
@@ -1078,11 +1119,11 @@ namespace {
             QuickView::AI::ModelProfile defP;
             defP.id = "primary_profile";
             defP.displayName = L"Google Gemini";
-            defP.protocol = QuickView::AI::ApiProtocol::OpenAiChat;
-            defP.baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/";
+            defP.protocol = QuickView::AI::ApiProtocol::GeminiNative;
+            defP.baseUrl = "https://generativelanguage.googleapis.com/v1beta/";
             defP.defaultModel = "";
             defP.maxResolution = QuickView::AI::MaxResolution::Original_4K;
-            defP.timeoutSeconds = 45;
+            defP.timeoutSeconds = 600;
             profiles.push_back(defP);
             mgr.SetDefaultProfileId(defP.id);
             mgr.SaveConfig();
@@ -1093,7 +1134,9 @@ namespace {
         s_aiUi.profileMaskedKeys.resize(profiles.size());
         s_aiUi.profileModels.resize(profiles.size());
         s_aiUi.profileProviderIndices.resize(profiles.size(), 0);
+        s_aiUi.profileProtocolIndices.resize(profiles.size(), 0);
         s_aiUi.profileMaxResIndices.resize(profiles.size(), 0);
+        s_aiUi.profileTimeoutIndices.resize(profiles.size(), 4);
         s_aiUi.profileFetchedModels.resize(profiles.size());
         s_aiUi.profileFetchedModelViews.resize(profiles.size());
         s_aiUi.profileFetchedModelIndex.resize(profiles.size(), 0);
@@ -1126,6 +1169,7 @@ namespace {
                 }
             }
             s_aiUi.profileProviderIndices[i] = provIdx;
+            s_aiUi.profileProtocolIndices[i] = ProtocolToUiIndex(p.protocol);
 
             s_aiUi.profileUrls[i] = Utf8ToWide(p.baseUrl);
 
@@ -1150,11 +1194,120 @@ namespace {
                 s_aiUi.profileFetchedModelViews[i].push_back(wName);
             }
 
+            // Update localized options
+            s_aiUi.providerOptions = {
+                L"Google Gemini", L"OpenAI (ChatGPT)", L"Anthropic Claude", L"xAI Grok",
+                L"SiliconFlow", L"DashScope",
+                AppStrings::Settings_Option_AiLocalComfyUI ? AppStrings::Settings_Option_AiLocalComfyUI : L"Local ComfyUI",
+                AppStrings::Settings_Option_AiLocalSdWebUI ? AppStrings::Settings_Option_AiLocalSdWebUI : L"Local SD WebUI / Forge",
+                AppStrings::Settings_Option_AiCustomEndpoint ? AppStrings::Settings_Option_AiCustomEndpoint : L"Custom (OpenAI Compatible)"
+            };
+
+            s_aiUi.protocolOptions = {
+                L"Google Gemini REST (models/...:generateContent)",
+                L"OpenAI Chat Completions (/chat/completions)",
+                L"OpenAI Images Generation (/images/generations)",
+                L"OpenAI Images Edit (/images/edits)",
+                L"Local SD WebUI / Forge (/sdapi/v1/img2img)",
+                L"Local ComfyUI (/prompt)",
+                L"Universal JSON POST (Custom)"
+            };
+
+            s_aiUi.maxResOptions = {
+                AppStrings::Settings_Option_AiRes4K ? AppStrings::Settings_Option_AiRes4K : L"4K / Original (4096px)",
+                AppStrings::Settings_Option_AiRes2K ? AppStrings::Settings_Option_AiRes2K : L"2K QHD (2048px)",
+                AppStrings::Settings_Option_AiRes1K ? AppStrings::Settings_Option_AiRes1K : L"1K Standard (1024px)",
+                AppStrings::Settings_Option_AiResOriginal ? AppStrings::Settings_Option_AiResOriginal : L"Unrestricted (Native)"
+            };
+
+            s_aiUi.scopeOptions = {
+                AppStrings::Settings_Option_AiScopeAuto ? AppStrings::Settings_Option_AiScopeAuto : L"Auto (Selection First)",
+                AppStrings::Settings_Option_AiScopeForceFull ? AppStrings::Settings_Option_AiScopeForceFull : L"Force Full Image",
+                AppStrings::Settings_Option_AiScopeCropBlend ? AppStrings::Settings_Option_AiScopeCropBlend : L"Inpaint & Blend"
+            };
+
+            bool isZh = IsSimplifiedChinese();
+            s_aiUi.timeoutOptions = isZh ? std::vector<std::wstring_view>{
+                L"30 秒",
+                L"60 秒",
+                L"120 秒 (2 分钟)",
+                L"300 秒 (5 分钟)",
+                L"600 秒 (10 分钟)",
+                L"无限制 (本地推荐)"
+            } : std::vector<std::wstring_view>{
+                L"30 Seconds",
+                L"60 Seconds (1 Min)",
+                L"120 Seconds (2 Mins)",
+                L"300 Seconds (5 Mins)",
+                L"600 Seconds (10 Mins)",
+                L"Unrestricted (Local)"
+            };
+
+            s_aiUi.denoiseOptions = isZh ? std::vector<std::wstring_view>{
+                L"0.30 (极低微调，保持结构)",
+                L"0.35 (细节增强，主体锁定)",
+                L"0.40 (适度重构，商业质感)",
+                L"0.50 (半重绘，风格转换)",
+                L"0.70 (高重绘，无痕消除)"
+            } : std::vector<std::wstring_view>{
+                L"0.30 (Subtle, preserve structure)",
+                L"0.35 (Detail boost, subject lock)",
+                L"0.40 (Balanced rework, professional)",
+                L"0.50 (Semi-repaint, style transfer)",
+                L"0.70 (High redraw, clean inpaint)"
+            };
+
+            s_aiUi.stepsOptions = isZh ? std::vector<std::wstring_view>{
+                L"15 步 (极速预览)",
+                L"20 步 (快速生成)",
+                L"25 步 (标准平衡 - 推荐)",
+                L"30 步 (高品质精细)",
+                L"40 步 (超高采样)",
+                L"50 步 (极致细节)"
+            } : std::vector<std::wstring_view>{
+                L"15 Steps (Fast Preview)",
+                L"20 Steps (Quick Generation)",
+                L"25 Steps (Standard - Recommended)",
+                L"30 Steps (High Quality)",
+                L"40 Steps (Ultra High Sampling)",
+                L"50 Steps (Maximum Detail)"
+            };
+
+            s_aiUi.cfgOptions = isZh ? std::vector<std::wstring_view>{
+                L"4.0 (弱引导，自然写实)",
+                L"5.5 (柔和平衡)",
+                L"7.0 (标准推荐 - 黄金比例)",
+                L"8.5 (强约束，强调特征)",
+                L"10.0 (超强遵循)"
+            } : std::vector<std::wstring_view>{
+                L"4.0 (Subtle Guidance, Realistic)",
+                L"5.5 (Soft Balance)",
+                L"7.0 (Balanced - Golden Ratio)",
+                L"8.5 (Strong Prompt Adherence)",
+                L"10.0 (Strict Enforcement)"
+            };
+
+            s_aiUi.aspectRatioOptions = isZh ? std::vector<std::wstring_view>{
+                L"自适应 (匹配原图尺寸与画幅)",
+                L"1:1 (正方形 - 1024x1024)",
+                L"16:9 (横屏宽屏 - 1344x768 / 1792x1024)",
+                L"9:16 (纵向壁纸 - 768x1344 / 1024x1792)",
+                L"4:3 (标准横向 - 1152x864)",
+                L"3:4 (标准纵向 - 864x1152)"
+            } : std::vector<std::wstring_view>{
+                L"Auto (Match Source Aspect Ratio)",
+                L"1:1 (Square - 1024x1024)",
+                L"16:9 (Landscape - 1344x768 / 1792x1024)",
+                L"9:16 (Portrait - 768x1344 / 1024x1792)",
+                L"4:3 (Standard - 1152x864)",
+                L"3:4 (Vertical - 864x1152)"
+            };
+
             // Hybrid Model Combobox Options (Auto-fetch + Pick from list or Custom Input)
             s_aiUi.profileHybridModelOptions[i].clear();
             s_aiUi.profileHybridModelOptionViews[i].clear();
 
-            std::wstring customOpt = L"✏️ 自定义输入模型标识...";
+            std::wstring customOpt = AppStrings::Settings_AiModelCustom ? AppStrings::Settings_AiModelCustom : L"✎ Custom Model Identifier...";
             if (!p.defaultModel.empty()) {
                 std::wstring curDef(p.defaultModel.begin(), p.defaultModel.end());
                 customOpt += L" [" + curDef + L"]";
@@ -1163,7 +1316,9 @@ namespace {
 
             int hybridSel = 0; // Default to Option 0 (Custom / Current model)
             if (p.fetchedModels.empty()) {
-                std::wstring fetchOpt = s_aiUi.profileIsFetchingModels[i] ? L"⏳ 正在拉取可用模型列表..." : L"🔄 自动拉取服务端模型列表...";
+                std::wstring fetchOpt = s_aiUi.profileIsFetchingModels[i] ? 
+                    (AppStrings::Settings_AiModelFetching ? AppStrings::Settings_AiModelFetching : L"⏳ Fetching available models...") : 
+                    (AppStrings::Settings_AiModelFetchAuto ? AppStrings::Settings_AiModelFetchAuto : L"↻ Fetch models from endpoint...");
                 s_aiUi.profileHybridModelOptions[i].push_back(fetchOpt);
             } else {
                 for (size_t mi = 0; mi < p.fetchedModels.size(); ++mi) {
@@ -1185,6 +1340,22 @@ namespace {
             else if (p.maxResolution == QuickView::AI::MaxResolution::FHD_2K) s_aiUi.profileMaxResIndices[i] = 1;
             else if (p.maxResolution == QuickView::AI::MaxResolution::Standard_1K) s_aiUi.profileMaxResIndices[i] = 2;
             else s_aiUi.profileMaxResIndices[i] = 3;
+
+            int timeoutIdx = 4; // 600s (10 min) default
+            if (p.timeoutSeconds == 30) timeoutIdx = 0;
+            else if (p.timeoutSeconds == 60) timeoutIdx = 1;
+            else if (p.timeoutSeconds == 120) timeoutIdx = 2;
+            else if (p.timeoutSeconds == 300) timeoutIdx = 3;
+            else if (p.timeoutSeconds == 600) timeoutIdx = 4;
+            else if (p.timeoutSeconds <= 0) timeoutIdx = 5; // 无限制
+            else {
+                if (p.timeoutSeconds < 45) timeoutIdx = 0;
+                else if (p.timeoutSeconds < 90) timeoutIdx = 1;
+                else if (p.timeoutSeconds < 200) timeoutIdx = 2;
+                else if (p.timeoutSeconds < 450) timeoutIdx = 3;
+                else timeoutIdx = 4;
+            }
+            s_aiUi.profileTimeoutIndices[i] = timeoutIdx;
         }
         for (const auto& name : s_aiUi.profileNames) {
             s_aiUi.profileNameViews.push_back(name);
@@ -1192,10 +1363,15 @@ namespace {
 
         s_aiUi.actionNames.resize(actions.size());
         s_aiUi.actionPrompts.resize(actions.size());
+        s_aiUi.actionNegativePrompts.resize(actions.size());
         s_aiUi.actionProfileIndices.resize(actions.size(), 0);
         s_aiUi.actionProfileOptionStrings.resize(actions.size());
         s_aiUi.actionProfileOptionViews.resize(actions.size());
         s_aiUi.actionScopeIndices.resize(actions.size(), 0);
+        s_aiUi.actionAspectIndices.resize(actions.size(), 0);
+        s_aiUi.actionDenoiseIndices.resize(actions.size(), 1);
+        s_aiUi.actionStepsIndices.resize(actions.size(), 2);
+        s_aiUi.actionCfgIndices.resize(actions.size(), 2);
         if (s_aiUi.actionExpanded.size() != actions.size()) {
             s_aiUi.actionExpanded.assign(actions.size(), false);
         }
@@ -1204,11 +1380,12 @@ namespace {
             const auto& a = actions[i];
             s_aiUi.actionNames[i] = a.name;
             s_aiUi.actionPrompts[i] = a.promptTemplate;
+            s_aiUi.actionNegativePrompts[i] = a.negativePrompt;
 
-            // Action Execution Model Options: Option 0 is "默认模型" (Default Model)
+            // Action Execution Model Options: Option 0 is Default Provider
             s_aiUi.actionProfileOptionStrings[i].clear();
             s_aiUi.actionProfileOptionViews[i].clear();
-            s_aiUi.actionProfileOptionStrings[i].push_back(L"默认模型");
+            s_aiUi.actionProfileOptionStrings[i].push_back(AppStrings::Settings_Option_AiDefaultModel ? AppStrings::Settings_Option_AiDefaultModel : L"Default Provider");
 
             int curSel = 0; // Default to Option 0 ("默认模型")
             for (size_t pi = 0; pi < profiles.size(); ++pi) {
@@ -1228,30 +1405,57 @@ namespace {
             }
 
             s_aiUi.actionScopeIndices[i] = static_cast<int>(a.scopeMode);
+            s_aiUi.actionAspectIndices[i] = static_cast<int>(a.aspectRatio);
+
+            int denoiseIdx = 1; // 0.35 default
+            if (a.denoisingStrength <= 0.32f) denoiseIdx = 0;
+            else if (a.denoisingStrength <= 0.37f) denoiseIdx = 1;
+            else if (a.denoisingStrength <= 0.45f) denoiseIdx = 2;
+            else if (a.denoisingStrength <= 0.60f) denoiseIdx = 3;
+            else denoiseIdx = 4;
+            s_aiUi.actionDenoiseIndices[i] = denoiseIdx;
+
+            int stepsIdx = 2; // 25 steps default
+            if (a.samplingSteps <= 17) stepsIdx = 0;
+            else if (a.samplingSteps <= 22) stepsIdx = 1;
+            else if (a.samplingSteps <= 27) stepsIdx = 2;
+            else if (a.samplingSteps <= 35) stepsIdx = 3;
+            else if (a.samplingSteps <= 45) stepsIdx = 4;
+            else stepsIdx = 5;
+            s_aiUi.actionStepsIndices[i] = stepsIdx;
+
+            int cfgIdx = 2; // 7.0 default
+            if (a.cfgScale <= 4.7f) cfgIdx = 0;
+            else if (a.cfgScale <= 6.2f) cfgIdx = 1;
+            else if (a.cfgScale <= 7.7f) cfgIdx = 2;
+            else if (a.cfgScale <= 9.2f) cfgIdx = 3;
+            else cfgIdx = 4;
+            s_aiUi.actionCfgIndices[i] = cfgIdx;
         }
     }
 
     void BuildAiActionsTab(SettingsTab& tabAi, [[maybe_unused]] SettingsOverlay* overlay) {
-        tabAi.name = ((AppStrings::Language)g_config.Language == AppStrings::Language::ChineseSimplified) ? L"AI 动作" : L"AI Actions";
+        tabAi.name = AppStrings::Settings_Tab_Ai ? AppStrings::Settings_Tab_Ai : L"AI Actions";
         tabAi.icon = Icons::SuperResolution;
 
+        bool isZh = IsSimplifiedChinese();
         SyncFromAiManager();
         auto& mgr = QuickView::AI::AiActionManager::Instance();
         auto& profiles = mgr.GetProfiles();
         auto& actions = mgr.GetActions();
 
         // Section 1: Model Profiles Header
-        tabAi.items.push_back({ L"AI 模型服务商配置", OptionType::Header });
-        tabAi.items.push_back({ L"模型名称支持动态拉取或自由填入；API 密钥受 Windows DPAPI 系统安全保护。", OptionType::InfoLabel });
+        tabAi.items.push_back({ AppStrings::Settings_Header_AiProviders ? AppStrings::Settings_Header_AiProviders : L"AI Model Providers", OptionType::Header });
+        tabAi.items.push_back({ AppStrings::Settings_Desc_AiProviders ? AppStrings::Settings_Desc_AiProviders : L"Manage AI endpoints, DPAPI-secured keys, and model identifiers.", OptionType::InfoLabel });
 
         // Profiles Accordion Cards (Default: Only 1 compact card)
         for (size_t i = 0; i < profiles.size(); ++i) {
             auto& p = profiles[i];
             bool isDefault = (p.id == mgr.GetDefaultProfileId());
-            std::wstring cardTitle = (isDefault ? L"★ [默认] " : L"") + 
+            std::wstring cardTitle = (isDefault ? L"★ " : L"") + 
                 ((!p.defaultModel.empty()) ? 
                 (p.displayName + L" - " + std::wstring(p.defaultModel.begin(), p.defaultModel.end())) : 
-                (p.displayName.empty() ? L"模型服务商配置" : p.displayName));
+                (p.displayName.empty() ? (AppStrings::Settings_Header_AiProviders ? AppStrings::Settings_Header_AiProviders : L"AI Provider") : p.displayName));
 
             SettingsItem itemProfCard = { cardTitle, OptionType::AccordionCardHeader, nullptr };
             itemProfCard.isActivated = s_aiUi.profileExpanded[i];
@@ -1269,7 +1473,7 @@ namespace {
             if (s_aiUi.profileExpanded[i]) {
                 // 1. Provider Select ComboBox
                 SettingsItem itemProv;
-                itemProv.label = L"供应商名称";
+                itemProv.label = AppStrings::Settings_Label_AiProviderName ? AppStrings::Settings_Label_AiProviderName : L"Provider Preset";
                 itemProv.type = OptionType::ComboBox;
                 itemProv.pIntVal = &s_aiUi.profileProviderIndices[i];
                 itemProv.pStrVal = reinterpret_cast<std::wstring*>(i);
@@ -1285,17 +1489,20 @@ namespace {
                             const auto& preset = s_providerPresets[choice];
                             pr[pIdx].displayName = preset.name;
                             pr[pIdx].protocol = preset.protocol;
+                            s_aiUi.profileProtocolIndices[pIdx] = ProtocolToUiIndex(preset.protocol);
                             if (!preset.defaultUrl.empty()) {
                                 pr[pIdx].baseUrl = preset.defaultUrl;
                             }
-                            pr[pIdx].fetchedModels.clear();
                             s_aiUi.profileProviderIndices[pIdx] = choice;
                             if (pIdx < s_aiUi.profileUrls.size() && !preset.defaultUrl.empty()) {
                                 s_aiUi.profileUrls[pIdx] = Utf8ToWide(preset.defaultUrl);
                             }
-                            OutputDebugStringW(L"[SettingsOverlay] Provider onChange: saving with displayName = ");
-                            OutputDebugStringW(preset.name.c_str());
-                            OutputDebugStringW(L"\n");
+                            bool isLocal = (preset.protocol == QuickView::AI::ApiProtocol::ComfyUI || 
+                                            preset.protocol == QuickView::AI::ApiProtocol::StabilityInpaint);
+                            pr[pIdx].timeoutSeconds = isLocal ? 0 : 600;
+                            if (pIdx < s_aiUi.profileTimeoutIndices.size()) {
+                                s_aiUi.profileTimeoutIndices[pIdx] = isLocal ? 5 : 4;
+                            }
                             m.SaveConfig();
                         }
                     }
@@ -1303,8 +1510,39 @@ namespace {
                 };
                 tabAi.items.push_back(itemProv);
 
+                // 2. Protocol Select ComboBox
+                SettingsItem itemProto;
+                itemProto.label = isZh ? L"API 协议标准 (Protocol)" : L"API Protocol Standard";
+                itemProto.type = OptionType::ComboBox;
+                itemProto.pIntVal = &s_aiUi.profileProtocolIndices[i];
+                itemProto.pStrVal = reinterpret_cast<std::wstring*>(i);
+                itemProto.options = s_aiUi.protocolOptions;
+                itemProto.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t pIdx = reinterpret_cast<size_t>(it->pStrVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx < pr.size()) {
+                        int choice = *it->pIntVal;
+                        auto newProto = UiIndexToProtocol(choice);
+                        pr[pIdx].protocol = newProto;
+                        if (newProto == QuickView::AI::ApiProtocol::GeminiNative) {
+                            if (pr[pIdx].baseUrl.find("generativelanguage.googleapis.com") != std::string::npos &&
+                                pr[pIdx].baseUrl.find("openai") != std::string::npos) {
+                                pr[pIdx].baseUrl = "https://generativelanguage.googleapis.com/v1beta/";
+                                if (pIdx < s_aiUi.profileUrls.size()) {
+                                    s_aiUi.profileUrls[pIdx] = Utf8ToWide(pr[pIdx].baseUrl);
+                                }
+                            }
+                        }
+                        m.SaveConfig();
+                    }
+                    if (ov) ov->RequestRebuild();
+                };
+                tabAi.items.push_back(itemProto);
+
                 // 2. Base URL Input
-                SettingsItem itemUrl = { L"接口地址 (Base URL)", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.profileUrls[i] };
+                SettingsItem itemUrl = { AppStrings::Settings_Label_AiBaseUrl ? AppStrings::Settings_Label_AiBaseUrl : L"Endpoint (Base URL)", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.profileUrls[i] };
                 itemUrl.pIntVal = reinterpret_cast<int*>(i);
                 itemUrl.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
                     if (!it) return;
@@ -1319,7 +1557,7 @@ namespace {
                 tabAi.items.push_back(itemUrl);
 
                 // 3. API Key Input (Masked in list, plain in popup dialog)
-                SettingsItem itemKey = { L"API 密钥 (DPAPI 加密保护)", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.profileMaskedKeys[i] };
+                SettingsItem itemKey = { AppStrings::Settings_Label_AiApiKey ? AppStrings::Settings_Label_AiApiKey : L"API Key (DPAPI Encrypted)", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.profileMaskedKeys[i] };
                 itemKey.pIntVal = reinterpret_cast<int*>(i);
                 itemKey.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
                     if (!it) return;
@@ -1337,12 +1575,12 @@ namespace {
 
                 // 4. Model Identifier (Hybrid Combobox: Auto-fetch online models + Custom input)
                 SettingsItem itemHybridModel;
-                std::wstring modelLabel = L"模型标识";
+                std::wstring modelLabel = AppStrings::Settings_Label_AiModelId ? AppStrings::Settings_Label_AiModelId : L"Model Identifier";
                 if (!p.defaultModel.empty()) {
                     std::wstring defW(p.defaultModel.begin(), p.defaultModel.end());
                     modelLabel += L" (" + defW + L")";
                 } else {
-                    modelLabel += L" [未配置，请拉取或输入]";
+                    modelLabel += AppStrings::Settings_Label_AiModelUnconfigured ? AppStrings::Settings_Label_AiModelUnconfigured : L" [Unconfigured]";
                 }
                 itemHybridModel.label = modelLabel;
                 itemHybridModel.type = OptionType::ComboBox;
@@ -1387,15 +1625,25 @@ namespace {
                         }
 
                         s_aiUi.profileIsFetchingModels[pIdx] = true;
-                        ::g_osd.Show(::g_mainHwnd, L"正在拉取大模型列表...", false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 3000);
+                        const wchar_t* fetchMsg = AppStrings::OSD_AiFetchingModels ? AppStrings::OSD_AiFetchingModels : L"Fetching model list...";
+                        ::g_osd.Show(::g_mainHwnd, fetchMsg, false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 3000);
                         if (ov) ov->RequestRebuild();
 
-                        m.FetchModelsAsync(pr[pIdx].baseUrl, plainKey, pr[pIdx].protocol, [pIdx, ov](bool success, const std::vector<std::string>& models, const std::wstring& errMsg) {
+                        std::string targetUrl = (pIdx < s_aiUi.profileUrls.size() && !s_aiUi.profileUrls[pIdx].empty()) ? 
+                                                WideToUtf8(s_aiUi.profileUrls[pIdx]) : pr[pIdx].baseUrl;
+                        QuickView::AI::ApiProtocol targetProtocol = pr[pIdx].protocol;
+                        if (targetUrl.find(":7860") != std::string::npos || targetUrl.find("sdapi") != std::string::npos) {
+                            targetProtocol = QuickView::AI::ApiProtocol::StabilityInpaint;
+                        } else if (targetUrl.find(":8188") != std::string::npos) {
+                            targetProtocol = QuickView::AI::ApiProtocol::ComfyUI;
+                        }
+
+                        m.FetchModelsAsync(targetUrl, plainKey, targetProtocol, [pIdx, ov](bool success, const std::vector<std::string>& models, const std::wstring& errMsg) {
                             if (pIdx < s_aiUi.profileIsFetchingModels.size()) {
                                 s_aiUi.profileIsFetchingModels[pIdx] = false;
                             }
                             if (!success) {
-                                std::wstring msg = L"拉取模型失败: " + errMsg;
+                                std::wstring msg = (AppStrings::OSD_AiFetchModelsFailed ? AppStrings::OSD_AiFetchModelsFailed : L"Failed to fetch models: ") + errMsg;
                                 ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 4000);
                                 if (ov) ov->RequestRebuild();
                                 return;
@@ -1414,8 +1662,10 @@ namespace {
                                 mgr.SaveConfig();
                             }
 
-                            std::wstring msg = L"已成功拉取 " + std::to_wstring(models.size()) + L" 个可用模型";
-                            ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
+                            wchar_t countBuf[128] = { 0 };
+                            const wchar_t* succFmt = AppStrings::OSD_AiFetchModelsSuccessFormat ? AppStrings::OSD_AiFetchModelsSuccessFormat : L"Fetched %zu available models";
+                            swprintf_s(countBuf, succFmt, models.size());
+                            ::g_osd.Show(::g_mainHwnd, countBuf, false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
                             if (ov) ov->RequestRebuild();
                         });
                     } else if (choice >= 1 && choice <= static_cast<int>(pr[pIdx].fetchedModels.size())) {
@@ -1431,7 +1681,7 @@ namespace {
 
                 // 5. Max Resolution ComboBox
                 SettingsItem itemRes;
-                itemRes.label = L"最大输入分辨率策略";
+                itemRes.label = AppStrings::Settings_Label_AiMaxRes ? AppStrings::Settings_Label_AiMaxRes : L"Max Input Resolution";
                 itemRes.type = OptionType::ComboBox;
                 itemRes.pIntVal = &s_aiUi.profileMaxResIndices[i];
                 itemRes.options = s_aiUi.maxResOptions;
@@ -1451,14 +1701,38 @@ namespace {
                 };
                 tabAi.items.push_back(itemRes);
 
+                // 6. Network Timeout ComboBox
+                SettingsItem itemTimeout;
+                itemTimeout.label = IsSimplifiedChinese() ? L"网络超时时间" : L"Network Timeout";
+                itemTimeout.type = OptionType::ComboBox;
+                itemTimeout.pIntVal = &s_aiUi.profileTimeoutIndices[i];
+                itemTimeout.options = s_aiUi.timeoutOptions;
+                itemTimeout.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t pIdx = static_cast<size_t>(it->pIntVal - s_aiUi.profileTimeoutIndices.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& pr = m.GetProfiles();
+                    if (pIdx < pr.size()) {
+                        int choice = *it->pIntVal;
+                        if (choice == 0) pr[pIdx].timeoutSeconds = 30;
+                        else if (choice == 1) pr[pIdx].timeoutSeconds = 60;
+                        else if (choice == 2) pr[pIdx].timeoutSeconds = 120;
+                        else if (choice == 3) pr[pIdx].timeoutSeconds = 300;
+                        else if (choice == 4) pr[pIdx].timeoutSeconds = 600;
+                        else if (choice == 5) pr[pIdx].timeoutSeconds = 0; // 无限制
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemTimeout);
+
                 // Default Profile Marker & Switch Button
                 if (isDefault) {
-                    SettingsItem itemDefStatus = { L"全局默认状态", OptionType::InfoLabel };
-                    itemDefStatus.label = L"★ 当前服务商为全局默认 (AI 动作默认调用此配置)";
+                    SettingsItem itemDefStatus = { AppStrings::Settings_Label_AiDefaultProfile ? AppStrings::Settings_Label_AiDefaultProfile : L"Default Provider", OptionType::InfoLabel };
+                    itemDefStatus.label = AppStrings::Settings_Label_AiDefaultProfile ? AppStrings::Settings_Label_AiDefaultProfile : L"★ Default Provider";
                     tabAi.items.push_back(itemDefStatus);
                 } else {
-                    SettingsItem itemSetDef = { L"设为默认服务商", OptionType::ActionButton };
-                    itemSetDef.buttonText = L"★ 设为全局默认服务商";
+                    SettingsItem itemSetDef = { AppStrings::Settings_Label_AiDefaultProfile ? AppStrings::Settings_Label_AiDefaultProfile : L"Default Provider", OptionType::ActionButton };
+                    itemSetDef.buttonText = AppStrings::Settings_Button_AiSetDefault ? AppStrings::Settings_Button_AiSetDefault : L"★ Set as Default Provider";
                     itemSetDef.pIntVal = reinterpret_cast<int*>(i);
                     itemSetDef.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
                         if (!it) return;
@@ -1468,7 +1742,10 @@ namespace {
                         if (pIdx < pr.size()) {
                             m.SetDefaultProfileId(pr[pIdx].id);
                             m.SaveConfig();
-                            ::g_osd.Show(::g_mainHwnd, (L"已将 " + pr[pIdx].displayName + L" 设为全局默认服务商").c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 2500);
+                            wchar_t defBuf[128] = { 0 };
+                            const wchar_t* defFmt = AppStrings::OSD_AiSetDefaultSuccessFormat ? AppStrings::OSD_AiSetDefaultSuccessFormat : L"Set %s as default provider";
+                            swprintf_s(defBuf, defFmt, pr[pIdx].displayName.c_str());
+                            ::g_osd.Show(::g_mainHwnd, defBuf, false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 2500);
                             if (ov) ov->RequestRebuild();
                         }
                     };
@@ -1476,8 +1753,8 @@ namespace {
                 }
 
                 // 6. Test Connection Button (Probe API connection and latency)
-                SettingsItem itemTestConn = { L"连通性探测", OptionType::ActionButton };
-                itemTestConn.buttonText = L"🔌 测试服务商连接与延迟";
+                SettingsItem itemTestConn = { AppStrings::Settings_Button_AiTestConn ? AppStrings::Settings_Button_AiTestConn : L"Test Connection", OptionType::ActionButton };
+                itemTestConn.buttonText = AppStrings::Settings_Button_AiTestConn ? AppStrings::Settings_Button_AiTestConn : L"Test Connection";
                 itemTestConn.pIntVal = reinterpret_cast<int*>(i);
                 itemTestConn.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
                     if (!it) return;
@@ -1491,12 +1768,24 @@ namespace {
                         plainKey = WideToUtf8(s_aiUi.profileKeys[pIdx]);
                     }
 
-                    ::g_osd.Show(::g_mainHwnd, L"正在测试服务商连接与鉴权...", false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 3000);
+                    const wchar_t* probeMsg = AppStrings::OSD_AiTestingConnection ? AppStrings::OSD_AiTestingConnection : L"Testing connection...";
+                    ::g_osd.Show(::g_mainHwnd, probeMsg, false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 3000);
 
-                    m.TestConnectionAsync(pr[pIdx].baseUrl, plainKey, pr[pIdx].protocol, [](bool success, int statusCode, int latencyMs, const std::wstring& message) {
+                    std::string targetUrl = (pIdx < s_aiUi.profileUrls.size() && !s_aiUi.profileUrls[pIdx].empty()) ? 
+                                            WideToUtf8(s_aiUi.profileUrls[pIdx]) : pr[pIdx].baseUrl;
+                    QuickView::AI::ApiProtocol targetProtocol = pr[pIdx].protocol;
+                    if (targetUrl.find(":7860") != std::string::npos || targetUrl.find("sdapi") != std::string::npos) {
+                        targetProtocol = QuickView::AI::ApiProtocol::StabilityInpaint;
+                    } else if (targetUrl.find(":8188") != std::string::npos) {
+                        targetProtocol = QuickView::AI::ApiProtocol::ComfyUI;
+                    }
+
+                    m.TestConnectionAsync(targetUrl, plainKey, targetProtocol, [](bool success, int statusCode, int latencyMs, const std::wstring& message) {
                         if (success) {
-                            std::wstring msg = L"✓ 连接正常！延迟: " + std::to_wstring(latencyMs) + L"ms (HTTP " + std::to_wstring(statusCode) + L")";
-                            ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 4000);
+                            wchar_t connBuf[128] = { 0 };
+                            const wchar_t* connFmt = AppStrings::OSD_AiConnSuccessFormat ? AppStrings::OSD_AiConnSuccessFormat : L"Connected successfully! Latency: %dms (HTTP %d)";
+                            swprintf_s(connBuf, connFmt, latencyMs, statusCode);
+                            ::g_osd.Show(::g_mainHwnd, connBuf, false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 4000);
                         } else {
                             std::wstring msg = L"✗ " + message + (latencyMs > 0 ? (L" (" + std::to_wstring(latencyMs) + L"ms)") : L"");
                             ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 5000);
@@ -1506,8 +1795,8 @@ namespace {
                 tabAi.items.push_back(itemTestConn);
 
                 // 7. Save Profile Button (Collapses card and saves profile)
-                SettingsItem itemSaveProf = { L"保存当前服务商", OptionType::ActionButton };
-                itemSaveProf.buttonText = L"✓ 保存配置";
+                SettingsItem itemSaveProf = { AppStrings::Settings_Button_AiSaveProf ? AppStrings::Settings_Button_AiSaveProf : L"Save Provider", OptionType::ActionButton };
+                itemSaveProf.buttonText = AppStrings::Settings_Button_AiSaveProf ? AppStrings::Settings_Button_AiSaveProf : L"Save Provider";
                 itemSaveProf.pIntVal = reinterpret_cast<int*>(i);
                 itemSaveProf.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
                     if (!it) return;
@@ -1522,7 +1811,8 @@ namespace {
 
                         // 1. Check Base URL
                         if (targetUrl.empty()) {
-                            ::g_osd.Show(::g_mainHwnd, L"保存失败: 接口地址 (Base URL) 不能为空", false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
+                            const wchar_t* errEmpty = AppStrings::OSD_AiSaveFailedBaseUrlEmpty ? AppStrings::OSD_AiSaveFailedBaseUrlEmpty : L"Save failed: Base URL cannot be empty";
+                            ::g_osd.Show(::g_mainHwnd, errEmpty, false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
                             return;
                         }
 
@@ -1532,17 +1822,24 @@ namespace {
                                         targetUrl.find("127.0.0.1") != std::string::npos ||
                                         targetUrl.find("localhost") != std::string::npos);
                         if (!isLocal && targetKey.empty() && pr[pIdx].encryptedApiKey.empty()) {
-                            ::g_osd.Show(::g_mainHwnd, L"保存失败: 云端服务商 API 密钥不能为空", false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
+                            const wchar_t* errKey = AppStrings::OSD_AiSaveFailedApiKeyEmpty ? AppStrings::OSD_AiSaveFailedApiKeyEmpty : L"Save failed: Cloud provider API key cannot be empty";
+                            ::g_osd.Show(::g_mainHwnd, errKey, false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
                             return;
                         }
 
                         // 3. Check Model Identifier
                         if (targetModel.empty()) {
-                            ::g_osd.Show(::g_mainHwnd, L"保存失败: 请先下拉拉取/选择模型，或手动指定模型标识", false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
+                            const wchar_t* errMod = AppStrings::OSD_AiSaveFailedModelEmpty ? AppStrings::OSD_AiSaveFailedModelEmpty : L"Save failed: Please specify or select a valid model";
+                            ::g_osd.Show(::g_mainHwnd, errMod, false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 3500);
                             return;
                         }
 
                         pr[pIdx].baseUrl = targetUrl;
+                        if (targetUrl.find(":7860") != std::string::npos || targetUrl.find("sdapi") != std::string::npos) {
+                            pr[pIdx].protocol = QuickView::AI::ApiProtocol::StabilityInpaint;
+                        } else if (targetUrl.find(":8188") != std::string::npos) {
+                            pr[pIdx].protocol = QuickView::AI::ApiProtocol::ComfyUI;
+                        }
                         if (!targetKey.empty()) {
                             pr[pIdx].encryptedApiKey = QuickView::AI::AiActionManager::EncryptApiKey(targetKey);
                         }
@@ -1554,7 +1851,8 @@ namespace {
                         if (pIdx < s_aiUi.profileExpanded.size()) {
                             s_aiUi.profileExpanded[pIdx] = false;
                         }
-                        ::g_osd.Show(::g_mainHwnd, L"✓ 服务商配置已保存", false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 2500);
+                        const wchar_t* succSaved = AppStrings::OSD_AiSaveProfileSuccess ? AppStrings::OSD_AiSaveProfileSuccess : L"Provider configuration saved";
+                        ::g_osd.Show(::g_mainHwnd, succSaved, false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 2500);
                     }
                     if (ov) ov->RequestRebuild();
                 };
@@ -1562,8 +1860,8 @@ namespace {
 
                 // 9. Delete Profile Button (if more than 1 profile)
                 if (profiles.size() > 1) {
-                    SettingsItem itemDelProf = { L"管理服务商", OptionType::ActionButton };
-                    itemDelProf.buttonText = L"删除该服务商配置";
+                    SettingsItem itemDelProf = { AppStrings::Settings_Button_AiDeleteProf ? AppStrings::Settings_Button_AiDeleteProf : L"Delete Provider", OptionType::ActionButton };
+                    itemDelProf.buttonText = AppStrings::Settings_Button_AiDeleteProf ? AppStrings::Settings_Button_AiDeleteProf : L"Delete Provider";
                     itemDelProf.isDestructive = true;
                     itemDelProf.pIntVal = reinterpret_cast<int*>(i);
                     itemDelProf.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
@@ -1586,19 +1884,19 @@ namespace {
         tabAi.items.push_back({ L"", OptionType::Separator });
 
         // Add Profile Button (Allow advanced users to add more if desired, default is just 1)
-        SettingsItem itemAddProf = { L"添加额外服务商", OptionType::ActionButton };
-        itemAddProf.buttonText = L"+ 添加新服务商配置";
+        SettingsItem itemAddProf = { AppStrings::Settings_Button_AiAddProf ? AppStrings::Settings_Button_AiAddProf : L"+ Add Model Provider", OptionType::ActionButton };
+        itemAddProf.buttonText = AppStrings::Settings_Button_AiAddProf ? AppStrings::Settings_Button_AiAddProf : L"+ Add Model Provider";
         itemAddProf.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
             auto& m = QuickView::AI::AiActionManager::Instance();
             auto& pr = m.GetProfiles();
             QuickView::AI::ModelProfile newP;
             newP.id = "custom_profile_" + std::to_string(GetTickCount());
-            newP.displayName = L"自定义服务商";
+            newP.displayName = AppStrings::Settings_Option_AiCustomEndpoint ? AppStrings::Settings_Option_AiCustomEndpoint : L"Custom Provider";
             newP.protocol = QuickView::AI::ApiProtocol::OpenAiChat;
             newP.baseUrl = "https://api.openai.com/v1/";
             newP.defaultModel = "";
             newP.maxResolution = QuickView::AI::MaxResolution::Standard_1K;
-            newP.timeoutSeconds = 30;
+            newP.timeoutSeconds = 600;
             newP.isCustom = true;
             pr.push_back(newP);
             m.SaveConfig();
@@ -1607,19 +1905,24 @@ namespace {
         tabAi.items.push_back(itemAddProf);
 
         // Section 2: AI Actions Header
-        tabAi.items.push_back({ L"自定义 AI 动作列表 (AI Actions)", OptionType::Header });
+        tabAi.items.push_back({ AppStrings::Settings_Header_AiActions ? AppStrings::Settings_Header_AiActions : L"AI Actions", OptionType::Header });
 
         // Add Action Button
-        SettingsItem itemAddAct = { L"添加新动作", OptionType::ActionButton };
-        itemAddAct.buttonText = L"+ 新建 AI 动作";
+        SettingsItem itemAddAct = { AppStrings::Settings_Button_AiAddAction ? AppStrings::Settings_Button_AiAddAction : L"+ New AI Action", OptionType::ActionButton };
+        itemAddAct.buttonText = AppStrings::Settings_Button_AiAddAction ? AppStrings::Settings_Button_AiAddAction : L"+ New AI Action";
         itemAddAct.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
             auto& m = QuickView::AI::AiActionManager::Instance();
             auto& acts = m.GetActions();
             QuickView::AI::ActionDesc newAct;
             newAct.id = "action_custom_" + std::to_string(GetTickCount());
-            newAct.name = L"新动作 " + std::to_wstring(acts.size() + 1);
+            newAct.name = L"Action " + std::to_wstring(acts.size() + 1);
             newAct.promptTemplate = L"Describe or modify the image";
+            newAct.negativePrompt = L"blurry, noise, low quality, artifacts, distorted, bad quality";
             newAct.scopeMode = QuickView::AI::ScopeMode::Auto;
+            newAct.aspectRatio = QuickView::AI::OutputAspectRatio::Auto;
+            newAct.denoisingStrength = 0.35f;
+            newAct.samplingSteps = 25;
+            newAct.cfgScale = 7.0f;
             acts.push_back(newAct);
             m.SaveConfig();
             if (ov) ov->RequestRebuild();
@@ -1649,7 +1952,7 @@ namespace {
 
             if (s_aiUi.actionExpanded[i]) {
                 // Action Name Input
-                SettingsItem itemActName = { L"动作名称", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.actionNames[i] };
+                SettingsItem itemActName = { AppStrings::Settings_Label_AiActionName ? AppStrings::Settings_Label_AiActionName : L"Action Name", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.actionNames[i] };
                 itemActName.pIntVal = reinterpret_cast<int*>(i);
                 itemActName.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
                     if (!it) return;
@@ -1664,7 +1967,7 @@ namespace {
                 tabAi.items.push_back(itemActName);
 
                 // Prompt Input (Multi-line enabled for expansive prompt engineering)
-                SettingsItem itemPrompt = { L"提示词模板", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.actionPrompts[i] };
+                SettingsItem itemPrompt = { AppStrings::Settings_Label_AiPromptTemplate ? AppStrings::Settings_Label_AiPromptTemplate : L"Prompt Template", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.actionPrompts[i] };
                 itemPrompt.isMultiLine = true;
                 itemPrompt.pIntVal = reinterpret_cast<int*>(i);
                 itemPrompt.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
@@ -1679,9 +1982,28 @@ namespace {
                 };
                 tabAi.items.push_back(itemPrompt);
 
-                // Action Execution Model (Option 0 is "默认模型")
+                // Negative Prompt Input
+                SettingsItem itemNegPrompt = { 
+                    IsSimplifiedChinese() ? L"反向提示词 (Negative Prompt)" : L"Negative Prompt", 
+                    OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.actionNegativePrompts[i] 
+                };
+                itemNegPrompt.isMultiLine = true;
+                itemNegPrompt.pIntVal = reinterpret_cast<int*>(i);
+                itemNegPrompt.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it) return;
+                    size_t aIdx = reinterpret_cast<size_t>(it->pIntVal);
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size()) {
+                        acts[aIdx].negativePrompt = s_aiUi.actionNegativePrompts[aIdx];
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemNegPrompt);
+
+                // Action Execution Model (Option 0 is Default Provider)
                 SettingsItem itemActProfile;
-                itemActProfile.label = L"执行模型";
+                itemActProfile.label = AppStrings::Settings_Label_AiExecModel ? AppStrings::Settings_Label_AiExecModel : L"Execution Provider";
                 itemActProfile.type = OptionType::ComboBox;
                 itemActProfile.pIntVal = &s_aiUi.actionProfileIndices[i];
                 itemActProfile.options = s_aiUi.actionProfileOptionViews[i];
@@ -1694,7 +2016,7 @@ namespace {
                     if (aIdx < acts.size()) {
                         int sel = *it->pIntVal;
                         if (sel == 0 || sel > static_cast<int>(pr.size())) {
-                            acts[aIdx].modelProfileId = ""; // 默认模型
+                            acts[aIdx].modelProfileId = ""; // Default Provider
                         } else {
                             acts[aIdx].modelProfileId = pr[sel - 1].id;
                         }
@@ -1705,7 +2027,7 @@ namespace {
 
                 // Scope Mode
                 SettingsItem itemScope;
-                itemScope.label = L"作用范围模式";
+                itemScope.label = AppStrings::Settings_Label_AiScopeMode ? AppStrings::Settings_Label_AiScopeMode : L"Scope Mode";
                 itemScope.type = OptionType::ComboBox;
                 itemScope.pIntVal = &s_aiUi.actionScopeIndices[i];
                 itemScope.options = s_aiUi.scopeOptions;
@@ -1721,9 +2043,97 @@ namespace {
                 };
                 tabAi.items.push_back(itemScope);
 
+                // Output Aspect Ratio & Framing ComboBox
+                SettingsItem itemAspect;
+                itemAspect.label = IsSimplifiedChinese() ? L"输出画幅与尺寸 (Aspect Ratio)" : L"Aspect Ratio & Framing";
+                itemAspect.type = OptionType::ComboBox;
+                itemAspect.pIntVal = &s_aiUi.actionAspectIndices[i];
+                itemAspect.options = s_aiUi.aspectRatioOptions;
+                itemAspect.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionAspectIndices.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size()) {
+                        acts[aIdx].aspectRatio = static_cast<QuickView::AI::OutputAspectRatio>(*it->pIntVal);
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemAspect);
+
+                // Denoising Strength ComboBox
+                SettingsItem itemDenoise;
+                itemDenoise.label = IsSimplifiedChinese() ? L"重绘/去噪幅度" : L"Denoising Strength";
+                itemDenoise.type = OptionType::ComboBox;
+                itemDenoise.pIntVal = &s_aiUi.actionDenoiseIndices[i];
+                itemDenoise.options = s_aiUi.denoiseOptions;
+                itemDenoise.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionDenoiseIndices.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size()) {
+                        int choice = *it->pIntVal;
+                        if (choice == 0) acts[aIdx].denoisingStrength = 0.30f;
+                        else if (choice == 1) acts[aIdx].denoisingStrength = 0.35f;
+                        else if (choice == 2) acts[aIdx].denoisingStrength = 0.40f;
+                        else if (choice == 3) acts[aIdx].denoisingStrength = 0.50f;
+                        else if (choice == 4) acts[aIdx].denoisingStrength = 0.70f;
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemDenoise);
+
+                // Sampling Steps ComboBox
+                SettingsItem itemSteps;
+                itemSteps.label = IsSimplifiedChinese() ? L"采样步数 (Steps)" : L"Sampling Steps";
+                itemSteps.type = OptionType::ComboBox;
+                itemSteps.pIntVal = &s_aiUi.actionStepsIndices[i];
+                itemSteps.options = s_aiUi.stepsOptions;
+                itemSteps.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionStepsIndices.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size()) {
+                        int choice = *it->pIntVal;
+                        if (choice == 0) acts[aIdx].samplingSteps = 15;
+                        else if (choice == 1) acts[aIdx].samplingSteps = 20;
+                        else if (choice == 2) acts[aIdx].samplingSteps = 25;
+                        else if (choice == 3) acts[aIdx].samplingSteps = 30;
+                        else if (choice == 4) acts[aIdx].samplingSteps = 40;
+                        else if (choice == 5) acts[aIdx].samplingSteps = 50;
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemSteps);
+
+                // Prompt Guidance (CFG Scale) ComboBox
+                SettingsItem itemCfg;
+                itemCfg.label = IsSimplifiedChinese() ? L"提示词引导系数 (CFG Scale)" : L"CFG Scale";
+                itemCfg.type = OptionType::ComboBox;
+                itemCfg.pIntVal = &s_aiUi.actionCfgIndices[i];
+                itemCfg.options = s_aiUi.cfgOptions;
+                itemCfg.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                    if (!it || !it->pIntVal) return;
+                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionCfgIndices.data());
+                    auto& m = QuickView::AI::AiActionManager::Instance();
+                    auto& acts = m.GetActions();
+                    if (aIdx < acts.size()) {
+                        int choice = *it->pIntVal;
+                        if (choice == 0) acts[aIdx].cfgScale = 4.0f;
+                        else if (choice == 1) acts[aIdx].cfgScale = 5.5f;
+                        else if (choice == 2) acts[aIdx].cfgScale = 7.0f;
+                        else if (choice == 3) acts[aIdx].cfgScale = 8.5f;
+                        else if (choice == 4) acts[aIdx].cfgScale = 10.0f;
+                        m.SaveConfig();
+                    }
+                };
+                tabAi.items.push_back(itemCfg);
+
                 // Delete Action Button
-                SettingsItem itemDelAct = { L"管理动作", OptionType::ActionButton };
-                itemDelAct.buttonText = L"删除该动作";
+                SettingsItem itemDelAct = { AppStrings::Settings_Button_AiDeleteAction ? AppStrings::Settings_Button_AiDeleteAction : L"Delete Action", OptionType::ActionButton };
+                itemDelAct.buttonText = AppStrings::Settings_Button_AiDeleteAction ? AppStrings::Settings_Button_AiDeleteAction : L"Delete Action";
                 itemDelAct.isDestructive = true;
                 itemDelAct.pIntVal = reinterpret_cast<int*>(i);
                 itemDelAct.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
@@ -7383,7 +7793,7 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
                              }
                          }
 
-                         ::g_osd.Show(::g_mainHwnd, L"正在自动发现可用模型...", false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 2500);
+                         ::g_osd.Show(::g_mainHwnd, AppStrings::OSD_AiFetchingModels ? AppStrings::OSD_AiFetchingModels : L"Discovering available models...", false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 2500);
 
                          m.FetchModelsAsync(pr[pIdx].baseUrl, plainKey, pr[pIdx].protocol, [pIdx, this](bool success, const std::vector<std::string>& models, [[maybe_unused]] const std::wstring& errMsg) {
                              if (pIdx < s_aiUi.profileIsFetchingModels.size()) {
@@ -7399,8 +7809,9 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
                                      }
                                      mgr.SaveConfig();
                                  }
-                                 std::wstring msg = L"已自动获取 " + std::to_wstring(models.size()) + L" 个在线模型";
-                                 ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
+                                 wchar_t msgBuf[128] = { 0 };
+                                 swprintf_s(msgBuf, AppStrings::OSD_AiFetchModelsSuccessFormat ? AppStrings::OSD_AiFetchModelsSuccessFormat : L"Successfully fetched %zu available models", models.size());
+                                 ::g_osd.Show(::g_mainHwnd, msgBuf, false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
                                  this->RequestRebuild();
                              }
                          });
@@ -7540,8 +7951,8 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
                         isApiKeyField = true;
                         keyProfileIdx = ki;
                         initialText = s_aiUi.profileKeys[ki];
-                        title = L"配置 API 密钥";
-                        msg = L"请输入服务商 API Key（数据将经 Windows DPAPI 本地硬件安全加密后写入磁盘）：";
+                        title = AppStrings::Dialog_AiApiKeyTitle ? AppStrings::Dialog_AiApiKeyTitle : L"Configure API Key";
+                        msg = AppStrings::Dialog_AiApiKeyPrompt ? AppStrings::Dialog_AiApiKeyPrompt : L"Enter provider API key (protected locally via Windows DPAPI):";
                         break;
                     }
                 }
@@ -7549,29 +7960,29 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
                 if (!isApiKeyField) {
                     for (size_t ai = 0; ai < s_aiUi.actionPrompts.size(); ++ai) {
                         if (targetItem->pStrVal == &s_aiUi.actionPrompts[ai]) {
-                            title = L"编辑提示词模板";
-                            msg = L"配置该 AI 动作生成的提示词内容（支持多行编辑，按 Ctrl+Enter 快捷提交）：";
+                            title = AppStrings::Dialog_AiPromptTitle ? AppStrings::Dialog_AiPromptTitle : L"Edit Prompt Template";
+                            msg = AppStrings::Dialog_AiPromptPrompt ? AppStrings::Dialog_AiPromptPrompt : L"Configure AI prompt template (multi-line supported, press Ctrl+Enter to submit):";
                             break;
                         }
                     }
                     for (size_t ai = 0; ai < s_aiUi.actionNames.size(); ++ai) {
                         if (targetItem->pStrVal == &s_aiUi.actionNames[ai]) {
-                            title = L"编辑动作名称";
-                            msg = L"请输入在 AI 动作面板中展示的友好名称：";
+                            title = AppStrings::Dialog_AiActionNameTitle ? AppStrings::Dialog_AiActionNameTitle : L"Edit Action Name";
+                            msg = AppStrings::Dialog_AiActionNamePrompt ? AppStrings::Dialog_AiActionNamePrompt : L"Enter display name for this AI action:";
                             break;
                         }
                     }
                     for (size_t pi = 0; pi < s_aiUi.profileUrls.size(); ++pi) {
                         if (targetItem->pStrVal == &s_aiUi.profileUrls[pi]) {
-                            title = L"配置接口地址";
-                            msg = L"请输入兼容 OpenAI / ComfyUI 格式的 API 基础端点地址 (Base URL)：";
+                            title = AppStrings::Dialog_AiBaseUrlTitle ? AppStrings::Dialog_AiBaseUrlTitle : L"Configure Endpoint";
+                            msg = AppStrings::Dialog_AiBaseUrlPrompt ? AppStrings::Dialog_AiBaseUrlPrompt : L"Enter OpenAI / ComfyUI compatible API Base URL:";
                             break;
                         }
                     }
                 }
 
                 if (title.empty() && !targetItem->label.empty()) {
-                    title = L"编辑 " + targetItem->label;
+                    title = (AppStrings::Help_Desc_Edit ? AppStrings::Help_Desc_Edit : L"Edit") + (L" " + targetItem->label);
                 }
 
                 DialogResult dlgRes = DialogResult::None;

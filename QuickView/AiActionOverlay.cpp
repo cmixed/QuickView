@@ -6,6 +6,10 @@
 #include "ThemeSystem.h"
 #include "OSDState.h"
 #include "EditState.h"
+#include "AppStrings.h"
+#include <thread>
+#include <chrono>
+#include <cmath>
 
 extern OSDState g_osd;
 extern HWND g_mainHwnd;
@@ -118,35 +122,86 @@ void AiActionOverlay::TriggerAction(size_t index) {
     const auto& act = actions[index];
     AI::AiActionManager::Instance().SetLastActionId(act.id);
 
-    wchar_t msg[128] = { 0 };
-    swprintf_s(msg, L"AI 正在处理: %s (按 Esc 取消)...", act.name.c_str());
-    g_osd.Show(m_hwnd, msg, false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 5000);
+    const auto* profile = AI::AiActionManager::Instance().FindProfile(act.modelProfileId);
+    if (!profile) profile = AI::AiActionManager::Instance().GetDefaultProfile();
+    bool isSdWebUi = profile && (profile->protocol == AI::ApiProtocol::StabilityInpaint);
+    std::string baseUrl = profile ? profile->baseUrl : "";
 
-    AI::AiActionManager::Instance().ExecuteAction(act, m_hwnd, [act](const AI::ExecutionResult& res) {
+    HWND hwnd = m_hwnd ? m_hwnd : g_mainHwnd;
+
+    wchar_t initMsg[256] = { 0 };
+    swprintf_s(initMsg, L"AI: %s 准备中 (Esc取消)...", act.name.c_str());
+    g_osd.StartPersistentTask(hwnd, initMsg, D2D1::ColorF(D2D1::ColorF::White), OSDPosition::Bottom, 0.05f);
+
+    auto taskFinished = std::make_shared<std::atomic<bool>>(false);
+
+    uint64_t currentTaskId = AI::AiActionManager::Instance().ExecuteAction(act, hwnd, [act, taskFinished](const AI::ExecutionResult& res) {
+        taskFinished->store(true);
         if (!res.success) {
-            std::wstring errText = res.errorMessage;
-            if (errText.rfind(L"AI 执行失败", 0) == std::wstring::npos) {
-                errText = L"AI 执行失败: " + errText;
-            }
-            g_osd.Show(g_mainHwnd, errText.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 6000);
+            g_osd.EndPersistentTask(g_mainHwnd);
+            AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
             return;
         }
 
         if (!res.resultImageData.empty()) {
-            // Execution succeeded with Image: Show notification and enter Compare Mode
-            g_osd.Show(g_mainHwnd, L"AI 生成完成！进入帘幕对比模式", false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
-
-            if (AppContext::GetInstance().CompareCtrl && g_mainHwnd) {
-                // Enter SR/AI Compare Mode (Wipe View: Left=Original, Right=AI Result)
-                AppContext::GetInstance().CompareCtrl->EnterSrCompareMode(g_mainHwnd);
-            }
-            if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
+            auto* pData = new AI::AsyncAiImageResult();
+            pData->imageData = std::move(res.resultImageData);
+            pData->actionName = act.name;
+            pData->width = res.imageWidth;
+            pData->height = res.imageHeight;
+            PostMessageW(g_mainHwnd, AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
         } else if (!res.textContent.empty()) {
             // Execution succeeded with Text Content
             std::wstring displayMsg = act.name + L": " + res.textContent;
-            g_osd.Show(g_mainHwnd, displayMsg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 8000);
+            g_osd.EndPersistentTask(g_mainHwnd, displayMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 8000);
+        } else {
+            g_osd.EndPersistentTask(g_mainHwnd);
         }
     });
+
+    std::wstring actName = act.name;
+    std::thread([hwnd, actName, baseUrl, isSdWebUi, currentTaskId, taskFinished]() {
+        auto startTime = std::chrono::steady_clock::now();
+        while (!taskFinished->load() && AI::AiActionManager::Instance().IsRunning() && AI::AiActionManager::Instance().GetCurrentTaskId() == currentTaskId) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            if (taskFinished->load() || !AI::AiActionManager::Instance().IsRunning() || AI::AiActionManager::Instance().GetCurrentTaskId() != currentTaskId) {
+                break;
+            }
+            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
+            int elapsedSec = static_cast<int>(elapsedMs / 1000);
+
+            if (isSdWebUi) {
+                AI::AiActionManager::SdProgressInfo prog;
+                if (AI::AiActionManager::PollSdProgress(baseUrl, prog) && prog.totalSteps > 0 && prog.progress > 0.0f) {
+                    wchar_t sdMsg[256] = { 0 };
+                    int pct = static_cast<int>(prog.progress * 100.0f);
+                    if (prog.eta > 0.0f) {
+                        swprintf_s(sdMsg, L"AI 采样中: %d%% (%d/%d步, 约剩%.0fs) [耗时%ds, Esc取消]",
+                            pct, prog.currentStep, prog.totalSteps, prog.eta, elapsedSec);
+                    } else {
+                        swprintf_s(sdMsg, L"AI 采样中: %d%% (%d/%d步) [耗时%ds, Esc取消]",
+                            pct, prog.currentStep, prog.totalSteps, elapsedSec);
+                    }
+                    g_osd.UpdatePersistentTask(hwnd, sdMsg, (std::max)(0.05f, (std::min)(prog.progress, 0.99f)));
+                    continue;
+                }
+            }
+
+            // Fallback for cloud LLMs or SD before sampling starts (warmup / loading model)
+            wchar_t cloudMsg[256] = { 0 };
+            if (elapsedSec < 3) {
+                swprintf_s(cloudMsg, L"AI 连接中: %s (Esc取消)...", actName.c_str());
+            } else {
+                swprintf_s(cloudMsg, L"AI 生成中: %s [已耗时 %ds, Esc取消]...", actName.c_str(), elapsedSec);
+            }
+
+            // Smooth asymptotic progress for cloud LLM: starts at 5%, slowly approaches 95%
+            float fakeProgress = 1.0f - std::exp(-static_cast<float>(elapsedSec) / 25.0f);
+            fakeProgress = (std::max)(0.05f, (std::min)(fakeProgress, 0.95f));
+
+            g_osd.UpdatePersistentTask(hwnd, cloudMsg, fakeProgress);
+        }
+    }).detach();
 }
 
 bool AiActionOverlay::OnKeyDown(WPARAM key) {
@@ -157,6 +212,10 @@ bool AiActionOverlay::OnKeyDown(WPARAM key) {
 
     // 1. Esc -> Close
     if (key == VK_ESCAPE) {
+        if (AI::AiActionManager::Instance().IsRunning()) {
+            AI::AiActionManager::Instance().CancelCurrentTask();
+            g_osd.EndPersistentTask(m_hwnd ? m_hwnd : g_mainHwnd, L"AI 任务已取消", false, D2D1::ColorF(D2D1::ColorF::LightSalmon), 1500);
+        }
         Hide();
         return true;
     }
@@ -324,13 +383,13 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
 
     // Draw Title Header
     D2D1_RECT_F titleRect = D2D1::RectF(hudX + padding + 6.0f, hudY + padding, hudX + hudW - padding, hudY + headerH);
-    std::wstring titleText = L"AI 动作 (AI Actions)";
-    dc->DrawText(titleText.c_str(), static_cast<UINT32>(titleText.size()), m_fontTitle.Get(), titleRect, m_brushText.Get());
+    const wchar_t* titleText = AppStrings::AiAction_Title ? AppStrings::AiAction_Title : L"AI Actions";
+    dc->DrawText(titleText, static_cast<UINT32>(wcslen(titleText)), m_fontTitle.Get(), titleRect, m_brushText.Get());
 
     // Draw Esc Hint
     D2D1_RECT_F escRect = D2D1::RectF(hudX + hudW - 100.0f * m_uiScale, hudY + padding + 4.0f, hudX + hudW - padding, hudY + headerH);
-    std::wstring escText = L"[Esc] 退出";
-    dc->DrawText(escText.c_str(), static_cast<UINT32>(escText.size()), m_fontDetail.Get(), escRect, m_brushTextDim.Get());
+    const wchar_t* escText = AppStrings::AiAction_EscHint ? AppStrings::AiAction_EscHint : L"[Esc] Close";
+    dc->DrawText(escText, static_cast<UINT32>(wcslen(escText)), m_fontDetail.Get(), escRect, m_brushTextDim.Get());
 
     // Draw Items
     float curY = hudY + headerH;
@@ -398,13 +457,17 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
         dc->DrawText(act.name.c_str(), static_cast<UINT32>(act.name.size()), m_fontItem.Get(), textR, m_brushText.Get());
 
         // Draw Scope / Detail Tag
-        std::wstring tagStr;
-        if (act.scopeMode == AI::ScopeMode::CropAndBlend) tagStr = L"选区修补";
-        else if (act.scopeMode == AI::ScopeMode::ForceFullImage) tagStr = L"全图生成";
-        else tagStr = L"自适应";
+        const wchar_t* tagStr = L"";
+        if (act.scopeMode == AI::ScopeMode::CropAndBlend) {
+            tagStr = AppStrings::AiAction_ScopeCropAndBlend ? AppStrings::AiAction_ScopeCropAndBlend : L"Inpaint";
+        } else if (act.scopeMode == AI::ScopeMode::ForceFullImage) {
+            tagStr = AppStrings::AiAction_ScopeForceFull ? AppStrings::AiAction_ScopeForceFull : L"Full";
+        } else {
+            tagStr = AppStrings::AiAction_ScopeAuto ? AppStrings::AiAction_ScopeAuto : L"Auto";
+        }
 
-        D2D1_RECT_F tagR = D2D1::RectF(itemR.right - 75.0f * m_uiScale, itemR.top + (itemH - 18.0f * m_uiScale) * 0.5f, itemR.right - 8.0f * m_uiScale, itemR.top + itemH);
-        dc->DrawText(tagStr.c_str(), static_cast<UINT32>(tagStr.size()), m_fontDetail.Get(), tagR, m_brushTextDim.Get());
+        D2D1_RECT_F tagR = D2D1::RectF(itemR.right - 95.0f * m_uiScale, itemR.top + (itemH - 18.0f * m_uiScale) * 0.5f, itemR.right - 8.0f * m_uiScale, itemR.top + itemH);
+        dc->DrawText(tagStr, static_cast<UINT32>(wcslen(tagStr)), m_fontDetail.Get(), tagR, m_brushTextDim.Get());
 
         curY += itemH + 6.0f * m_uiScale;
     }

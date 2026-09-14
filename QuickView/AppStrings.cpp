@@ -656,6 +656,107 @@ const wchar_t *Settings_Label_ItemsInCompareMode = nullptr;
 const wchar_t *Settings_Label_SeparatorPreset = nullptr;
 const wchar_t *Settings_Option_SlideshowNormal = nullptr;
 const wchar_t *Settings_Option_SlideshowSpotlight = nullptr;
+const wchar_t *Toolbar_Tooltip_CompareSave = nullptr;
+const wchar_t *Dialog_MultiLineInputHint = nullptr;
+const wchar_t *Dialog_AiApiKeyTitle = nullptr;
+const wchar_t *Dialog_AiApiKeyPrompt = nullptr;
+const wchar_t *Dialog_AiPromptTitle = nullptr;
+const wchar_t *Dialog_AiPromptPrompt = nullptr;
+const wchar_t *Dialog_AiActionNameTitle = nullptr;
+const wchar_t *Dialog_AiActionNamePrompt = nullptr;
+const wchar_t *Dialog_AiBaseUrlTitle = nullptr;
+const wchar_t *Dialog_AiBaseUrlPrompt = nullptr;
+const wchar_t *AiAction_Title = nullptr;
+const wchar_t *AiAction_EscHint = nullptr;
+const wchar_t *AiAction_ScopeCropAndBlend = nullptr;
+const wchar_t *AiAction_ScopeForceFull = nullptr;
+const wchar_t *AiAction_ScopeAuto = nullptr;
+const wchar_t *OSD_AiProcessing = nullptr;
+const wchar_t *OSD_AiGenerationSuccess = nullptr;
+const wchar_t *OSD_AiFailedPrefix = nullptr;
+const wchar_t *Settings_Tab_Ai = nullptr;
+const wchar_t *Settings_Header_AiProviders = nullptr;
+const wchar_t *Settings_Desc_AiProviders = nullptr;
+const wchar_t *Settings_Label_AiProviderName = nullptr;
+const wchar_t *Settings_Label_AiBaseUrl = nullptr;
+const wchar_t *Settings_Label_AiApiKey = nullptr;
+const wchar_t *Settings_Label_AiModelId = nullptr;
+const wchar_t *Settings_Label_AiModelUnconfigured = nullptr;
+const wchar_t *Settings_Label_AiMaxRes = nullptr;
+const wchar_t *Settings_Label_AiDefaultProfile = nullptr;
+const wchar_t *Settings_Button_AiSetDefault = nullptr;
+const wchar_t *Settings_Button_AiTestConn = nullptr;
+const wchar_t *Settings_Button_AiSaveProf = nullptr;
+const wchar_t *Settings_Button_AiDeleteProf = nullptr;
+const wchar_t *Settings_Button_AiAddProf = nullptr;
+const wchar_t *Settings_Header_AiActions = nullptr;
+const wchar_t *Settings_Button_AiAddAction = nullptr;
+const wchar_t *Settings_Label_AiActionName = nullptr;
+const wchar_t *Settings_Label_AiPromptTemplate = nullptr;
+const wchar_t *Settings_Label_AiExecModel = nullptr;
+const wchar_t *Settings_Option_AiDefaultModel = nullptr;
+const wchar_t *Settings_Label_AiScopeMode = nullptr;
+const wchar_t *Settings_Button_AiDeleteAction = nullptr;
+const wchar_t *Settings_AiModelCustom = nullptr;
+const wchar_t *Settings_AiModelFetching = nullptr;
+const wchar_t *Settings_AiModelFetchAuto = nullptr;
+const wchar_t *Settings_Option_AiRes4K = nullptr;
+const wchar_t *Settings_Option_AiRes2K = nullptr;
+const wchar_t *Settings_Option_AiRes1K = nullptr;
+const wchar_t *Settings_Option_AiResOriginal = nullptr;
+const wchar_t *Settings_Option_AiScopeAuto = nullptr;
+const wchar_t *Settings_Option_AiScopeForceFull = nullptr;
+const wchar_t *Settings_Option_AiScopeCropBlend = nullptr;
+const wchar_t *Settings_Option_AiCustomEndpoint = nullptr;
+const wchar_t *Settings_Option_AiLocalComfyUI = nullptr;
+const wchar_t *Settings_Option_AiLocalSdWebUI = nullptr;
+const wchar_t *OSD_AiFetchingModels = nullptr;
+const wchar_t *OSD_AiFetchModelsFailed = nullptr;
+const wchar_t *OSD_AiFetchModelsSuccessFormat = nullptr;
+const wchar_t *OSD_AiSetDefaultSuccessFormat = nullptr;
+const wchar_t *OSD_AiTestingConnection = nullptr;
+const wchar_t *OSD_AiConnSuccessFormat = nullptr;
+const wchar_t *OSD_AiSaveFailedBaseUrlEmpty = nullptr;
+const wchar_t *OSD_AiSaveFailedApiKeyEmpty = nullptr;
+const wchar_t *OSD_AiSaveFailedModelEmpty = nullptr;
+const wchar_t *OSD_AiSaveProfileSuccess = nullptr;
+const wchar_t *AiError_Http429Title = nullptr;
+const wchar_t *AiError_Http429Advice = nullptr;
+const wchar_t *AiError_Http503Title = nullptr;
+const wchar_t *AiError_Http503Advice = nullptr;
+const wchar_t *AiError_Http404Title = nullptr;
+const wchar_t *AiError_Http404Advice = nullptr;
+const wchar_t *AiError_Http401Title = nullptr;
+const wchar_t *AiError_Http401Advice = nullptr;
+const wchar_t *AiError_Http403Title = nullptr;
+const wchar_t *AiError_Http403Advice = nullptr;
+const wchar_t *AiError_Http413Title = nullptr;
+const wchar_t *AiError_Http413Advice = nullptr;
+const wchar_t *AiError_HttpGenericTitle = nullptr;
+const wchar_t *AiError_HttpGenericAdvice = nullptr;
+const wchar_t *AiError_ApiKeyEmpty = nullptr;
+const wchar_t *AiError_ModelEmpty = nullptr;
+const wchar_t *AiError_InvalidUrl = nullptr;
+const wchar_t *AiError_InitWinHttpFailed = nullptr;
+const wchar_t *AiError_ConnectFailed = nullptr;
+const wchar_t *AiError_CreateReqFailed = nullptr;
+const wchar_t *AiError_SendReqFailedFormat = nullptr;
+const wchar_t *AiError_NoValidDataReturned = nullptr;
+const wchar_t *AiError_DetailPrefix = nullptr;
+const wchar_t *AiError_AdvicePrefix = nullptr;
+const wchar_t *AiAction_DefRemoveBg = nullptr;
+const wchar_t *AiAction_DefInpaint = nullptr;
+const wchar_t *AiAction_DefAnime = nullptr;
+const wchar_t *AiAction_DefCyberpunk = nullptr;
+const wchar_t *AiAction_DefSuperDetail = nullptr;
+const wchar_t *AiError_RequestTimeout = nullptr;
+const wchar_t *AiError_HttpStatusPrefix = nullptr;
+const wchar_t *AiError_JsonParseFailed = nullptr;
+const wchar_t *AiError_NoModelsFound = nullptr;
+const wchar_t *AiTest_ConnSuccess = nullptr;
+const wchar_t *AiTest_AuthFailedPrefix = nullptr;
+const wchar_t *AiTest_HttpErrorPrefix = nullptr;
+const wchar_t *AiError_NoAvailableProfile = nullptr;
 
 // --- Static Constants ---
 const wchar_t *Settings_Text_Copyright = L"\u00A9 2025\u2013%s Vivor Loong (GitHub: @justnullname)";
@@ -1291,6 +1392,107 @@ struct LanguageTable {
     const wchar_t *Settings_Option_LoupeShapeCircle;
     const wchar_t *Settings_Tooltip_LoupeHotkey;
     const wchar_t *Settings_Tooltip_CropModeHotkey;
+    const wchar_t *Toolbar_Tooltip_CompareSave;
+    const wchar_t *Dialog_MultiLineInputHint;
+    const wchar_t *Dialog_AiApiKeyTitle;
+    const wchar_t *Dialog_AiApiKeyPrompt;
+    const wchar_t *Dialog_AiPromptTitle;
+    const wchar_t *Dialog_AiPromptPrompt;
+    const wchar_t *Dialog_AiActionNameTitle;
+    const wchar_t *Dialog_AiActionNamePrompt;
+    const wchar_t *Dialog_AiBaseUrlTitle;
+    const wchar_t *Dialog_AiBaseUrlPrompt;
+    const wchar_t *AiAction_Title;
+    const wchar_t *AiAction_EscHint;
+    const wchar_t *AiAction_ScopeCropAndBlend;
+    const wchar_t *AiAction_ScopeForceFull;
+    const wchar_t *AiAction_ScopeAuto;
+    const wchar_t *OSD_AiProcessing;
+    const wchar_t *OSD_AiGenerationSuccess;
+    const wchar_t *OSD_AiFailedPrefix;
+    const wchar_t *Settings_Tab_Ai;
+    const wchar_t *Settings_Header_AiProviders;
+    const wchar_t *Settings_Desc_AiProviders;
+    const wchar_t *Settings_Label_AiProviderName;
+    const wchar_t *Settings_Label_AiBaseUrl;
+    const wchar_t *Settings_Label_AiApiKey;
+    const wchar_t *Settings_Label_AiModelId;
+    const wchar_t *Settings_Label_AiModelUnconfigured;
+    const wchar_t *Settings_Label_AiMaxRes;
+    const wchar_t *Settings_Label_AiDefaultProfile;
+    const wchar_t *Settings_Button_AiSetDefault;
+    const wchar_t *Settings_Button_AiTestConn;
+    const wchar_t *Settings_Button_AiSaveProf;
+    const wchar_t *Settings_Button_AiDeleteProf;
+    const wchar_t *Settings_Button_AiAddProf;
+    const wchar_t *Settings_Header_AiActions;
+    const wchar_t *Settings_Button_AiAddAction;
+    const wchar_t *Settings_Label_AiActionName;
+    const wchar_t *Settings_Label_AiPromptTemplate;
+    const wchar_t *Settings_Label_AiExecModel;
+    const wchar_t *Settings_Option_AiDefaultModel;
+    const wchar_t *Settings_Label_AiScopeMode;
+    const wchar_t *Settings_Button_AiDeleteAction;
+    const wchar_t *Settings_AiModelCustom;
+    const wchar_t *Settings_AiModelFetching;
+    const wchar_t *Settings_AiModelFetchAuto;
+    const wchar_t *Settings_Option_AiRes4K;
+    const wchar_t *Settings_Option_AiRes2K;
+    const wchar_t *Settings_Option_AiRes1K;
+    const wchar_t *Settings_Option_AiResOriginal;
+    const wchar_t *Settings_Option_AiScopeAuto;
+    const wchar_t *Settings_Option_AiScopeForceFull;
+    const wchar_t *Settings_Option_AiScopeCropBlend;
+    const wchar_t *Settings_Option_AiCustomEndpoint;
+    const wchar_t *Settings_Option_AiLocalComfyUI;
+    const wchar_t *Settings_Option_AiLocalSdWebUI;
+    const wchar_t *OSD_AiFetchingModels;
+    const wchar_t *OSD_AiFetchModelsFailed;
+    const wchar_t *OSD_AiFetchModelsSuccessFormat;
+    const wchar_t *OSD_AiSetDefaultSuccessFormat;
+    const wchar_t *OSD_AiTestingConnection;
+    const wchar_t *OSD_AiConnSuccessFormat;
+    const wchar_t *OSD_AiSaveFailedBaseUrlEmpty;
+    const wchar_t *OSD_AiSaveFailedApiKeyEmpty;
+    const wchar_t *OSD_AiSaveFailedModelEmpty;
+    const wchar_t *OSD_AiSaveProfileSuccess;
+    const wchar_t *AiError_Http429Title;
+    const wchar_t *AiError_Http429Advice;
+    const wchar_t *AiError_Http503Title;
+    const wchar_t *AiError_Http503Advice;
+    const wchar_t *AiError_Http404Title;
+    const wchar_t *AiError_Http404Advice;
+    const wchar_t *AiError_Http401Title;
+    const wchar_t *AiError_Http401Advice;
+    const wchar_t *AiError_Http403Title;
+    const wchar_t *AiError_Http403Advice;
+    const wchar_t *AiError_Http413Title;
+    const wchar_t *AiError_Http413Advice;
+    const wchar_t *AiError_HttpGenericTitle;
+    const wchar_t *AiError_HttpGenericAdvice;
+    const wchar_t *AiError_ApiKeyEmpty;
+    const wchar_t *AiError_ModelEmpty;
+    const wchar_t *AiError_InvalidUrl;
+    const wchar_t *AiError_InitWinHttpFailed;
+    const wchar_t *AiError_ConnectFailed;
+    const wchar_t *AiError_CreateReqFailed;
+    const wchar_t *AiError_SendReqFailedFormat;
+    const wchar_t *AiError_NoValidDataReturned;
+    const wchar_t *AiError_DetailPrefix;
+    const wchar_t *AiError_AdvicePrefix;
+    const wchar_t *AiAction_DefRemoveBg;
+    const wchar_t *AiAction_DefInpaint;
+    const wchar_t *AiAction_DefAnime;
+    const wchar_t *AiAction_DefCyberpunk;
+    const wchar_t *AiAction_DefSuperDetail;
+    const wchar_t *AiError_RequestTimeout;
+    const wchar_t *AiError_HttpStatusPrefix;
+    const wchar_t *AiError_JsonParseFailed;
+    const wchar_t *AiError_NoModelsFound;
+    const wchar_t *AiTest_ConnSuccess;
+    const wchar_t *AiTest_AuthFailedPrefix;
+    const wchar_t *AiTest_HttpErrorPrefix;
+    const wchar_t *AiError_NoAvailableProfile;
 };
 
 // ----------------------------------------------------------------
@@ -1923,6 +2125,107 @@ static const LanguageTable Table_EN = {
     L"Circle", // Settings_Option_LoupeShapeCircle
     L"Hold the shortcut key and scroll the mouse wheel to adjust the magnifier size.", // Settings_Tooltip_LoupeHotkey
     L"Hold Ctrl and drag with the left mouse button to quick-crop.", // Settings_Tooltip_CropModeHotkey
+    L"Save / Export (S)", // Toolbar_Tooltip_CompareSave
+    L"[Ctrl+Enter] Submit / Save", // Dialog_MultiLineInputHint
+    L"Configure API Key", // Dialog_AiApiKeyTitle
+    L"Enter provider API key (protected locally via Windows DPAPI):", // Dialog_AiApiKeyPrompt
+    L"Edit Prompt Template", // Dialog_AiPromptTitle
+    L"Configure AI prompt template (multi-line supported, press Ctrl+Enter to submit):", // Dialog_AiPromptPrompt
+    L"Edit Action Name", // Dialog_AiActionNameTitle
+    L"Enter display name for this AI action:", // Dialog_AiActionNamePrompt
+    L"Configure Endpoint", // Dialog_AiBaseUrlTitle
+    L"Enter OpenAI / ComfyUI compatible API Base URL:", // Dialog_AiBaseUrlPrompt
+    L"AI Actions", // AiAction_Title
+    L"[Esc] Close", // AiAction_EscHint
+    L"Inpaint Selection", // AiAction_ScopeCropAndBlend
+    L"Full Image", // AiAction_ScopeForceFull
+    L"Auto Scope", // AiAction_ScopeAuto
+    L"AI Processing: %s (Esc to cancel)...", // OSD_AiProcessing
+    L"AI generation completed! Entering Wipe Compare mode", // OSD_AiGenerationSuccess
+    L"AI Failed: ", // OSD_AiFailedPrefix
+    L"AI Actions", // Settings_Tab_Ai
+    L"AI Model Providers", // Settings_Header_AiProviders
+    L"Manage AI endpoints, DPAPI-secured keys, and model identifiers.", // Settings_Desc_AiProviders
+    L"Provider Preset", // Settings_Label_AiProviderName
+    L"Endpoint (Base URL)", // Settings_Label_AiBaseUrl
+    L"API Key (DPAPI Encrypted)", // Settings_Label_AiApiKey
+    L"Model Identifier", // Settings_Label_AiModelId
+    L"[Unconfigured, pull or input]", // Settings_Label_AiModelUnconfigured
+    L"Max Input Resolution", // Settings_Label_AiMaxRes
+    L"★ Default Provider", // Settings_Label_AiDefaultProfile
+    L"★ Set as Default Provider", // Settings_Button_AiSetDefault
+    L"Test Connection", // Settings_Button_AiTestConn
+    L"Save Provider", // Settings_Button_AiSaveProf
+    L"Delete Provider", // Settings_Button_AiDeleteProf
+    L"+ Add Model Provider", // Settings_Button_AiAddProf
+    L"AI Actions", // Settings_Header_AiActions
+    L"+ New AI Action", // Settings_Button_AiAddAction
+    L"Action Name", // Settings_Label_AiActionName
+    L"Prompt Template", // Settings_Label_AiPromptTemplate
+    L"Execution Provider", // Settings_Label_AiExecModel
+    L"Default Provider", // Settings_Option_AiDefaultModel
+    L"Scope Mode", // Settings_Label_AiScopeMode
+    L"Delete Action", // Settings_Button_AiDeleteAction
+    L"✎ Custom Model Identifier...", // Settings_AiModelCustom
+    L"⏳ Fetching available models...", // Settings_AiModelFetching
+    L"↻ Fetch models from endpoint...", // Settings_AiModelFetchAuto
+    L"4K / Original (4096px)", // Settings_Option_AiRes4K
+    L"2K QHD (2048px)", // Settings_Option_AiRes2K
+    L"1K Standard (1024px)", // Settings_Option_AiRes1K
+    L"Unrestricted (Native)", // Settings_Option_AiResOriginal
+    L"Auto (Selection First)", // Settings_Option_AiScopeAuto
+    L"Force Full Image", // Settings_Option_AiScopeForceFull
+    L"Inpaint & Blend", // Settings_Option_AiScopeCropBlend
+    L"Custom (OpenAI Compatible)", // Settings_Option_AiCustomEndpoint
+    L"Local ComfyUI", // Settings_Option_AiLocalComfyUI
+    L"Local SD WebUI / Forge", // Settings_Option_AiLocalSdWebUI
+    L"Fetching model list from endpoint...", // OSD_AiFetchingModels
+    L"Failed to fetch models: ", // OSD_AiFetchModelsFailed
+    L"Fetched %zu available models", // OSD_AiFetchModelsSuccessFormat
+    L"Set %s as default provider", // OSD_AiSetDefaultSuccessFormat
+    L"Testing connection and authentication...", // OSD_AiTestingConnection
+    L"✓ Connected successfully! Latency: %dms (HTTP %d)", // OSD_AiConnSuccessFormat
+    L"Save failed: Base URL cannot be empty", // OSD_AiSaveFailedBaseUrlEmpty
+    L"Save failed: Cloud provider API key cannot be empty", // OSD_AiSaveFailedApiKeyEmpty
+    L"Save failed: Please specify or select a valid model", // OSD_AiSaveFailedModelEmpty
+    L"✓ Provider configuration saved", // OSD_AiSaveProfileSuccess
+    L"Quota exceeded or rate limit reached (HTTP 429)", // AiError_Http429Title
+    L"Hint: Check your account balance / rate limits, or try again later.", // AiError_Http429Advice
+    L"Service temporarily unavailable (HTTP 503)", // AiError_Http503Title
+    L"Hint: The provider server is experiencing high traffic or maintenance.", // AiError_Http503Advice
+    L"Model or endpoint not found (HTTP 404)", // AiError_Http404Title
+    L"Hint: Selected model is not deployed on this endpoint. Please select a valid model.", // AiError_Http404Advice
+    L"Invalid or expired API key (HTTP 401)", // AiError_Http401Title
+    L"Hint: Verify your API key or regenerate a new one from the provider console.", // AiError_Http401Advice
+    L"Access denied / Forbidden (HTTP 403)", // AiError_Http403Title
+    L"Hint: Current account lacks permission to call this model.", // AiError_Http403Advice
+    L"Image payload exceeds maximum size (HTTP 413)", // AiError_Http413Title
+    L"Hint: Lower the Max Resolution setting to 1024px or 2048px.", // AiError_Http413Advice
+    L"Server error (HTTP %lu)", // AiError_HttpGenericTitle
+    L"Hint: Verify endpoint address and proxy/network connectivity.", // AiError_HttpGenericAdvice
+    L"API key is empty. Configure it in Settings -> AI Actions.", // AiError_ApiKeyEmpty
+    L"Model identifier is empty. Configure it in Settings -> AI Actions.", // AiError_ModelEmpty
+    L"Invalid Base URL format.", // AiError_InvalidUrl
+    L"Failed to initialize WinHTTP session.", // AiError_InitWinHttpFailed
+    L"Failed to connect to host. Check network or proxy settings.", // AiError_ConnectFailed
+    L"Failed to create HTTP request.", // AiError_CreateReqFailed
+    L"Network request failed (Error: %lu). Check proxy or network status.", // AiError_SendReqFailedFormat
+    L"HTTP 200 OK, but no valid image or text content was parsed.", // AiError_NoValidDataReturned
+    L"Details: ", // AiError_DetailPrefix
+    L"Hint: ", // AiError_AdvicePrefix
+    L"Remove Background", // AiAction_DefRemoveBg
+    L"Inpaint & Reconstruct", // AiAction_DefInpaint
+    L"Anime Art Style", // AiAction_DefAnime
+    L"Cyberpunk Neon", // AiAction_DefCyberpunk
+    L"High Detail Enhancement", // AiAction_DefSuperDetail
+    L"Network request timed out or server unresponsive.", // AiError_RequestTimeout
+    L"Provider returned error (HTTP ", // AiError_HttpStatusPrefix
+    L"Failed to parse JSON returned by provider.", // AiError_JsonParseFailed
+    L"Request succeeded, but no available models were parsed.", // AiError_NoModelsFound
+    L"Connection successful and credentials authorized.", // AiTest_ConnSuccess
+    L"Invalid API key or unauthorized (HTTP ", // AiTest_AuthFailedPrefix
+    L"Server returned HTTP ", // AiTest_HttpErrorPrefix,
+    L"No available AI model profile found. Please check Settings."
 };
 
 // ----------------------------------------------------------------
@@ -2555,6 +2858,107 @@ static const LanguageTable Table_CN = {
     L"圆形", // Settings_Option_LoupeShapeCircle
     L"按住快捷键并滚动鼠标滚轮可调节放大镜尺寸。", // Settings_Tooltip_LoupeHotkey
     L"按住 Ctrl 并使用鼠标左键拖动可快速进入框选剪裁模式。", // Settings_Tooltip_CropModeHotkey
+    L"保存/导出图像 (S)", // Toolbar_Tooltip_CompareSave
+    L"[Ctrl+Enter] 快速提交保存", // Dialog_MultiLineInputHint
+    L"配置 API 密钥", // Dialog_AiApiKeyTitle
+    L"请输入服务商 API 密钥（受 Windows DPAPI 本地硬件安全保护）：", // Dialog_AiApiKeyPrompt
+    L"编辑提示词模板", // Dialog_AiPromptTitle
+    L"配置该 AI 动作提示词模板（支持多行编辑，按 Ctrl+Enter 快速提交）：", // Dialog_AiPromptPrompt
+    L"编辑动作名称", // Dialog_AiActionNameTitle
+    L"请输入在 AI 动作面板中展示的名称：", // Dialog_AiActionNamePrompt
+    L"配置接口地址", // Dialog_AiBaseUrlTitle
+    L"请输入兼容 OpenAI / ComfyUI 格式的 API 基础端点地址 (Base URL)：", // Dialog_AiBaseUrlPrompt
+    L"AI 动作", // AiAction_Title
+    L"[Esc] 退出", // AiAction_EscHint
+    L"选区修补", // AiAction_ScopeCropAndBlend
+    L"全图生成", // AiAction_ScopeForceFull
+    L"自适应", // AiAction_ScopeAuto
+    L"AI 正在处理: %s (按 Esc 取消)...", // OSD_AiProcessing
+    L"AI 生成完成！进入帘幕对比模式", // OSD_AiGenerationSuccess
+    L"AI 执行失败: ", // OSD_AiFailedPrefix
+    L"AI 动作", // Settings_Tab_Ai
+    L"AI 模型服务商配置", // Settings_Header_AiProviders
+    L"配置 AI 端点地址、DPAPI 安全密钥及大模型。", // Settings_Desc_AiProviders
+    L"供应商预设", // Settings_Label_AiProviderName
+    L"接口地址 (Base URL)", // Settings_Label_AiBaseUrl
+    L"API 密钥 (DPAPI 加密保护)", // Settings_Label_AiApiKey
+    L"模型标识", // Settings_Label_AiModelId
+    L"[未配置，请拉取或输入]", // Settings_Label_AiModelUnconfigured
+    L"最大输入分辨率策略", // Settings_Label_AiMaxRes
+    L"★ 全局默认服务商", // Settings_Label_AiDefaultProfile
+    L"★ 设为全局默认服务商", // Settings_Button_AiSetDefault
+    L"测试连接与延迟", // Settings_Button_AiTestConn
+    L"保存配置", // Settings_Button_AiSaveProf
+    L"删除该服务商配置", // Settings_Button_AiDeleteProf
+    L"+ 添加新服务商配置", // Settings_Button_AiAddProf
+    L"自定义 AI 动作列表", // Settings_Header_AiActions
+    L"+ 新建 AI 动作", // Settings_Button_AiAddAction
+    L"动作名称", // Settings_Label_AiActionName
+    L"提示词模板", // Settings_Label_AiPromptTemplate
+    L"执行服务商", // Settings_Label_AiExecModel
+    L"全局默认服务商", // Settings_Option_AiDefaultModel
+    L"作用范围模式", // Settings_Label_AiScopeMode
+    L"删除该动作", // Settings_Button_AiDeleteAction
+    L"✎ 自定义输入模型标识...", // Settings_AiModelCustom
+    L"⏳ 正在拉取可用模型列表...", // Settings_AiModelFetching
+    L"↻ 自动拉取服务端模型列表...", // Settings_AiModelFetchAuto
+    L"4K / 原图优先 (4096px)", // Settings_Option_AiRes4K
+    L"2K 高清 (2048px)", // Settings_Option_AiRes2K
+    L"1K 标准 (1024px)", // Settings_Option_AiRes1K
+    L"原始尺寸 (不限制)", // Settings_Option_AiResOriginal
+    L"自适应 (选区优先)", // Settings_Option_AiScopeAuto
+    L"强制全图", // Settings_Option_AiScopeForceFull
+    L"局部修补 (贴回羽化)", // Settings_Option_AiScopeCropBlend
+    L"自定义 (兼容 OpenAI 端点)", // Settings_Option_AiCustomEndpoint
+    L"本地 ComfyUI", // Settings_Option_AiLocalComfyUI
+    L"本地 SD WebUI / Forge", // Settings_Option_AiLocalSdWebUI
+    L"正在拉取大模型列表...", // OSD_AiFetchingModels
+    L"拉取模型失败: ", // OSD_AiFetchModelsFailed
+    L"已成功拉取 %zu 个可用模型", // OSD_AiFetchModelsSuccessFormat
+    L"已将 %s 设为全局默认服务商", // OSD_AiSetDefaultSuccessFormat
+    L"正在测试服务商连接与鉴权...", // OSD_AiTestingConnection
+    L"✓ 连接正常！延迟: %dms (HTTP %d)", // OSD_AiConnSuccessFormat
+    L"保存失败: 接口地址 (Base URL) 不能为空", // OSD_AiSaveFailedBaseUrlEmpty
+    L"保存失败: 云端服务商 API 密钥不能为空", // OSD_AiSaveFailedApiKeyEmpty
+    L"保存失败: 请先选择或输入有效的模型标识", // OSD_AiSaveFailedModelEmpty
+    L"✓ 服务商配置已保存", // OSD_AiSaveProfileSuccess
+    L"API 配额超限或请求过于频繁 (HTTP 429)", // AiError_Http429Title
+    L"提示: 请检查账户余额或 API 额度，或稍后重试。", // AiError_Http429Advice
+    L"服务暂时不可用 (HTTP 503)", // AiError_Http503Title
+    L"提示: 服务端当前处于负载高峰或正在维护，建议稍后重试。", // AiError_Http503Advice
+    L"服务端未找到该资源或模型 (HTTP 404)", // AiError_Http404Title
+    L"提示: 所选模型未在该端点上线，请在设置中重新拉取并选择有效模型。", // AiError_Http404Advice
+    L"API 密钥无效或已过期 (HTTP 401)", // AiError_Http401Title
+    L"提示: 请检查密钥是否输入正确或已被服务端吊销。", // AiError_Http401Advice
+    L"接口访问被拒绝 (HTTP 403)", // AiError_Http403Title
+    L"提示: 当前账户无权调用该模型，请检查权限或换用其他模型。", // AiError_Http403Advice
+    L"图片数据体积超出限制 (HTTP 413)", // AiError_Http413Title
+    L"提示: 建议在模型设置中将最大分辨率调为 1024px 或 2048px。", // AiError_Http413Advice
+    L"服务端响应异常 (HTTP %lu)", // AiError_HttpGenericTitle
+    L"提示: 请检查接口地址与网络代理连通性。", // AiError_HttpGenericAdvice
+    L"API 密钥为空，请先在【设置 -> AI 动作】中配置该服务商密钥。", // AiError_ApiKeyEmpty
+    L"未配置模型标识，请先在【设置 -> AI 动作】中拉取或输入有效模型。", // AiError_ModelEmpty
+    L"无效的 Base URL 格式。", // AiError_InvalidUrl
+    L"初始化 WinHTTP 失败。", // AiError_InitWinHttpFailed
+    L"连接服务器失败，请检查网络或代理设置。", // AiError_ConnectFailed
+    L"创建 HTTP 请求失败。", // AiError_CreateReqFailed
+    L"网络请求发送失败 (Error: %lu)。请检查代理或网络状态。", // AiError_SendReqFailedFormat
+    L"API 响应成功，但未解析到有效的图片或文字数据。", // AiError_NoValidDataReturned
+    L"详情: ", // AiError_DetailPrefix
+    L"提示: ", // AiError_AdvicePrefix
+    L"智能消除背景", // AiAction_DefRemoveBg
+    L"局部修补与重绘", // AiAction_DefInpaint
+    L"转二次元动漫风格", // AiAction_DefAnime
+    L"赛博朋克霓虹风格", // AiAction_DefCyberpunk
+    L"超高清细节增强", // AiAction_DefSuperDetail
+    L"网络请求超时或服务无响应。", // AiError_RequestTimeout
+    L"服务商返回错误 (HTTP ", // AiError_HttpStatusPrefix
+    L"无法解析服务商返回的 JSON 数据。", // AiError_JsonParseFailed
+    L"接口返回成功，但未解析到可用模型列表。", // AiError_NoModelsFound
+    L"连接正常且凭据鉴权通过。", // AiTest_ConnSuccess
+    L"API 密钥无效或未授权 (HTTP ", // AiTest_AuthFailedPrefix
+    L"服务器返回 HTTP ", // AiTest_HttpErrorPrefix,
+    L"未找到可用的 AI 模型预设，请检查设置。"
 };
 
 // ----------------------------------------------------------------
@@ -3187,6 +3591,107 @@ static const LanguageTable Table_TW = {
     L"圓形", // Settings_Option_LoupeShapeCircle
     L"按住快捷鍵並滾動滑鼠滾輪可調節放大鏡尺寸。", // Settings_Tooltip_LoupeHotkey
     L"按住 Ctrl 並使用滑鼠左鍵拖曳可快速進入框選剪裁模式。", // Settings_Tooltip_CropModeHotkey
+    L"儲存/匯出影像 (S)", // Toolbar_Tooltip_CompareSave
+    L"[Ctrl+Enter] 快速儲存提交", // Dialog_MultiLineInputHint
+    L"設定 API 金鑰", // Dialog_AiApiKeyTitle
+    L"請輸入服務商 API 金鑰（受 Windows DPAPI 本機硬體安全保護）：", // Dialog_AiApiKeyPrompt
+    L"編輯提示詞範本", // Dialog_AiPromptTitle
+    L"設定該 AI 動作提示詞範本（支援多行編輯，按 Ctrl+Enter 快速提交）：", // Dialog_AiPromptPrompt
+    L"編輯動作名稱", // Dialog_AiActionNameTitle
+    L"請輸入在 AI 動作面板中顯示的名稱：", // Dialog_AiActionNamePrompt
+    L"設定端點位址", // Dialog_AiBaseUrlTitle
+    L"請輸入相容 OpenAI / ComfyUI 格式的 API 基礎端點位址 (Base URL)：", // Dialog_AiBaseUrlPrompt
+    L"AI 動作", // AiAction_Title
+    L"[Esc] 結束", // AiAction_EscHint
+    L"選區修補", // AiAction_ScopeCropAndBlend
+    L"全圖生成", // AiAction_ScopeForceFull
+    L"自適應", // AiAction_ScopeAuto
+    L"AI 正在處理: %s (按 Esc 取消)...", // OSD_AiProcessing
+    L"AI 生成完成！進入簾幕對比模式", // OSD_AiGenerationSuccess
+    L"AI 執行失敗: ", // OSD_AiFailedPrefix
+    L"AI 動作", // Settings_Tab_Ai
+    L"AI 模型服務商設定", // Settings_Header_AiProviders
+    L"管理 AI 端點位址、DPAPI 安全金鑰及模型。", // Settings_Desc_AiProviders
+    L"供應商預設", // Settings_Label_AiProviderName
+    L"端點位址 (Base URL)", // Settings_Label_AiBaseUrl
+    L"API 金鑰 (DPAPI 加密保護)", // Settings_Label_AiApiKey
+    L"模型識別碼", // Settings_Label_AiModelId
+    L"[未設定，請抓取或輸入]", // Settings_Label_AiModelUnconfigured
+    L"最大輸入解析度策略", // Settings_Label_AiMaxRes
+    L"★ 全域預設服務商", // Settings_Label_AiDefaultProfile
+    L"★ 設為全域預設服務商", // Settings_Button_AiSetDefault
+    L"測試連線與延遲", // Settings_Button_AiTestConn
+    L"儲存設定", // Settings_Button_AiSaveProf
+    L"刪除該服務商設定", // Settings_Button_AiDeleteProf
+    L"+ 新增服務商設定", // Settings_Button_AiAddProf
+    L"自訂 AI 動作清單", // Settings_Header_AiActions
+    L"+ 新建 AI 動作", // Settings_Button_AiAddAction
+    L"動作名稱", // Settings_Label_AiActionName
+    L"提示詞範本", // Settings_Label_AiPromptTemplate
+    L"執行服務商", // Settings_Label_AiExecModel
+    L"全域預設服務商", // Settings_Option_AiDefaultModel
+    L"作用範圍模式", // Settings_Label_AiScopeMode
+    L"刪除該動作", // Settings_Button_AiDeleteAction
+    L"✎ 自訂輸入模型識別碼...", // Settings_AiModelCustom
+    L"⏳ 正在抓取可用模型清單...", // Settings_AiModelFetching
+    L"↻ 自動抓取伺服端模型清單...", // Settings_AiModelFetchAuto
+    L"4K / 原圖優先 (4096px)", // Settings_Option_AiRes4K
+    L"2K 高畫質 (2048px)", // Settings_Option_AiRes2K
+    L"1K 標準 (1024px)", // Settings_Option_AiRes1K
+    L"原始尺寸 (不限制)", // Settings_Option_AiResOriginal
+    L"自適應 (選區優先)", // Settings_Option_AiScopeAuto
+    L"強制全圖", // Settings_Option_AiScopeForceFull
+    L"局部修補 (貼回羽化)", // Settings_Option_AiScopeCropBlend
+    L"自訂 (相容 OpenAI 端點)", // Settings_Option_AiCustomEndpoint
+    L"本機 ComfyUI", // Settings_Option_AiLocalComfyUI
+    L"本機 SD WebUI / Forge", // Settings_Option_AiLocalSdWebUI
+    L"正在抓取大模型清單...", // OSD_AiFetchingModels
+    L"抓取模型失敗: ", // OSD_AiFetchModelsFailed
+    L"已成功抓取 %zu 個可用模型", // OSD_AiFetchModelsSuccessFormat
+    L"已將 %s 設為全域預設服務商", // OSD_AiSetDefaultSuccessFormat
+    L"正在測試服務商連線與驗證...", // OSD_AiTestingConnection
+    L"✓ 連線正常！延遲: %dms (HTTP %d)", // OSD_AiConnSuccessFormat
+    L"儲存失敗: 端點位址 (Base URL) 不能為空", // OSD_AiSaveFailedBaseUrlEmpty
+    L"儲存失敗: 雲端服務商 API 金鑰不能為空", // OSD_AiSaveFailedApiKeyEmpty
+    L"儲存失敗: 請先選擇或指定有效的模型識別碼", // OSD_AiSaveFailedModelEmpty
+    L"✓ 服務商設定已儲存", // OSD_AiSaveProfileSuccess
+    L"API 配額用罄或請求過於頻繁 (HTTP 429)", // AiError_Http429Title
+    L"提示: 請檢查帳戶餘額或 API 額度，或稍後重試。", // AiError_Http429Advice
+    L"服務暫時無法使用 (HTTP 503)", // AiError_Http503Title
+    L"提示: 伺服端正處於尖峰或維護中，建議稍後重試。", // AiError_Http503Advice
+    L"未找到該模型或端點 (HTTP 404)", // AiError_Http404Title
+    L"提示: 所選模型未在此端點上線，請重新抓取並選擇有效模型。", // AiError_Http404Advice
+    L"API 金鑰無效或已過期 (HTTP 401)", // AiError_Http401Title
+    L"提示: 請檢查金鑰是否正確或已被伺服端撤銷。", // AiError_Http401Advice
+    L"介面存取被拒 (HTTP 403)", // AiError_Http403Title
+    L"提示: 目前帳戶無權調用該模型，請檢查權限。", // AiError_Http403Advice
+    L"影像資料大小超出限制 (HTTP 413)", // AiError_Http413Title
+    L"提示: 建議在設定中將最大解析度調整為 1024px 或 2048px。", // AiError_Http413Advice
+    L"伺服端回應異常 (HTTP %lu)", // AiError_HttpGenericTitle
+    L"提示: 請檢查端點位址與網路代理連線狀態。", // AiError_HttpGenericAdvice
+    L"API 金鑰為空，請先在【設定 -> AI 動作】中設定金鑰。", // AiError_ApiKeyEmpty
+    L"未設定模型識別碼，請先在【設定 -> AI 動作】中抓取或輸入。", // AiError_ModelEmpty
+    L"無效的 Base URL 格式。", // AiError_InvalidUrl
+    L"初始化 WinHTTP 工作階段失敗。", // AiError_InitWinHttpFailed
+    L"連線至伺服器失敗，請檢查網路或 Proxy 設定。", // AiError_ConnectFailed
+    L"建立 HTTP 請求失敗。", // AiError_CreateReqFailed
+    L"網路請求傳送失敗 (Error: %lu)。請檢查網路狀態。", // AiError_SendReqFailedFormat
+    L"API 回應成功，但未解析到有效的影像或文字資料。", // AiError_NoValidDataReturned
+    L"詳細資訊: ", // AiError_DetailPrefix
+    L"提示: ", // AiError_AdvicePrefix
+    L"智慧消除背景", // AiAction_DefRemoveBg
+    L"局部修補與重繪", // AiAction_DefInpaint
+    L"轉動漫插畫風格", // AiAction_DefAnime
+    L"賽博龐克霓虹風格", // AiAction_DefCyberpunk
+    L"超高畫質細節增強", // AiAction_DefSuperDetail
+    L"網路請求超時或服務無回應。", // AiError_RequestTimeout
+    L"服務商傳回錯誤 (HTTP ", // AiError_HttpStatusPrefix
+    L"無法解析服務商傳回的 JSON 資料。", // AiError_JsonParseFailed
+    L"介面傳回成功，但未解析到可用模型清單。", // AiError_NoModelsFound
+    L"連線正常且憑證鑑權通過。", // AiTest_ConnSuccess
+    L"API 金鑰無效或未授權 (HTTP ", // AiTest_AuthFailedPrefix
+    L"伺服器傳回 HTTP ", // AiTest_HttpErrorPrefix,
+    L"未找到可用的 AI 模型預設，請檢查設定。"
 };
 
 // ----------------------------------------------------------------
@@ -3819,6 +4324,107 @@ static const LanguageTable Table_JA = {
     L"円形", // Settings_Option_LoupeShapeCircle
     L"ショートカットキーを押しながらマウスホイールをスクロールすると、ルーペのサイズを調整できます。", // Settings_Tooltip_LoupeHotkey
     L"Ctrl キーを押しながら左クリックでドラッグすると、すばやく範囲選択してトリミングできます。", // Settings_Tooltip_CropModeHotkey
+    L"画像を保存/エクスポート (S)", // Toolbar_Tooltip_CompareSave
+    L"[Ctrl+Enter] 送信して保存", // Dialog_MultiLineInputHint
+    L"API キーの設定", // Dialog_AiApiKeyTitle
+    L"プロバイダーの API キーを入力してください（Windows DPAPI で暗号化保存）：", // Dialog_AiApiKeyPrompt
+    L"プロンプトテンプレートの編集", // Dialog_AiPromptTitle
+    L"プロンプトを設定（複数行対応、Ctrl+Enter で送信）：", // Dialog_AiPromptPrompt
+    L"アクション名の編集", // Dialog_AiActionNameTitle
+    L"AI アクションの表示名を入力してください：", // Dialog_AiActionNamePrompt
+    L"エンドポイントの設定", // Dialog_AiBaseUrlTitle
+    L"OpenAI / ComfyUI 互換の API ベース URL を入力してください：", // Dialog_AiBaseUrlPrompt
+    L"AI アクション", // AiAction_Title
+    L"[Esc] 閉じる", // AiAction_EscHint
+    L"選択範囲の修復", // AiAction_ScopeCropAndBlend
+    L"画像全体を生成", // AiAction_ScopeForceFull
+    L"自動判定", // AiAction_ScopeAuto
+    L"AI 処理中: %s (Esc でキャンセル)...", // OSD_AiProcessing
+    L"AI 生成完了！ワイプ比較モードを開始します", // OSD_AiGenerationSuccess
+    L"AI 処理失敗: ", // OSD_AiFailedPrefix
+    L"AI アクション", // Settings_Tab_Ai
+    L"AI プロバイダー設定", // Settings_Header_AiProviders
+    L"API エンドポイント、DPAPI 暗号化キー、モデルを管理します。", // Settings_Desc_AiProviders
+    L"プロバイダー プリセット", // Settings_Label_AiProviderName
+    L"エンドポイント (Base URL)", // Settings_Label_AiBaseUrl
+    L"API キー (DPAPI 暗号化)", // Settings_Label_AiApiKey
+    L"モデル識別子", // Settings_Label_AiModelId
+    L"[未設定・取得または入力]", // Settings_Label_AiModelUnconfigured
+    L"最大解像度ポリシー", // Settings_Label_AiMaxRes
+    L"★ デフォルトプロバイダー", // Settings_Label_AiDefaultProfile
+    L"★ デフォルトに設定", // Settings_Button_AiSetDefault
+    L"接続テスト", // Settings_Button_AiTestConn
+    L"設定を保存", // Settings_Button_AiSaveProf
+    L"この設定を削除", // Settings_Button_AiDeleteProf
+    L"+ プロバイダーを追加", // Settings_Button_AiAddProf
+    L"カスタム AI アクション一覧", // Settings_Header_AiActions
+    L"+ 新規 AI アクション", // Settings_Button_AiAddAction
+    L"アクション名", // Settings_Label_AiActionName
+    L"プロンプトテンプレート", // Settings_Label_AiPromptTemplate
+    L"実行プロバイダー", // Settings_Label_AiExecModel
+    L"デフォルトプロバイダー", // Settings_Option_AiDefaultModel
+    L"処理範囲モード", // Settings_Label_AiScopeMode
+    L"このアクションを削除", // Settings_Button_AiDeleteAction
+    L"✎ モデル名を手動入力...", // Settings_AiModelCustom
+    L"⏳ モデル一覧を取得中...", // Settings_AiModelFetching
+    L"↻ サーバーからモデルを取得...", // Settings_AiModelFetchAuto
+    L"4K / 原寸優先 (4096px)", // Settings_Option_AiRes4K
+    L"2K 高画質 (2048px)", // Settings_Option_AiRes2K
+    L"1K 標準 (1024px)", // Settings_Option_AiRes1K
+    L"制限なし (オリジナル)", // Settings_Option_AiResOriginal
+    L"自動 (選択範囲優先)", // Settings_Option_AiScopeAuto
+    L"強制的に画像全体", // Settings_Option_AiScopeForceFull
+    L"部分修復・ブレンド", // Settings_Option_AiScopeCropBlend
+    L"カスタム (OpenAI 互換)", // Settings_Option_AiCustomEndpoint
+    L"ローカル ComfyUI", // Settings_Option_AiLocalComfyUI
+    L"ローカル SD WebUI / Forge", // Settings_Option_AiLocalSdWebUI
+    L"モデル一覧を取得中...", // OSD_AiFetchingModels
+    L"モデル一覧の取得に失敗: ", // OSD_AiFetchModelsFailed
+    L"%zu 件のモデルを取得しました", // OSD_AiFetchModelsSuccessFormat
+    L"%s をデフォルトに設定しました", // OSD_AiSetDefaultSuccessFormat
+    L"接続と認証を確認中...", // OSD_AiTestingConnection
+    L"✓ 接続成功！レイテンシ: %dms (HTTP %d)", // OSD_AiConnSuccessFormat
+    L"保存失敗: エンドポイント (Base URL) が空です", // OSD_AiSaveFailedBaseUrlEmpty
+    L"保存失敗: クラウド API キーが空です", // OSD_AiSaveFailedApiKeyEmpty
+    L"保存失敗: モデル名を指定または選択してください", // OSD_AiSaveFailedModelEmpty
+    L"✓ プロバイダー設定を保存しました", // OSD_AiSaveProfileSuccess
+    L"利用制限またはレート制限超過 (HTTP 429)", // AiError_Http429Title
+    L"ヒント: 残高または利用枠を確認し、後ほど再試行してください。", // AiError_Http429Advice
+    L"サービスが一時的に利用不可 (HTTP 503)", // AiError_Http503Title
+    L"ヒント: サーバーが混雑またはメンテナンス中です。", // AiError_Http503Advice
+    L"モデルまたはリソース未検出 (HTTP 404)", // AiError_Http404Title
+    L"ヒント: 指定されたモデルがこのエンドポイントに存在しません。", // AiError_Http404Advice
+    L"API キーが無効または期限切れ (HTTP 401)", // AiError_Http401Title
+    L"ヒント: API キーが正しく入力されているか確認してください。", // AiError_Http401Advice
+    L"アクセス拒否 (HTTP 403)", // AiError_Http403Title
+    L"ヒント: アカウントにこのモデルの利用権限がありません。", // AiError_Http403Advice
+    L"画像サイズが制限を超過 (HTTP 413)", // AiError_Http413Title
+    L"ヒント: 設定で最大入力解像度を 1024px または 2048px に下げてください。", // AiError_Http413Advice
+    L"サーバー応答エラー (HTTP %lu)", // AiError_HttpGenericTitle
+    L"ヒント: エンドポイントとネットワーク接続を確認してください。", // AiError_HttpGenericAdvice
+    L"API キーが未設定です。【設定 -> AI アクション】で入力してください。", // AiError_ApiKeyEmpty
+    L"モデルが未設定です。【設定 -> AI アクション】で選択または入力してください。", // AiError_ModelEmpty
+    L"Base URL の形式が無効です。", // AiError_InvalidUrl
+    L"WinHTTP セッションの初期化に失敗しました。", // AiError_InitWinHttpFailed
+    L"サーバーへの接続に失敗しました。ネットワークを確認してください。", // AiError_ConnectFailed
+    L"HTTP リクエストの作成に失敗しました。", // AiError_CreateReqFailed
+    L"ネットワーク送信失敗 (Error: %lu)。プロキシや接続を確認してください。", // AiError_SendReqFailedFormat
+    L"HTTP 200 応答ですが、有効な画像またはテキストが検出されませんでした。", // AiError_NoValidDataReturned
+    L"詳細: ", // AiError_DetailPrefix
+    L"ヒント: ", // AiError_AdvicePrefix
+    L"背景の切り抜き", // AiAction_DefRemoveBg
+    L"部分修復とインペイント", // AiAction_DefInpaint
+    L"アニメ調イラスト変換", // AiAction_DefAnime
+    L"サイバーパンク調変換", // AiAction_DefCyberpunk
+    L"超高精細ディテール強調", // AiAction_DefSuperDetail
+    L"ネットワーク要求がタイムアウトしたか、応答がありません。", // AiError_RequestTimeout
+    L"プロバイダーからエラーが返されました (HTTP ", // AiError_HttpStatusPrefix
+    L"プロバイダーから返された JSON データを解析できません。", // AiError_JsonParseFailed
+    L"リクエストは成功しましたが、利用可能なモデルが見つかりませんでした。", // AiError_NoModelsFound
+    L"接続に成功し、認証が承認されました。", // AiTest_ConnSuccess
+    L"API キーが無効または未認証です (HTTP ", // AiTest_AuthFailedPrefix
+    L"サーバーから HTTP ", // AiTest_HttpErrorPrefix,
+    L"利用可能な AI モデルプロファイルが見つかりません。設定を確認してください。"
 };
 
 // ----------------------------------------------------------------
@@ -4451,6 +5057,107 @@ static const LanguageTable Table_RU = {
     L"Круглая", // Settings_Option_LoupeShapeCircle
     L"Чтобы настроить размер лупы, удерживайте сочетание клавиш и вращайте колёсико мыши.", // Settings_Tooltip_LoupeHotkey
     L"Удерживайте Ctrl и перетаскивайте левую кнопку мыши для быстрого кадрирования.", // Settings_Tooltip_CropModeHotkey
+    L"Сохранить / Экспорт (S)", // Toolbar_Tooltip_CompareSave
+    L"[Ctrl+Enter] Сохранить", // Dialog_MultiLineInputHint
+    L"Настройка API ключа", // Dialog_AiApiKeyTitle
+    L"Введите API ключ (защищен с помощью Windows DPAPI):", // Dialog_AiApiKeyPrompt
+    L"Редактировать шаблон промпта", // Dialog_AiPromptTitle
+    L"Настройте шаблон промпта (поддерживает перенос строк, Ctrl+Enter для сохранения):", // Dialog_AiPromptPrompt
+    L"Редактировать название действия", // Dialog_AiActionNameTitle
+    L"Введите отображаемое имя для действия AI:", // Dialog_AiActionNamePrompt
+    L"Настройка адреса сервера (Base URL)", // Dialog_AiBaseUrlTitle
+    L"Введите базовый URL API, совместимый с OpenAI / ComfyUI:", // Dialog_AiBaseUrlPrompt
+    L"AI Действия", // AiAction_Title
+    L"[Esc] Закрыть", // AiAction_EscHint
+    L"Восстановление области", // AiAction_ScopeCropAndBlend
+    L"Всё изображение", // AiAction_ScopeForceFull
+    L"Автовыбор", // AiAction_ScopeAuto
+    L"AI обрабатывает: %s (Esc для отмены)...", // OSD_AiProcessing
+    L"Генерация завершена! Переход в режим сравнения шторкой", // OSD_AiGenerationSuccess
+    L"Ошибка AI: ", // OSD_AiFailedPrefix
+    L"AI Действия", // Settings_Tab_Ai
+    L"Провайдеры AI моделей", // Settings_Header_AiProviders
+    L"Управление адресами API, ключами (DPAPI) и моделями.", // Settings_Desc_AiProviders
+    L"Предустановка провайдера", // Settings_Label_AiProviderName
+    L"Адрес API (Base URL)", // Settings_Label_AiBaseUrl
+    L"API Ключ (шифрование DPAPI)", // Settings_Label_AiApiKey
+    L"Идентификатор модели", // Settings_Label_AiModelId
+    L"[Не настроено, выберите или введите]", // Settings_Label_AiModelUnconfigured
+    L"Макс. разрешение ввода", // Settings_Label_AiMaxRes
+    L"★ Провайдер по умолчанию", // Settings_Label_AiDefaultProfile
+    L"★ Сделать по умолчанию", // Settings_Button_AiSetDefault
+    L"Проверить соединение", // Settings_Button_AiTestConn
+    L"Сохранить настройки", // Settings_Button_AiSaveProf
+    L"Удалить провайдера", // Settings_Button_AiDeleteProf
+    L"+ Добавить провайдера", // Settings_Button_AiAddProf
+    L"Список действий AI", // Settings_Header_AiActions
+    L"+ Создать действие AI", // Settings_Button_AiAddAction
+    L"Название действия", // Settings_Label_AiActionName
+    L"Шаблон промпта", // Settings_Label_AiPromptTemplate
+    L"Исполняющий провайдер", // Settings_Label_AiExecModel
+    L"Провайдер по умолчанию", // Settings_Option_AiDefaultModel
+    L"Режим области", // Settings_Label_AiScopeMode
+    L"Удалить действие", // Settings_Button_AiDeleteAction
+    L"✎ Ввести модель вручную...", // Settings_AiModelCustom
+    L"⏳ Получение списка моделей...", // Settings_AiModelFetching
+    L"↻ Запросить модели с сервера...", // Settings_AiModelFetchAuto
+    L"4K / Оригинал (4096px)", // Settings_Option_AiRes4K
+    L"2K Высокое (2048px)", // Settings_Option_AiRes2K
+    L"1K Стандартное (1024px)", // Settings_Option_AiRes1K
+    L"Без ограничений (Native)", // Settings_Option_AiResOriginal
+    L"Авто (сначала выделение)", // Settings_Option_AiScopeAuto
+    L"Всё изображение", // Settings_Option_AiScopeForceFull
+    L"Замена и смешивание", // Settings_Option_AiScopeCropBlend
+    L"Пользовательский (OpenAI API)", // Settings_Option_AiCustomEndpoint
+    L"Локальный ComfyUI", // Settings_Option_AiLocalComfyUI
+    L"Локальный SD WebUI / Forge", // Settings_Option_AiLocalSdWebUI
+    L"Загрузка списка моделей...", // OSD_AiFetchingModels
+    L"Ошибка загрузки моделей: ", // OSD_AiFetchModelsFailed
+    L"Получено доступных моделей: %zu", // OSD_AiFetchModelsSuccessFormat
+    L"Провайдер %s назначен по умолчанию", // OSD_AiSetDefaultSuccessFormat
+    L"Проверка соединения и ключа...", // OSD_AiTestingConnection
+    L"✓ Успешно! Задержка: %dмс (HTTP %d)", // OSD_AiConnSuccessFormat
+    L"Ошибка: адрес (Base URL) не может быть пустым", // OSD_AiSaveFailedBaseUrlEmpty
+    L"Ошибка: API ключ облачного провайдера не может быть пустым", // OSD_AiSaveFailedApiKeyEmpty
+    L"Ошибка: укажите или выберите модель", // OSD_AiSaveFailedModelEmpty
+    L"✓ Конфигурация сохранена", // OSD_AiSaveProfileSuccess
+    L"Исчерпан лимит запросов или квота (HTTP 429)", // AiError_Http429Title
+    L"Совет: Проверьте баланс аккаунта или повторите попытку позже.", // AiError_Http429Advice
+    L"Сервис временно недоступен (HTTP 503)", // AiError_Http503Title
+    L"Совет: Сервер перегружен или находится на обслуживании.", // AiError_Http503Advice
+    L"Модель или адрес не найдены (HTTP 404)", // AiError_Http404Title
+    L"Совет: Указанная модель недоступна на данном сервере.", // AiError_Http404Advice
+    L"Недействительный или истекший API ключ (HTTP 401)", // AiError_Http401Title
+    L"Совет: Проверьте правильность введенного ключа.", // AiError_Http401Advice
+    L"Доступ запрещен (HTTP 403)", // AiError_Http403Title
+    L"Совет: У данного аккаунта нет прав на вызов этой модели.", // AiError_Http403Advice
+    L"Размер изображения превышает лимит (HTTP 413)", // AiError_Http413Title
+    L"Совет: Уменьшите максимальное разрешение в настройках до 1024px или 2048px.", // AiError_Http413Advice
+    L"Ошибка сервера (HTTP %lu)", // AiError_HttpGenericTitle
+    L"Совет: Проверьте адрес сервера и подключение к сети.", // AiError_HttpGenericAdvice
+    L"API ключ пуст. Настройте его в Настройки -> AI Действия.", // AiError_ApiKeyEmpty
+    L"Идентификатор модели не указан. Настройте в Настройки -> AI Действия.", // AiError_ModelEmpty
+    L"Неверный формат базового URL.", // AiError_InvalidUrl
+    L"Не удалось инициализировать сеанс WinHTTP.", // AiError_InitWinHttpFailed
+    L"Не удалось подключиться к серверу.", // AiError_ConnectFailed
+    L"Не удалось создать HTTP-запрос.", // AiError_CreateReqFailed
+    L"Сбой сетевого запроса (Ошибка: %lu). Проверьте прокси/сеть.", // AiError_SendReqFailedFormat
+    L"Ответ HTTP 200 получен, но данные изображения или текста не найдены.", // AiError_NoValidDataReturned
+    L"Подробности: ", // AiError_DetailPrefix
+    L"Совет: ", // AiError_AdvicePrefix
+    L"Удаление фона", // AiAction_DefRemoveBg
+    L"Точечное восстановление", // AiAction_DefInpaint
+    L"Аниме стиль", // AiAction_DefAnime
+    L"Киберпанк неон", // AiAction_DefCyberpunk
+    L"Улучшение деталей", // AiAction_DefSuperDetail
+    L"Время ожидания сетевого запроса истекло или сервер не отвечает.", // AiError_RequestTimeout
+    L"Провайдер вернул ошибку (HTTP ", // AiError_HttpStatusPrefix
+    L"Не удалось разобрать JSON, возвращенный провайдером.", // AiError_JsonParseFailed
+    L"Запрос выполнен успешно, но список доступных моделей не найден.", // AiError_NoModelsFound
+    L"Подключение успешно установлено, авторизация пройдена.", // AiTest_ConnSuccess
+    L"Недействительный API-ключ или нет доступа (HTTP ", // AiTest_AuthFailedPrefix
+    L"Сервер вернул HTTP ", // AiTest_HttpErrorPrefix,
+    L"Профиль AI модели не найден. Проверьте настройки."
 };
 
 // ----------------------------------------------------------------
@@ -5083,6 +5790,107 @@ static const LanguageTable Table_DE = {
     L"Kreis", // Settings_Option_LoupeShapeCircle
     L"Halten Sie die Tastenkombination gedrückt und scrollen Sie mit dem Mausrad, um die Lupengröße anzupassen.", // Settings_Tooltip_LoupeHotkey
     L"Halten Sie Strg gedrückt und ziehen Sie mit der linken Maustaste, um schnell zuzuschneiden.", // Settings_Tooltip_CropModeHotkey
+    L"Bild speichern / exportieren (S)", // Toolbar_Tooltip_CompareSave
+    L"[Strg+Eingabe] Speichern", // Dialog_MultiLineInputHint
+    L"API-Schlüssel konfigurieren", // Dialog_AiApiKeyTitle
+    L"Geben Sie den API-Schlüssel ein (lokal geschützt durch Windows DPAPI):", // Dialog_AiApiKeyPrompt
+    L"Prompt-Vorlage bearbeiten", // Dialog_AiPromptTitle
+    L"Konfigurieren Sie den AI-Prompt (mehrzeilig, Strg+Eingabe zum Speichern):", // Dialog_AiPromptPrompt
+    L"Aktionsnamen bearbeiten", // Dialog_AiActionNameTitle
+    L"Geben Sie einen Anzeigenamen für die AI-Aktion ein:", // Dialog_AiActionNamePrompt
+    L"Endpunkt-URL konfigurieren", // Dialog_AiBaseUrlTitle
+    L"Geben Sie die OpenAI / ComfyUI kompatible Basis-URL ein:", // Dialog_AiBaseUrlPrompt
+    L"AI-Aktionen", // AiAction_Title
+    L"[Esc] Schließen", // AiAction_EscHint
+    L"Bereich reparieren", // AiAction_ScopeCropAndBlend
+    L"Gesamtes Bild", // AiAction_ScopeForceFull
+    L"Automatisch", // AiAction_ScopeAuto
+    L"AI verarbeitet: %s (Esc zum Abbrechen)...", // OSD_AiProcessing
+    L"AI-Generierung abgeschlossen! Wisch-Vergleichsmodus aktiv", // OSD_AiGenerationSuccess
+    L"AI-Fehler: ", // OSD_AiFailedPrefix
+    L"AI-Aktionen", // Settings_Tab_Ai
+    L"AI-Modellanbieter", // Settings_Header_AiProviders
+    L"Verwalten Sie Endpunkte, DPAPI-Schlüssel und Modellkennungen.", // Settings_Desc_AiProviders
+    L"Anbieter-Voreinstellung", // Settings_Label_AiProviderName
+    L"Endpunkt (Base URL)", // Settings_Label_AiBaseUrl
+    L"API-Schlüssel (DPAPI-geschützt)", // Settings_Label_AiApiKey
+    L"Modellkennung", // Settings_Label_AiModelId
+    L"[Nicht konfiguriert, abrufen oder eingeben]", // Settings_Label_AiModelUnconfigured
+    L"Maximale Eingangsauflösung", // Settings_Label_AiMaxRes
+    L"★ Standard-Anbieter", // Settings_Label_AiDefaultProfile
+    L"★ Als Standard festlegen", // Settings_Button_AiSetDefault
+    L"Verbindung testen", // Settings_Button_AiTestConn
+    L"Konfiguration speichern", // Settings_Button_AiSaveProf
+    L"Anbieter löschen", // Settings_Button_AiDeleteProf
+    L"+ Anbieter hinzufügen", // Settings_Button_AiAddProf
+    L"Benutzerdefinierte AI-Aktionen", // Settings_Header_AiActions
+    L"+ Neue AI-Aktion", // Settings_Button_AiAddAction
+    L"Aktionsname", // Settings_Label_AiActionName
+    L"Prompt-Vorlage", // Settings_Label_AiPromptTemplate
+    L"Ausführender Anbieter", // Settings_Label_AiExecModel
+    L"Standard-Anbieter", // Settings_Option_AiDefaultModel
+    L"Wirkungsbereich", // Settings_Label_AiScopeMode
+    L"Aktion löschen", // Settings_Button_AiDeleteAction
+    L"✎ Modell manuell eingeben...", // Settings_AiModelCustom
+    L"⏳ Modelle werden abgerufen...", // Settings_AiModelFetching
+    L"↻ Modelle vom Server abrufen...", // Settings_AiModelFetchAuto
+    L"4K / Original (4096px)", // Settings_Option_AiRes4K
+    L"2K QHD (2048px)", // Settings_Option_AiRes2K
+    L"1K Standard (1024px)", // Settings_Option_AiRes1K
+    L"Unbegrenzt (Original)", // Settings_Option_AiResOriginal
+    L"Automatisch (Auswahl zuerst)", // Settings_Option_AiScopeAuto
+    L"Ganzes Bild erzwingen", // Settings_Option_AiScopeForceFull
+    L"Inpaint & Einblenden", // Settings_Option_AiScopeCropBlend
+    L"Benutzerdefiniert (OpenAI-kompatibel)", // Settings_Option_AiCustomEndpoint
+    L"Lokales ComfyUI", // Settings_Option_AiLocalComfyUI
+    L"Lokales SD WebUI / Forge", // Settings_Option_AiLocalSdWebUI
+    L"Modellliste wird abgerufen...", // OSD_AiFetchingModels
+    L"Abrufen der Modelle fehlgeschlagen: ", // OSD_AiFetchModelsFailed
+    L"%zu verfügbare Modelle abgerufen", // OSD_AiFetchModelsSuccessFormat
+    L"%s als Standardanbieter festgelegt", // OSD_AiSetDefaultSuccessFormat
+    L"Verbindung und Autorisierung werden getestet...", // OSD_AiTestingConnection
+    L"✓ Verbindung erfolgreich! Latenz: %dms (HTTP %d)", // OSD_AiConnSuccessFormat
+    L"Speichern fehlgeschlagen: Basis-URL darf nicht leer sein", // OSD_AiSaveFailedBaseUrlEmpty
+    L"Speichern fehlgeschlagen: API-Schlüssel erforderlich", // OSD_AiSaveFailedApiKeyEmpty
+    L"Speichern fehlgeschlagen: Bitte Modell festlegen", // OSD_AiSaveFailedModelEmpty
+    L"✓ Anbieterkonfiguration gespeichert", // OSD_AiSaveProfileSuccess
+    L"Kontingent erschöpft oder Rate-Limit erreicht (HTTP 429)", // AiError_Http429Title
+    L"Hinweis: Kontoguthaben prüfen oder später erneut versuchen.", // AiError_Http429Advice
+    L"Dienst vorübergehend nicht verfügbar (HTTP 503)", // AiError_Http503Title
+    L"Hinweis: Server überlastet oder Wartungsarbeiten aktiv.", // AiError_Http503Advice
+    L"Modell oder Endpunkt nicht gefunden (HTTP 404)", // AiError_Http404Title
+    L"Hinweis: Gewähltes Modell ist an diesem Endpunkt nicht verfügbar.", // AiError_Http404Advice
+    L"Ungültiger oder abgelaufener API-Schlüssel (HTTP 401)", // AiError_Http401Title
+    L"Hinweis: Bitte überprüfen Sie Ihren eingegebenen Schlüssel.", // AiError_Http401Advice
+    L"Zugriff verweigert (HTTP 403)", // AiError_Http403Title
+    L"Hinweis: Fehlende Berechtigung für dieses Modell.", // AiError_Http403Advice
+    L"Bildgröße überschreitet Limit (HTTP 413)", // AiError_Http413Title
+    L"Hinweis: Verringern Sie die maximale Eingangsauflösung auf 1024px oder 2048px.", // AiError_Http413Advice
+    L"Serverfehler (HTTP %lu)", // AiError_HttpGenericTitle
+    L"Hinweis: Überprüfen Sie Endpunkt und Netzwerkverbindung.", // AiError_HttpGenericAdvice
+    L"API-Schlüssel ist leer. Bitte in Einstellungen -> AI-Aktionen konfigurieren.", // AiError_ApiKeyEmpty
+    L"Modellkennung ist leer. Bitte in Einstellungen -> AI-Aktionen konfigurieren.", // AiError_ModelEmpty
+    L"Ungültiges Basis-URL-Format.", // AiError_InvalidUrl
+    L"WinHTTP-Sitzung konnte nicht initialisiert werden.", // AiError_InitWinHttpFailed
+    L"Verbindung zum Server fehlgeschlagen.", // AiError_ConnectFailed
+    L"HTTP-Anfrage konnte nicht erstellt werden.", // AiError_CreateReqFailed
+    L"Netzwerkanfrage fehlgeschlagen (Fehler: %lu).", // AiError_SendReqFailedFormat
+    L"HTTP 200 empfangen, aber keine Bild- oder Textdaten gefunden.", // AiError_NoValidDataReturned
+    L"Details: ", // AiError_DetailPrefix
+    L"Hinweis: ", // AiError_AdvicePrefix
+    L"Hintergrund entfernen", // AiAction_DefRemoveBg
+    L"Bereich reparieren & füllen", // AiAction_DefInpaint
+    L"Anime-Illustrationsstil", // AiAction_DefAnime
+    L"Cyberpunk-Neonstil", // AiAction_DefCyberpunk
+    L"Ultra-Detailverbesserung", // AiAction_DefSuperDetail
+    L"Netzwerkanforderung abgelaufen oder Server antwortet nicht.", // AiError_RequestTimeout
+    L"Anbieter meldete Fehler (HTTP ", // AiError_HttpStatusPrefix
+    L"JSON-Antwort des Anbieters konnte nicht verarbeitet werden.", // AiError_JsonParseFailed
+    L"Anforderung erfolgreich, aber keine verfügbaren Modelle gefunden.", // AiError_NoModelsFound
+    L"Verbindung erfolgreich und Authentifizierung bestätigt.", // AiTest_ConnSuccess
+    L"Ungültiger API-Schlüssel oder nicht autorisiert (HTTP ", // AiTest_AuthFailedPrefix
+    L"Server antwortet mit HTTP ", // AiTest_HttpErrorPrefix,
+    L"Kein verfügbares AI-Modellprofil gefunden. Bitte Einstellungen prüfen."
 };
 
 // ----------------------------------------------------------------
@@ -5715,6 +6523,107 @@ static const LanguageTable Table_ES = {
     L"Círculo", // Settings_Option_LoupeShapeCircle
     L"Mantenga presionada la tecla de acceso rápido y gire la rueda del mouse para ajustar el tamaño de la lupa.", // Settings_Tooltip_LoupeHotkey
     L"Mantenga presionado Ctrl y arrastre con el botón izquierdo del mouse para un recorte rápido.", // Settings_Tooltip_CropModeHotkey
+    L"Guardar / Exportar (S)", // Toolbar_Tooltip_CompareSave
+    L"[Ctrl+Enter] Guardar", // Dialog_MultiLineInputHint
+    L"Configurar clave API", // Dialog_AiApiKeyTitle
+    L"Ingrese la clave API (protegida localmente mediante Windows DPAPI):", // Dialog_AiApiKeyPrompt
+    L"Editar plantilla de prompt", // Dialog_AiPromptTitle
+    L"Configure el prompt de IA (soporta múltiples líneas, Ctrl+Enter para guardar):", // Dialog_AiPromptPrompt
+    L"Editar nombre de la acción", // Dialog_AiActionNameTitle
+    L"Ingrese el nombre que se mostrará en el panel de IA:", // Dialog_AiActionNamePrompt
+    L"Configurar URL del extremo", // Dialog_AiBaseUrlTitle
+    L"Ingrese la URL base compatible con OpenAI / ComfyUI:", // Dialog_AiBaseUrlPrompt
+    L"Acciones IA", // AiAction_Title
+    L"[Esc] Cerrar", // AiAction_EscHint
+    L"Reparar selección", // AiAction_ScopeCropAndBlend
+    L"Imagen completa", // AiAction_ScopeForceFull
+    L"Automático", // AiAction_ScopeAuto
+    L"IA procesando: %s (Esc para cancelar)...", // OSD_AiProcessing
+    L"¡Generación completada! Modo de comparación cortina activo", // OSD_AiGenerationSuccess
+    L"Error de IA: ", // OSD_AiFailedPrefix
+    L"Acciones IA", // Settings_Tab_Ai
+    L"Proveedores de modelos IA", // Settings_Header_AiProviders
+    L"Administre extremos de API, claves cifradas (DPAPI) y modelos.", // Settings_Desc_AiProviders
+    L"Proveedor predeterminado", // Settings_Label_AiProviderName
+    L"URL base del extremo", // Settings_Label_AiBaseUrl
+    L"Clave API (cifrada con DPAPI)", // Settings_Label_AiApiKey
+    L"Identificador del modelo", // Settings_Label_AiModelId
+    L"[Sin configurar, obtener o ingresar]", // Settings_Label_AiModelUnconfigured
+    L"Resolución máxima de entrada", // Settings_Label_AiMaxRes
+    L"★ Proveedor predeterminado", // Settings_Label_AiDefaultProfile
+    L"★ Establecer como predeterminado", // Settings_Button_AiSetDefault
+    L"Probar conexión", // Settings_Button_AiTestConn
+    L"Guardar configuración", // Settings_Button_AiSaveProf
+    L"Eliminar proveedor", // Settings_Button_AiDeleteProf
+    L"+ Añadir proveedor", // Settings_Button_AiAddProf
+    L"Acciones IA personalizadas", // Settings_Header_AiActions
+    L"+ Nueva acción IA", // Settings_Button_AiAddAction
+    L"Nombre de la acción", // Settings_Label_AiActionName
+    L"Plantilla de prompt", // Settings_Label_AiPromptTemplate
+    L"Proveedor de ejecución", // Settings_Label_AiExecModel
+    L"Proveedor predeterminado", // Settings_Option_AiDefaultModel
+    L"Modo de alcance", // Settings_Label_AiScopeMode
+    L"Eliminar acción", // Settings_Button_AiDeleteAction
+    L"✎ Ingresar modelo manualmente...", // Settings_AiModelCustom
+    L"⏳ Obteniendo modelos disponibles...", // Settings_AiModelFetching
+    L"↻ Consultar modelos del servidor...", // Settings_AiModelFetchAuto
+    L"4K / Original (4096px)", // Settings_Option_AiRes4K
+    L"2K QHD (2048px)", // Settings_Option_AiRes2K
+    L"1K Estándar (1024px)", // Settings_Option_AiRes1K
+    L"Sin límite (Nativo)", // Settings_Option_AiResOriginal
+    L"Auto (selección primero)", // Settings_Option_AiScopeAuto
+    L"Forzar imagen completa", // Settings_Option_AiScopeForceFull
+    L"Inpaint y difuminar", // Settings_Option_AiScopeCropBlend
+    L"Personalizado (compatible OpenAI)", // Settings_Option_AiCustomEndpoint
+    L"ComfyUI local", // Settings_Option_AiLocalComfyUI
+    L"SD WebUI / Forge local", // Settings_Option_AiLocalSdWebUI
+    L"Obteniendo lista de modelos...", // OSD_AiFetchingModels
+    L"Error al obtener modelos: ", // OSD_AiFetchModelsFailed
+    L"Se obtuvieron %zu modelos disponibles", // OSD_AiFetchModelsSuccessFormat
+    L"%s establecido como predeterminado", // OSD_AiSetDefaultSuccessFormat
+    L"Probando conexión y autenticación...", // OSD_AiTestingConnection
+    L"✓ ¡Conexión exitosa! Latencia: %dms (HTTP %d)", // OSD_AiConnSuccessFormat
+    L"Error al guardar: la URL base no puede estar vacía", // OSD_AiSaveFailedBaseUrlEmpty
+    L"Error al guardar: la clave API en la nube es obligatoria", // OSD_AiSaveFailedApiKeyEmpty
+    L"Error al guardar: especifique o seleccione un modelo válido", // OSD_AiSaveFailedModelEmpty
+    L"✓ Configuración del proveedor guardada", // OSD_AiSaveProfileSuccess
+    L"Cuota agotada o límite de solicitudes superado (HTTP 429)", // AiError_Http429Title
+    L"Sugerencia: Verifique el saldo de su cuenta o intente de nuevo más tarde.", // AiError_Http429Advice
+    L"Servicio no disponible temporalmente (HTTP 503)", // AiError_Http503Title
+    L"Sugerencia: El servidor está saturado o en mantenimiento.", // AiError_Http503Advice
+    L"Modelo o extremo no encontrado (HTTP 404)", // AiError_Http404Title
+    L"Sugerencia: El modelo seleccionado no existe en este extremo.", // AiError_Http404Advice
+    L"Clave API no válida o caducada (HTTP 401)", // AiError_Http401Title
+    L"Sugerencia: Compruebe que su clave API sea correcta.", // AiError_Http401Advice
+    L"Acceso denegado (HTTP 403)", // AiError_Http403Title
+    L"Sugerencia: La cuenta carece de permisos para invocar este modelo.", // AiError_Http403Advice
+    L"El tamaño de la imagen supera el límite (HTTP 413)", // AiError_Http413Title
+    L"Sugerencia: Reduzca la resolución máxima a 1024px o 2048px en los ajustes.", // AiError_Http413Advice
+    L"Error del servidor (HTTP %lu)", // AiError_HttpGenericTitle
+    L"Sugerencia: Verifique la dirección del extremo y su conexión a internet.", // AiError_HttpGenericAdvice
+    L"Clave API vacía. Configúrela en Ajustes -> Acciones IA.", // AiError_ApiKeyEmpty
+    L"Identificador de modelo vacío. Configúrelo en Ajustes -> Acciones IA.", // AiError_ModelEmpty
+    L"Formato de URL base no válido.", // AiError_InvalidUrl
+    L"Error al inicializar la sesión WinHTTP.", // AiError_InitWinHttpFailed
+    L"Error al conectar con el servidor.", // AiError_ConnectFailed
+    L"Error al crear la solicitud HTTP.", // AiError_CreateReqFailed
+    L"Fallo en la solicitud de red (Error: %lu). Verifique proxy o red.", // AiError_SendReqFailedFormat
+    L"Respuesta HTTP 200 recibida, pero sin datos válidos de imagen o texto.", // AiError_NoValidDataReturned
+    L"Detalles: ", // AiError_DetailPrefix
+    L"Sugerencia: ", // AiError_AdvicePrefix
+    L"Eliminar fondo", // AiAction_DefRemoveBg
+    L"Reparación y reconstrucción", // AiAction_DefInpaint
+    L"Estilo anime", // AiAction_DefAnime
+    L"Estilo cyberpunk neón", // AiAction_DefCyberpunk
+    L"Mejora de detalles ultra", // AiAction_DefSuperDetail
+    L"Tiempo de espera agotado o el servidor no responde.", // AiError_RequestTimeout
+    L"El proveedor devolvió un error (HTTP ", // AiError_HttpStatusPrefix
+    L"No se pudo procesar la respuesta JSON del proveedor.", // AiError_JsonParseFailed
+    L"Solicitud correcta, pero no se encontraron modelos disponibles.", // AiError_NoModelsFound
+    L"Conexión exitosa y credenciales autorizadas.", // AiTest_ConnSuccess
+    L"Clave de API no válida o no autorizada (HTTP ", // AiTest_AuthFailedPrefix
+    L"El servidor devolvió HTTP ", // AiTest_HttpErrorPrefix,
+    L"No se encontró un perfil de modelo de IA disponible. Verifique la configuración."
 };
 
 // ----------------------------------------------------------------
@@ -6347,6 +7256,107 @@ static const LanguageTable Table_FR = {
     L"Cercle", // Settings_Option_LoupeShapeCircle
     L"Maintenez la touche de raccourci enfoncée et faites défiler la molette de la souris pour ajuster la taille de la loupe.", // Settings_Tooltip_LoupeHotkey
     L"Maintenez la touche Ctrl enfoncée et faites glisser avec le bouton gauche de la souris pour un recadrage rapide.", // Settings_Tooltip_CropModeHotkey
+    L"Enregistrer / Exporter (S)", // Toolbar_Tooltip_CompareSave
+    L"[Ctrl+Entrée] Enregistrer", // Dialog_MultiLineInputHint
+    L"Configurer la clé API", // Dialog_AiApiKeyTitle
+    L"Saisissez la clé API (protégée localement par Windows DPAPI) :", // Dialog_AiApiKeyPrompt
+    L"Modifier le modèle de prompt", // Dialog_AiPromptTitle
+    L"Configurez le prompt IA (multiligne, Ctrl+Entrée pour valider) :", // Dialog_AiPromptPrompt
+    L"Modifier le nom de l'action", // Dialog_AiActionNameTitle
+    L"Saisissez le nom affiché pour l'action IA :", // Dialog_AiActionNamePrompt
+    L"Configurer l'adresse du point de terminaison", // Dialog_AiBaseUrlTitle
+    L"Saisissez l'URL de base compatible OpenAI / ComfyUI :", // Dialog_AiBaseUrlPrompt
+    L"Actions IA", // AiAction_Title
+    L"[Échap] Fermer", // AiAction_EscHint
+    L"Inpainting de la sélection", // AiAction_ScopeCropAndBlend
+    L"Image entière", // AiAction_ScopeForceFull
+    L"Automatique", // AiAction_ScopeAuto
+    L"IA en cours de traitement : %s (Échap pour annuler)...", // OSD_AiProcessing
+    L"Génération IA terminée ! Mode comparaison par volet activé", // OSD_AiGenerationSuccess
+    L"Échec de l'IA : ", // OSD_AiFailedPrefix
+    L"Actions IA", // Settings_Tab_Ai
+    L"Fournisseurs de modèles IA", // Settings_Header_AiProviders
+    L"Gérez les points de terminaison, les clés (DPAPI) et les modèles.", // Settings_Desc_AiProviders
+    L"Préréglage du fournisseur", // Settings_Label_AiProviderName
+    L"URL de base (Base URL)", // Settings_Label_AiBaseUrl
+    L"Clé API (chiffrée via DPAPI)", // Settings_Label_AiApiKey
+    L"Identifiant du modèle", // Settings_Label_AiModelId
+    L"[Non configuré, récupérer ou saisir]", // Settings_Label_AiModelUnconfigured
+    L"Résolution d'entrée maximale", // Settings_Label_AiMaxRes
+    L"★ Fournisseur par défaut", // Settings_Label_AiDefaultProfile
+    L"★ Définir comme fournisseur par défaut", // Settings_Button_AiSetDefault
+    L"Tester la connexion", // Settings_Button_AiTestConn
+    L"Enregistrer la configuration", // Settings_Button_AiSaveProf
+    L"Supprimer ce fournisseur", // Settings_Button_AiDeleteProf
+    L"+ Ajouter un fournisseur", // Settings_Button_AiAddProf
+    L"Actions IA personnalisées", // Settings_Header_AiActions
+    L"+ Nouvelle action IA", // Settings_Button_AiAddAction
+    L"Nom de l'action", // Settings_Label_AiActionName
+    L"Modèle de prompt", // Settings_Label_AiPromptTemplate
+    L"Fournisseur d'exécution", // Settings_Label_AiExecModel
+    L"Fournisseur par défaut", // Settings_Option_AiDefaultModel
+    L"Mode de portée", // Settings_Label_AiScopeMode
+    L"Supprimer l'action", // Settings_Button_AiDeleteAction
+    L"✎ Saisir le modèle manuellement...", // Settings_AiModelCustom
+    L"⏳ Récupération des modèles...", // Settings_AiModelFetching
+    L"↻ Interroger les modèles du serveur...", // Settings_AiModelFetchAuto
+    L"4K / Original (4096px)", // Settings_Option_AiRes4K
+    L"2K QHD (2048px)", // Settings_Option_AiRes2K
+    L"1K Standard (1024px)", // Settings_Option_AiRes1K
+    L"Illimité (Natif)", // Settings_Option_AiResOriginal
+    L"Auto (sélection prioritaire)", // Settings_Option_AiScopeAuto
+    L"Forcer l'image entière", // Settings_Option_AiScopeForceFull
+    L"Inpainting et fusion", // Settings_Option_AiScopeCropBlend
+    L"Personnalisé (compatible OpenAI)", // Settings_Option_AiCustomEndpoint
+    L"ComfyUI local", // Settings_Option_AiLocalComfyUI
+    L"SD WebUI / Forge local", // Settings_Option_AiLocalSdWebUI
+    L"Récupération de la liste des modèles...", // OSD_AiFetchingModels
+    L"Échec de récupération des modèles : ", // OSD_AiFetchModelsFailed
+    L"%zu modèles disponibles récupérés", // OSD_AiFetchModelsSuccessFormat
+    L"%s défini comme fournisseur par défaut", // OSD_AiSetDefaultSuccessFormat
+    L"Test de la connexion et de l'authentification...", // OSD_AiTestingConnection
+    L"✓ Connecté avec succès ! Latence : %dms (HTTP %d)", // OSD_AiConnSuccessFormat
+    L"Échec : l'URL de base ne peut pas être vide", // OSD_AiSaveFailedBaseUrlEmpty
+    L"Échec : la clé API cloud est obligatoire", // OSD_AiSaveFailedApiKeyEmpty
+    L"Échec : veuillez sélectionner ou saisir un modèle valide", // OSD_AiSaveFailedModelEmpty
+    L"✓ Configuration du fournisseur enregistrée", // OSD_AiSaveProfileSuccess
+    L"Quota épuisé ou limite de requêtes atteinte (HTTP 429)", // AiError_Http429Title
+    L"Conseil : Vérifiez le solde de votre compte ou réessayez plus tard.", // AiError_Http429Advice
+    L"Service temporairement indisponible (HTTP 503)", // AiError_Http503Title
+    L"Conseil : Le serveur est surchargé ou en maintenance.", // AiError_Http503Advice
+    L"Modèle ou point de terminaison introuvable (HTTP 404)", // AiError_Http404Title
+    L"Conseil : Le modèle sélectionné n'est pas déployé sur ce serveur.", // AiError_Http404Advice
+    L"Clé API non valide ou expirée (HTTP 401)", // AiError_Http401Title
+    L"Conseil : Vérifiez que votre clé API a été saisie correctement.", // AiError_Http401Advice
+    L"Accès refusé (HTTP 403)", // AiError_Http403Title
+    L"Conseil : Votre compte n'a pas la permission d'appeler ce modèle.", // AiError_Http403Advice
+    L"Taille de l'image supérieure à la limite (HTTP 413)", // AiError_Http413Title
+    L"Conseil : Réduisez la résolution maximale à 1024px ou 2048px dans les paramètres.", // AiError_Http413Advice
+    L"Erreur du serveur (HTTP %lu)", // AiError_HttpGenericTitle
+    L"Conseil : Vérifiez l'adresse du serveur et la connexion réseau.", // AiError_HttpGenericAdvice
+    L"La clé API est vide. Configurez-la dans Paramètres -> Actions IA.", // AiError_ApiKeyEmpty
+    L"L'identifiant de modèle est vide. Configurez-le dans Paramètres -> Actions IA.", // AiError_ModelEmpty
+    L"Format d'URL de base non valide.", // AiError_InvalidUrl
+    L"Échec de l'initialisation de la session WinHTTP.", // AiError_InitWinHttpFailed
+    L"Impossible de se connecter au serveur hôte.", // AiError_ConnectFailed
+    L"Échec de création de la requête HTTP.", // AiError_CreateReqFailed
+    L"Échec de la requête réseau (Erreur : %lu). Vérifiez le proxy/réseau.", // AiError_SendReqFailedFormat
+    L"Réponse HTTP 200 reçue, mais aucune image ou texte valide extrait.", // AiError_NoValidDataReturned
+    L"Détails : ", // AiError_DetailPrefix
+    L"Conseil : ", // AiError_AdvicePrefix
+    L"Supprimer l'arrière-plan", // AiAction_DefRemoveBg
+    L"Retouche et reconstruction", // AiAction_DefInpaint
+    L"Style illustration anime", // AiAction_DefAnime
+    L"Style cyberpunk néon", // AiAction_DefCyberpunk
+    L"Amélioration ultra-détaillée", // AiAction_DefSuperDetail
+    L"Délai d'attente réseau dépassé ou serveur sans réponse.", // AiError_RequestTimeout
+    L"Le fournisseur a renvoyé une erreur (HTTP ", // AiError_HttpStatusPrefix
+    L"Impossible d'analyser les données JSON renvoyées par le fournisseur.", // AiError_JsonParseFailed
+    L"Requête réussie, mais aucun modèle disponible trouvé.", // AiError_NoModelsFound
+    L"Connexion réussie et informations d'identification validées.", // AiTest_ConnSuccess
+    L"Clé API invalide ou non autorisée (HTTP ", // AiTest_AuthFailedPrefix
+    L"Le serveur a renvoyé HTTP ", // AiTest_HttpErrorPrefix,
+    L"Aucun profil de modèle IA disponible trouvé. Veuillez vérifier les paramètres."
 };
 
 // ----------------------------------------------------------------
@@ -6978,6 +7988,107 @@ void Apply(const LanguageTable& t) {
   Settings_Label_SeparatorPreset = t.Settings_Label_SeparatorPreset;
   Settings_Option_SlideshowNormal = t.Settings_Option_SlideshowNormal;
   Settings_Option_SlideshowSpotlight = t.Settings_Option_SlideshowSpotlight;
+  Toolbar_Tooltip_CompareSave = t.Toolbar_Tooltip_CompareSave;
+  Dialog_MultiLineInputHint = t.Dialog_MultiLineInputHint;
+  Dialog_AiApiKeyTitle = t.Dialog_AiApiKeyTitle;
+  Dialog_AiApiKeyPrompt = t.Dialog_AiApiKeyPrompt;
+  Dialog_AiPromptTitle = t.Dialog_AiPromptTitle;
+  Dialog_AiPromptPrompt = t.Dialog_AiPromptPrompt;
+  Dialog_AiActionNameTitle = t.Dialog_AiActionNameTitle;
+  Dialog_AiActionNamePrompt = t.Dialog_AiActionNamePrompt;
+  Dialog_AiBaseUrlTitle = t.Dialog_AiBaseUrlTitle;
+  Dialog_AiBaseUrlPrompt = t.Dialog_AiBaseUrlPrompt;
+  AiAction_Title = t.AiAction_Title;
+  AiAction_EscHint = t.AiAction_EscHint;
+  AiAction_ScopeCropAndBlend = t.AiAction_ScopeCropAndBlend;
+  AiAction_ScopeForceFull = t.AiAction_ScopeForceFull;
+  AiAction_ScopeAuto = t.AiAction_ScopeAuto;
+  OSD_AiProcessing = t.OSD_AiProcessing;
+  OSD_AiGenerationSuccess = t.OSD_AiGenerationSuccess;
+  OSD_AiFailedPrefix = t.OSD_AiFailedPrefix;
+  Settings_Tab_Ai = t.Settings_Tab_Ai;
+  Settings_Header_AiProviders = t.Settings_Header_AiProviders;
+  Settings_Desc_AiProviders = t.Settings_Desc_AiProviders;
+  Settings_Label_AiProviderName = t.Settings_Label_AiProviderName;
+  Settings_Label_AiBaseUrl = t.Settings_Label_AiBaseUrl;
+  Settings_Label_AiApiKey = t.Settings_Label_AiApiKey;
+  Settings_Label_AiModelId = t.Settings_Label_AiModelId;
+  Settings_Label_AiModelUnconfigured = t.Settings_Label_AiModelUnconfigured;
+  Settings_Label_AiMaxRes = t.Settings_Label_AiMaxRes;
+  Settings_Label_AiDefaultProfile = t.Settings_Label_AiDefaultProfile;
+  Settings_Button_AiSetDefault = t.Settings_Button_AiSetDefault;
+  Settings_Button_AiTestConn = t.Settings_Button_AiTestConn;
+  Settings_Button_AiSaveProf = t.Settings_Button_AiSaveProf;
+  Settings_Button_AiDeleteProf = t.Settings_Button_AiDeleteProf;
+  Settings_Button_AiAddProf = t.Settings_Button_AiAddProf;
+  Settings_Header_AiActions = t.Settings_Header_AiActions;
+  Settings_Button_AiAddAction = t.Settings_Button_AiAddAction;
+  Settings_Label_AiActionName = t.Settings_Label_AiActionName;
+  Settings_Label_AiPromptTemplate = t.Settings_Label_AiPromptTemplate;
+  Settings_Label_AiExecModel = t.Settings_Label_AiExecModel;
+  Settings_Option_AiDefaultModel = t.Settings_Option_AiDefaultModel;
+  Settings_Label_AiScopeMode = t.Settings_Label_AiScopeMode;
+  Settings_Button_AiDeleteAction = t.Settings_Button_AiDeleteAction;
+  Settings_AiModelCustom = t.Settings_AiModelCustom;
+  Settings_AiModelFetching = t.Settings_AiModelFetching;
+  Settings_AiModelFetchAuto = t.Settings_AiModelFetchAuto;
+  Settings_Option_AiRes4K = t.Settings_Option_AiRes4K;
+  Settings_Option_AiRes2K = t.Settings_Option_AiRes2K;
+  Settings_Option_AiRes1K = t.Settings_Option_AiRes1K;
+  Settings_Option_AiResOriginal = t.Settings_Option_AiResOriginal;
+  Settings_Option_AiScopeAuto = t.Settings_Option_AiScopeAuto;
+  Settings_Option_AiScopeForceFull = t.Settings_Option_AiScopeForceFull;
+  Settings_Option_AiScopeCropBlend = t.Settings_Option_AiScopeCropBlend;
+  Settings_Option_AiCustomEndpoint = t.Settings_Option_AiCustomEndpoint;
+  Settings_Option_AiLocalComfyUI = t.Settings_Option_AiLocalComfyUI;
+  Settings_Option_AiLocalSdWebUI = t.Settings_Option_AiLocalSdWebUI;
+  OSD_AiFetchingModels = t.OSD_AiFetchingModels;
+  OSD_AiFetchModelsFailed = t.OSD_AiFetchModelsFailed;
+  OSD_AiFetchModelsSuccessFormat = t.OSD_AiFetchModelsSuccessFormat;
+  OSD_AiSetDefaultSuccessFormat = t.OSD_AiSetDefaultSuccessFormat;
+  OSD_AiTestingConnection = t.OSD_AiTestingConnection;
+  OSD_AiConnSuccessFormat = t.OSD_AiConnSuccessFormat;
+  OSD_AiSaveFailedBaseUrlEmpty = t.OSD_AiSaveFailedBaseUrlEmpty;
+  OSD_AiSaveFailedApiKeyEmpty = t.OSD_AiSaveFailedApiKeyEmpty;
+  OSD_AiSaveFailedModelEmpty = t.OSD_AiSaveFailedModelEmpty;
+  OSD_AiSaveProfileSuccess = t.OSD_AiSaveProfileSuccess;
+  AiError_Http429Title = t.AiError_Http429Title;
+  AiError_Http429Advice = t.AiError_Http429Advice;
+  AiError_Http503Title = t.AiError_Http503Title;
+  AiError_Http503Advice = t.AiError_Http503Advice;
+  AiError_Http404Title = t.AiError_Http404Title;
+  AiError_Http404Advice = t.AiError_Http404Advice;
+  AiError_Http401Title = t.AiError_Http401Title;
+  AiError_Http401Advice = t.AiError_Http401Advice;
+  AiError_Http403Title = t.AiError_Http403Title;
+  AiError_Http403Advice = t.AiError_Http403Advice;
+  AiError_Http413Title = t.AiError_Http413Title;
+  AiError_Http413Advice = t.AiError_Http413Advice;
+  AiError_HttpGenericTitle = t.AiError_HttpGenericTitle;
+  AiError_HttpGenericAdvice = t.AiError_HttpGenericAdvice;
+  AiError_ApiKeyEmpty = t.AiError_ApiKeyEmpty;
+  AiError_ModelEmpty = t.AiError_ModelEmpty;
+  AiError_InvalidUrl = t.AiError_InvalidUrl;
+  AiError_InitWinHttpFailed = t.AiError_InitWinHttpFailed;
+  AiError_ConnectFailed = t.AiError_ConnectFailed;
+  AiError_CreateReqFailed = t.AiError_CreateReqFailed;
+  AiError_SendReqFailedFormat = t.AiError_SendReqFailedFormat;
+  AiError_NoValidDataReturned = t.AiError_NoValidDataReturned;
+  AiError_DetailPrefix = t.AiError_DetailPrefix;
+  AiError_AdvicePrefix = t.AiError_AdvicePrefix;
+  AiAction_DefRemoveBg = t.AiAction_DefRemoveBg;
+  AiAction_DefInpaint = t.AiAction_DefInpaint;
+  AiAction_DefAnime = t.AiAction_DefAnime;
+  AiAction_DefCyberpunk = t.AiAction_DefCyberpunk;
+  AiAction_DefSuperDetail = t.AiAction_DefSuperDetail;
+  AiError_RequestTimeout = t.AiError_RequestTimeout;
+  AiError_HttpStatusPrefix = t.AiError_HttpStatusPrefix;
+  AiError_JsonParseFailed = t.AiError_JsonParseFailed;
+  AiError_NoModelsFound = t.AiError_NoModelsFound;
+  AiTest_ConnSuccess = t.AiTest_ConnSuccess;
+  AiTest_AuthFailedPrefix = t.AiTest_AuthFailedPrefix;
+  AiTest_HttpErrorPrefix = t.AiTest_HttpErrorPrefix;
+  AiError_NoAvailableProfile = t.AiError_NoAvailableProfile;
 }
 
 void Init() { SetLanguage(Language::Auto); }

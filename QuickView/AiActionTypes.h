@@ -42,6 +42,16 @@ enum class ScopeMode : uint8_t {
     CropAndBlend            // Crop selection, inpaint/generate, and alpha-feather back onto base
 };
 
+// Target Output Aspect Ratio & Size Framing
+enum class OutputAspectRatio : uint8_t {
+    Auto = 0,               // Adaptive: match input source aspect ratio
+    Square_1_1,             // 1:1 Square (1024x1024)
+    Landscape_16_9,         // 16:9 Landscape widescreen (1344x768 / 1792x1024)
+    Portrait_9_16,          // 9:16 Portrait wallpaper (768x1344 / 1024x1792)
+    Standard_4_3,           // 4:3 Standard landscape (1152x864)
+    Vertical_3_4            // 3:4 Vertical standard (864x1152)
+};
+
 // Model Profile Descriptor (Connection credentials & Endpoint defaults)
 struct ModelProfile {
     std::string id;                         // Unique Profile ID (e.g. "gemini_official", "siliconflow")
@@ -51,7 +61,7 @@ struct ModelProfile {
     std::string encryptedApiKey;            // DPAPI-encrypted Base64 cipher text
     std::string defaultModel;               // User-editable model identifier (e.g. "gemini-2.0-flash", "gpt-4o")
     MaxResolution maxResolution = MaxResolution::Standard_1K;
-    int timeoutSeconds = 30;                // Network timeout in seconds
+    int timeoutSeconds = 600;               // Network timeout in seconds (0 = infinite)
     bool isCustom = true;                   // True if user-created, false if built-in template
     std::vector<std::string> fetchedModels; // Dynamically fetched model list from endpoint
 };
@@ -59,11 +69,15 @@ struct ModelProfile {
 // AI Action Descriptor (Prompt template, parameter mappings)
 struct ActionDesc {
     std::string id;                         // Unique Action ID
-    std::wstring name;                      // Action display name (e.g. L"智能消除与重绘")
+    std::wstring name;                      // Action display name (e.g. L"Inpaint & Remove")
     std::string modelProfileId;             // Bound ModelProfile ID (empty = use global default profile)
     std::wstring promptTemplate;            // Prompt template (supports {prompt} macro)
     std::wstring negativePrompt;            // Optional negative prompt
     ScopeMode scopeMode = ScopeMode::Auto;  // Processing target scope
+    OutputAspectRatio aspectRatio = OutputAspectRatio::Auto; // Target output aspect ratio & framing
+    float denoisingStrength = 0.35f;        // Denoising strength for img2img (0.0~1.0, default 0.35 for fidelity)
+    int samplingSteps = 25;                 // Diffusion sampling steps (15~50, default 25)
+    float cfgScale = 7.0f;                  // Prompt guidance scale (4.0~10.0, default 7.0)
     bool isCollapsed = true;                // Collapsible card state in Settings UI
 };
 
@@ -72,11 +86,23 @@ struct ExecutionResult {
     bool success = false;
     uint32_t httpStatusCode = 0;
     std::wstring errorMessage;              // Human-readable error description with hints
+    std::wstring mainTitle;                 // Short main instruction for TaskDialog
+    std::wstring detailMessage;             // Extracted high-priority semantic error detail
+    std::wstring actionAdvice;              // Actionable troubleshooting advice
     std::wstring textContent;               // Text response returned by LLM (if any)
-    std::string rawResponseBody;            // For debugging / detailed inspection
+    std::string rawResponseBody;            // For debugging / detailed inspection (expanded in TaskDialog)
     std::vector<uint8_t> resultImageData;   // Decoded PNG/JPEG/WebP raw bytes
     uint32_t imageWidth = 0;
     uint32_t imageHeight = 0;
+};
+
+constexpr UINT WM_AI_ACTION_COMPLETED = WM_APP + 62;
+
+struct AsyncAiImageResult {
+    std::vector<uint8_t> imageData;
+    std::wstring actionName;
+    uint32_t width = 0;
+    uint32_t height = 0;
 };
 
 } // namespace QuickView::AI

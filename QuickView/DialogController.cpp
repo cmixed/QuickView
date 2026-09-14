@@ -224,7 +224,7 @@ void DialogController::Render(ID2D1DeviceContext* context) {
             D2D1_RECT_F hintRect = D2D1::RectF(layout.Input.left, layout.Input.bottom + 8.0f * g_uiScale, layout.Input.left + 260.0f * g_uiScale, layout.Input.bottom + 28.0f * g_uiScale);
             D2D1_COLOR_F hintClr = isLight ? D2D1::ColorF(0.5f, 0.5f, 0.55f, 1.0f) : D2D1::ColorF(0.55f, 0.55f, 0.6f, 1.0f);
             pBrush->SetColor(hintClr);
-            const wchar_t* hintStr = L"[Ctrl+Enter] 快速提交保存";
+            const wchar_t* hintStr = AppStrings::Dialog_MultiLineInputHint ? AppStrings::Dialog_MultiLineInputHint : L"[Ctrl+Enter] Submit / Save";
             context->DrawText(hintStr, (UINT32)wcslen(hintStr), fmtBody.Get(), hintRect, pBrush.Get());
         }
     }

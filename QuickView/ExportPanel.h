@@ -5,6 +5,8 @@
 #include <wrl/client.h>
 #include "GeekGlass.h"
 #include "ImageExporter.h"
+#include "ImageTypes.h"
+#include "PaneTypes.h"
 #include "GeekWidgets.h"
 #include <string>
 #include <vector>
@@ -86,7 +88,10 @@ public:
         return instance;
     }
 
-    void Show(HWND hwnd, int initialWidth, int initialHeight, const std::wstring& originalPath, PendingAction pending = PendingAction::None);
+    void Show(HWND hwnd, int initialWidth, int initialHeight, const std::wstring& originalPath, 
+              PendingAction pending = PendingAction::None,
+              PaneSlot targetSlot = PaneSlot::Primary,
+              std::shared_ptr<RawImageFrame> sourceFrame = nullptr);
     void Hide();
     bool IsVisible() const { return m_isVisible; }
     bool IsInputFocused() const { 
@@ -144,6 +149,8 @@ private:
     ExportMode m_exportMode = ExportMode::NormalExport;
     PendingAction m_pendingAction = PendingAction::None;
     bool m_isModified = false;
+    PaneSlot m_targetSlot = PaneSlot::Primary;
+    std::shared_ptr<RawImageFrame> m_customSourceFrame = nullptr;
 
     // Super-Resolution Export
     bool m_hasSrBitmap = false;

@@ -19,6 +19,7 @@
 #include <functional>
 #include <winhttp.h>
 #include <wincrypt.h>
+#include <commctrl.h>
 #include "AiActionTypes.h"
 #include "AppContext.h"
 
@@ -75,8 +76,21 @@ public:
         ApiProtocol protocol,
         std::function<void(bool success, int statusCode, int latencyMs, const std::wstring& message)> onComplete);
 
-    // --- Error Formatting Helper ---
+    // --- Error Formatting & Native Dialog Presentation ---
+    static void ExtractSemanticError(
+        DWORD statusCode, std::string_view responseBody,
+        std::wstring& outTitle, std::wstring& outDetail, std::wstring& outAdvice);
     static std::wstring FormatAiErrorMessage(DWORD statusCode, std::string_view responseBody);
+    static void ShowAiErrorDialog(HWND hwndParent, const ExecutionResult& result);
+
+    // --- Stable Diffusion Progress Polling Helper ---
+    struct SdProgressInfo {
+        float progress = 0.0f;
+        int currentStep = 0;
+        int totalSteps = 0;
+        float eta = 0.0f;
+    };
+    static bool PollSdProgress(std::string_view baseUrl, SdProgressInfo& outInfo);
 
     // --- Image Processing & Inpainting Helper ---
     // Downsamples BGRA image buffer to fit maxDim while maintaining aspect ratio and aligning to step

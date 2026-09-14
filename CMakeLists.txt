@@ -377,6 +377,7 @@ target_link_libraries(QuickView PRIVATE
     windowscodecs.lib
     shlwapi.lib
     shell32.lib
+    comctl32.lib
     mscms.lib
     gdiplus.lib
     ${QV_WEBVIEW2_LIB}
@@ -490,6 +491,7 @@ target_link_libraries(QuickViewTests PRIVATE
     d3d11.lib 
     shlwapi.lib 
     shell32.lib 
+    comctl32.lib
     mscms.lib
     gdiplus.lib
     winhttp.lib
