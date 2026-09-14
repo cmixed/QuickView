@@ -58,6 +58,11 @@ public:
 
     // --- Execution & Task Lifecycle ---
     uint64_t ExecuteAction(const ActionDesc& action, HWND hwnd, std::function<void(const ExecutionResult&)> onComplete);
+    uint64_t ExecuteInpaint(
+        int cropL, int cropT, int cropR, int cropB,
+        std::wstring_view customPrompt,
+        HWND hwnd,
+        std::function<void(const ExecutionResult&)> onComplete);
     void CancelCurrentTask();
     bool IsRunning() const { return m_isRunning.load(); }
     uint64_t GetCurrentTaskId() const { return m_currentTaskId.load(); }
@@ -104,11 +109,16 @@ public:
         const uint8_t* bgra, int width, int height, int stride,
         std::vector<uint8_t>& outPngBytes);
 
-    // Blits generated sub-image back onto original buffer with 3~5px alpha feathering
-    static void BlendFeatheredSubImage(
-        uint8_t* dstBgra, int dstW, int dstH, int dstStride,
+    // Resamples BGRA image buffer to exact target width and height with bilinear interpolation
+    static void ResampleBgraExact(
         const uint8_t* srcBgra, int srcW, int srcH, int srcStride,
-        int targetX, int targetY, int featherPixels = 4);
+        uint8_t* dstBgra, int dstW, int dstH, int dstStride);
+
+    // Blits generated sub-image back onto original buffer strictly within user selection with cosine edge feathering
+    static void BlendMaskGuidedFeathered(
+        uint8_t* dstBgra, int dstW, int dstH, int dstStride,
+        const uint8_t* subBgra, int sliceX0, int sliceY0, int sliceW, int sliceH, int sliceStride,
+        int selX0, int selY0, int selX1, int selY1, int featherPixels = 6);
 
 private:
     AiActionManager();
@@ -118,6 +128,10 @@ private:
 
     // Worker thread function
     void WorkerThread(uint64_t taskId, ActionDesc action, ModelProfile profile, HWND hwnd, std::function<void(const ExecutionResult&)> callback);
+    void InpaintWorkerThread(
+        uint64_t taskId, int cropL, int cropT, int cropR, int cropB,
+        std::wstring prompt, ModelProfile profile, HWND hwnd,
+        std::function<void(const ExecutionResult&)> callback);
 
     std::vector<ModelProfile> m_profiles;
     std::vector<ActionDesc> m_actions;

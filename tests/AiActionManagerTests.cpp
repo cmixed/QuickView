@@ -314,13 +314,64 @@ TEST_F(AiActionManagerTest, GeminiNativeEndpointLiveRoutingProbeWithoutKey) {
     CloseHandle(hEvent);
 
     if (waitResult == WAIT_OBJECT_0 && returnedStatusCode > 0) {
-        // If internet connectivity is available, the request must reach GenerativeLanguage API:
-        // HTTP 400 means route /v1beta/models was correctly hit and API key was evaluated!
-        // It must NOT be 404 (wrong endpoint path) and must NOT be 401 (OAuth Bearer misconfiguration)!
         EXPECT_EQ(returnedStatusCode, 400);
         EXPECT_NE(returnedStatusCode, 401);
         EXPECT_NE(returnedStatusCode, 404);
     }
+}
+
+TEST_F(AiActionManagerTest, ResampleBgraExactScalingCorrectness) {
+    // 2x2 red-green-blue-white pattern resampled to 4x4
+    std::vector<uint8_t> src = {
+        255, 0, 0, 255,   0, 255, 0, 255,
+        0, 0, 255, 255,   255, 255, 255, 255
+    };
+    std::vector<uint8_t> dst(4 * 4 * 4, 0);
+
+    QuickView::AI::AiActionManager::ResampleBgraExact(
+        src.data(), 2, 2, 2 * 4,
+        dst.data(), 4, 4, 4 * 4);
+
+    // Alpha channel must remain fully opaque (255)
+    for (int i = 0; i < 16; ++i) {
+        EXPECT_EQ(dst[i * 4 + 3], 255);
+    }
+}
+
+TEST_F(AiActionManagerTest, BlendMaskGuidedFeatheredStrictRegionIsolation) {
+    // 100x100 white canvas
+    const int W = 100, H = 100;
+    std::vector<uint8_t> orig(W * H * 4, 255);
+
+    // 40x40 red patch representing context slice at (30, 30)
+    const int sliceW = 40, sliceH = 40;
+    std::vector<uint8_t> sub(sliceW * sliceH * 4, 0);
+    for (int i = 0; i < sliceW * sliceH; ++i) {
+        sub[i * 4 + 2] = 255; // Red channel
+        sub[i * 4 + 3] = 255; // Alpha
+    }
+
+    // User selection is strictly [40, 60) x [40, 60), sub-image covers [30, 70)
+    int selX0 = 40, selY0 = 40, selX1 = 60, selY1 = 60;
+    int sliceX0 = 30, sliceY0 = 30;
+
+    QuickView::AI::AiActionManager::BlendMaskGuidedFeathered(
+        orig.data(), W, H, W * 4,
+        sub.data(), sliceX0, sliceY0, sliceW, sliceH, sliceW * 4,
+        selX0, selY0, selX1, selY1, 4);
+
+    // Pixel at (35, 35) is inside the slice but OUTSIDE user selection [40, 60):
+    // MUST remain original white (255, 255, 255), absolutely never overwritten!
+    int outIdx = (35 * W + 35) * 4;
+    EXPECT_EQ(orig[outIdx + 0], 255);
+    EXPECT_EQ(orig[outIdx + 1], 255);
+    EXPECT_EQ(orig[outIdx + 2], 255);
+
+    // Center of user selection (50, 50) MUST be blended with AI red patch
+    int inIdx = (50 * W + 50) * 4;
+    EXPECT_EQ(orig[inIdx + 0], 0);   // B
+    EXPECT_EQ(orig[inIdx + 1], 0);   // G
+    EXPECT_EQ(orig[inIdx + 2], 255); // R
 }
 
 

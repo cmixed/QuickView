@@ -1031,41 +1031,90 @@ bool AiActionManager::EncodeToPngMemory(
     return bytesRead > 0;
 }
 
-void AiActionManager::BlendFeatheredSubImage(
-    uint8_t* dstBgra, int dstW, int dstH, int dstStride,
+void AiActionManager::ResampleBgraExact(
     const uint8_t* srcBgra, int srcW, int srcH, int srcStride,
-    int targetX, int targetY, int featherPixels) {
+    uint8_t* dstBgra, int dstW, int dstH, int dstStride) {
 
-    if (!dstBgra || !srcBgra || srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return;
+    if (!srcBgra || !dstBgra || srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return;
+
+    const float xRatio = static_cast<float>(srcW) / static_cast<float>(dstW);
+    const float yRatio = static_cast<float>(srcH) / static_cast<float>(dstH);
+
+    for (int y = 0; y < dstH; ++y) {
+        float srcY = (static_cast<float>(y) + 0.5f) * yRatio - 0.5f;
+        int yLow = std::clamp(static_cast<int>(std::floor(srcY)), 0, srcH - 1);
+        int yHigh = std::clamp(yLow + 1, 0, srcH - 1);
+        float yWeight = srcY - std::floor(srcY);
+
+        const uint8_t* rowLow = srcBgra + yLow * srcStride;
+        const uint8_t* rowHigh = srcBgra + yHigh * srcStride;
+        uint8_t* dstRow = dstBgra + y * dstStride;
+
+        for (int x = 0; x < dstW; ++x) {
+            float srcX = (static_cast<float>(x) + 0.5f) * xRatio - 0.5f;
+            int xLow = std::clamp(static_cast<int>(std::floor(srcX)), 0, srcW - 1);
+            int xHigh = std::clamp(xLow + 1, 0, srcW - 1);
+            float xWeight = srcX - std::floor(srcX);
+
+            const uint8_t* p00 = rowLow + xLow * 4;
+            const uint8_t* p10 = rowLow + xHigh * 4;
+            const uint8_t* p01 = rowHigh + xLow * 4;
+            const uint8_t* p11 = rowHigh + xHigh * 4;
+
+            float w00 = (1.0f - xWeight) * (1.0f - yWeight);
+            float w10 = xWeight * (1.0f - yWeight);
+            float w01 = (1.0f - xWeight) * yWeight;
+            float w11 = xWeight * yWeight;
+
+            for (int c = 0; c < 4; ++c) {
+                float val = w00 * p00[c] + w10 * p10[c] + w01 * p01[c] + w11 * p11[c];
+                dstRow[x * 4 + c] = static_cast<uint8_t>(std::clamp(val, 0.0f, 255.0f));
+            }
+        }
+    }
+}
+
+void AiActionManager::BlendMaskGuidedFeathered(
+    uint8_t* dstBgra, int dstW, int dstH, int dstStride,
+    const uint8_t* subBgra, int sliceX0, int sliceY0, int sliceW, int sliceH, int sliceStride,
+    int selX0, int selY0, int selX1, int selY1, int featherPixels) {
+
+    if (!dstBgra || !subBgra || dstW <= 0 || dstH <= 0 || sliceW <= 0 || sliceH <= 0) return;
     featherPixels = (std::max)(1, featherPixels);
 
-    for (int sy = 0; sy < srcH; ++sy) {
-        int dy = targetY + sy;
-        if (dy < 0 || dy >= dstH) continue;
+    // Strictly limit blending to the user's selected region.
+    // Pixels outside [selX0, selX1) x [selY0, selY1) are NEVER touched, perfectly protecting original image!
+    int blendX0 = (std::max)(sliceX0, (std::max)(0, selX0));
+    int blendY0 = (std::max)(sliceY0, (std::max)(0, selY0));
+    int blendX1 = (std::min)(sliceX0 + sliceW, (std::min)(dstW, selX1));
+    int blendY1 = (std::min)(sliceY0 + sliceH, (std::min)(dstH, selY1));
 
-        uint8_t* dstRow = dstBgra + dy * dstStride;
-        const uint8_t* srcRow = srcBgra + sy * srcStride;
+    for (int y = blendY0; y < blendY1; ++y) {
+        uint8_t* dRow = dstBgra + y * dstStride;
+        int subY = y - sliceY0;
+        if (subY < 0 || subY >= sliceH) continue;
+        const uint8_t* sRow = subBgra + subY * sliceStride;
 
-        for (int sx = 0; sx < srcW; ++sx) {
-            int dx = targetX + sx;
-            if (dx < 0 || dx >= dstW) continue;
+        int distY = (std::min)(y - selY0, selY1 - 1 - y);
 
-            // Distance to sub-image boundary
-            int distX = (std::min)(sx, srcW - 1 - sx);
-            int distY = (std::min)(sy, srcH - 1 - sy);
+        for (int x = blendX0; x < blendX1; ++x) {
+            int subX = x - sliceX0;
+            if (subX < 0 || subX >= sliceW) continue;
+
+            int distX = (std::min)(x - selX0, selX1 - 1 - x);
             int minDist = (std::min)(distX, distY);
 
-            float featherAlpha = 1.0f;
+            float alpha = 1.0f;
             if (minDist < featherPixels) {
-                featherAlpha = static_cast<float>(minDist) / static_cast<float>(featherPixels);
-                // Smooth cosine curve
-                featherAlpha = 0.5f * (1.0f - std::cos(featherAlpha * 3.14159265f));
+                float norm = static_cast<float>(minDist) / static_cast<float>(featherPixels);
+                // Cosine smooth transition
+                alpha = 0.5f * (1.0f - std::cos(norm * 3.141592653589793f));
             }
 
-            uint8_t* dPixel = dstRow + dx * 4;
-            const uint8_t* sPixel = srcRow + sx * 4;
+            uint8_t* dPixel = dRow + x * 4;
+            const uint8_t* sPixel = sRow + subX * 4;
 
-            float srcA = (sPixel[3] / 255.0f) * featherAlpha;
+            float srcA = (sPixel[3] / 255.0f) * alpha;
             float invA = 1.0f - srcA;
 
             dPixel[0] = static_cast<uint8_t>(std::clamp(sPixel[0] * srcA + dPixel[0] * invA, 0.0f, 255.0f));
@@ -2361,6 +2410,713 @@ bool AiActionManager::PollSdProgress(std::string_view baseUrl, SdProgressInfo& o
     }
     yyjson_doc_free(doc);
     return true;
+}
+
+static bool LoadActiveImageAsBgra(const std::wstring& filePath, std::vector<uint8_t>& outBgra, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outStride) {
+    outWidth = outHeight = outStride = 0;
+    if (filePath.empty() || !PathFileExistsW(filePath.c_str())) return false;
+
+    IWICImagingFactory* pFactory = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFactory)))) return false;
+
+    IWICBitmapDecoder* pDecoder = nullptr;
+    if (FAILED(pFactory->CreateDecoderFromFilename(filePath.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &pDecoder))) {
+        pFactory->Release();
+        return false;
+    }
+
+    IWICBitmapFrameDecode* pFrame = nullptr;
+    if (FAILED(pDecoder->GetFrame(0, &pFrame))) {
+        pDecoder->Release();
+        pFactory->Release();
+        return false;
+    }
+
+    UINT w = 0, h = 0;
+    pFrame->GetSize(&w, &h);
+    if (w == 0 || h == 0) {
+        pFrame->Release();
+        pDecoder->Release();
+        pFactory->Release();
+        return false;
+    }
+
+    IWICFormatConverter* pConv = nullptr;
+    if (FAILED(pFactory->CreateFormatConverter(&pConv))) {
+        pFrame->Release();
+        pDecoder->Release();
+        pFactory->Release();
+        return false;
+    }
+
+    if (FAILED(pConv->Initialize(pFrame, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0.0f, WICBitmapPaletteTypeCustom))) {
+        pConv->Release();
+        pFrame->Release();
+        pDecoder->Release();
+        pFactory->Release();
+        return false;
+    }
+
+    UINT stride = w * 4;
+    outBgra.resize(static_cast<size_t>(stride) * h);
+    HRESULT hr = pConv->CopyPixels(nullptr, stride, static_cast<UINT>(outBgra.size()), outBgra.data());
+
+    pConv->Release();
+    pFrame->Release();
+    pDecoder->Release();
+    pFactory->Release();
+
+    if (FAILED(hr)) {
+        outBgra.clear();
+        return false;
+    }
+
+    outWidth = w;
+    outHeight = h;
+    outStride = stride;
+    return true;
+}
+
+static bool DecodeMemoryToBgra(const uint8_t* data, size_t size, std::vector<uint8_t>& outBgra, uint32_t& outW, uint32_t& outH, uint32_t& outStride) {
+    if (!data || size == 0) return false;
+    IWICImagingFactory* pFactory = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFactory)))) return false;
+
+    IStream* pStream = SHCreateMemStream(data, static_cast<UINT>(size));
+    if (!pStream) {
+        pFactory->Release();
+        return false;
+    }
+
+    IWICBitmapDecoder* pDecoder = nullptr;
+    if (FAILED(pFactory->CreateDecoderFromStream(pStream, nullptr, WICDecodeMetadataCacheOnLoad, &pDecoder))) {
+        pStream->Release();
+        pFactory->Release();
+        return false;
+    }
+
+    IWICBitmapFrameDecode* pFrame = nullptr;
+    if (FAILED(pDecoder->GetFrame(0, &pFrame))) {
+        pDecoder->Release();
+        pStream->Release();
+        pFactory->Release();
+        return false;
+    }
+
+    UINT w = 0, h = 0;
+    pFrame->GetSize(&w, &h);
+    IWICFormatConverter* pConv = nullptr;
+    pFactory->CreateFormatConverter(&pConv);
+    if (!pConv || FAILED(pConv->Initialize(pFrame, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0.0f, WICBitmapPaletteTypeCustom))) {
+        if (pConv) pConv->Release();
+        pFrame->Release();
+        pDecoder->Release();
+        pStream->Release();
+        pFactory->Release();
+        return false;
+    }
+
+    UINT stride = w * 4;
+    outBgra.resize(static_cast<size_t>(stride) * h);
+    HRESULT hr = pConv->CopyPixels(nullptr, stride, static_cast<UINT>(outBgra.size()), outBgra.data());
+
+    pConv->Release();
+    pFrame->Release();
+    pDecoder->Release();
+    pStream->Release();
+    pFactory->Release();
+
+    if (FAILED(hr)) {
+        outBgra.clear();
+        return false;
+    }
+
+    outW = w;
+    outH = h;
+    outStride = stride;
+    return true;
+}
+
+uint64_t AiActionManager::ExecuteInpaint(
+    int cropL, int cropT, int cropR, int cropB,
+    std::wstring_view customPrompt,
+    HWND hwnd,
+    std::function<void(const ExecutionResult&)> onComplete) {
+
+    CancelCurrentTask();
+
+    // Strictly respect the user's active default profile!
+    const ModelProfile* profile = GetDefaultProfile();
+    if (!profile) {
+        for (const auto& p : m_profiles) {
+            if (p.protocol == ApiProtocol::GeminiNative || p.protocol == ApiProtocol::StabilityInpaint || p.protocol == ApiProtocol::OpenAiImagesEdit) {
+                profile = &p;
+                break;
+            }
+        }
+    }
+    if (!profile && !m_profiles.empty()) {
+        profile = &m_profiles[0];
+    }
+
+    if (!profile) {
+        if (onComplete) {
+            ExecutionResult err;
+            err.success = false;
+            err.errorMessage = AppStrings::AiError_NoAvailableProfile;
+            onComplete(err);
+        }
+        return 0;
+    }
+
+    uint64_t taskId = ++m_currentTaskId;
+    m_isRunning.store(true);
+
+    ModelProfile profCopy = *profile;
+    std::wstring promptCopy(customPrompt);
+
+    std::thread([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete]() {
+        InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete);
+    }).detach();
+
+    return taskId;
+}
+
+void AiActionManager::InpaintWorkerThread(
+    uint64_t taskId, int cropL, int cropT, int cropR, int cropB,
+    std::wstring prompt, ModelProfile profile, HWND /*hwnd*/,
+    std::function<void(const ExecutionResult&)> callback) {
+
+    ExecutionResult result;
+    result.success = false;
+
+    if (taskId != m_currentTaskId.load()) {
+        m_isRunning.store(false);
+        return;
+    }
+
+    // 1. Load active image as raw BGRA
+    std::vector<uint8_t> origBgra;
+    uint32_t origW = 0, origH = 0, origStride = 0;
+    if (!LoadActiveImageAsBgra(GetCurrentActiveImagePath(), origBgra, origW, origH, origStride) || origBgra.empty()) {
+        result.errorMessage = L"读取当前图像像素数据失败";
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    // 2. Normalize Selection Coordinates
+    int selX0 = std::clamp((std::min)(cropL, cropR), 0, (int)origW);
+    int selY0 = std::clamp((std::min)(cropT, cropB), 0, (int)origH);
+    int selX1 = std::clamp((std::max)(cropL, cropR), 0, (int)origW);
+    int selY1 = std::clamp((std::max)(cropT, cropB), 0, (int)origH);
+    int selW = selX1 - selX0;
+    int selH = selY1 - selY0;
+
+    if (selW < 8 || selH < 8) {
+        result.errorMessage = L"选区尺寸过小，请重新框选";
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    // 3. Smart Context Margin (20% padding, aligned to 8px)
+    int padX = (std::max)(32, static_cast<int>(selW * 0.20f));
+    int padY = (std::max)(32, static_cast<int>(selH * 0.20f));
+    int sliceX0 = (std::max)(0, selX0 - padX);
+    int sliceY0 = (std::max)(0, selY0 - padY);
+    int sliceX1 = (std::min)((int)origW, selX1 + padX);
+    int sliceY1 = (std::min)((int)origH, selY1 + padY);
+
+    int sliceW = ((sliceX1 - sliceX0) / 8) * 8;
+    int sliceH = ((sliceY1 - sliceY0) / 8) * 8;
+    if (sliceW <= 0) sliceW = 8;
+    if (sliceH <= 0) sliceH = 8;
+
+    // 4. Extract Slice Image and Generate Binary Mask
+    std::vector<uint8_t> sliceBgra(static_cast<size_t>(sliceW) * sliceH * 4, 0);
+    std::vector<uint8_t> maskBgra(static_cast<size_t>(sliceW) * sliceH * 4, 0);
+
+    for (int y = 0; y < sliceH; ++y) {
+        int srcY = sliceY0 + y;
+        if (srcY >= (int)origH) break;
+        const uint8_t* srcRow = origBgra.data() + srcY * origStride;
+        uint8_t* sliceRow = sliceBgra.data() + y * (sliceW * 4);
+        uint8_t* maskRow = maskBgra.data() + y * (sliceW * 4);
+
+        for (int x = 0; x < sliceW; ++x) {
+            int srcX = sliceX0 + x;
+            if (srcX >= (int)origW) break;
+
+            const uint8_t* sPx = srcRow + srcX * 4;
+            uint8_t* dSlicePx = sliceRow + x * 4;
+            uint8_t* dMaskPx = maskRow + x * 4;
+
+            dSlicePx[0] = sPx[0];
+            dSlicePx[1] = sPx[1];
+            dSlicePx[2] = sPx[2];
+            dSlicePx[3] = sPx[3];
+
+            if (srcX >= selX0 && srcX < selX1 && srcY >= selY0 && srcY < selY1) {
+                dMaskPx[0] = 255;
+                dMaskPx[1] = 255;
+                dMaskPx[2] = 255;
+                dMaskPx[3] = 255;
+            } else {
+                dMaskPx[0] = 0;
+                dMaskPx[1] = 0;
+                dMaskPx[2] = 0;
+                dMaskPx[3] = 255;
+            }
+        }
+    }
+
+    std::vector<uint8_t> slicePngBytes, maskPngBytes;
+    if (!EncodeToPngMemory(sliceBgra.data(), sliceW, sliceH, sliceW * 4, slicePngBytes) ||
+        !EncodeToPngMemory(maskBgra.data(), sliceW, sliceH, sliceW * 4, maskPngBytes)) {
+        result.errorMessage = L"编码选区图像切片失败";
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    std::string sliceB64 = BinaryToBase64(slicePngBytes.data(), slicePngBytes.size());
+    std::string maskB64 = BinaryToBase64(maskPngBytes.data(), maskPngBytes.size());
+
+    // 5. Build Prompts
+    std::string utf8Prompt;
+    if (!prompt.empty()) {
+        utf8Prompt = WideToUtf8(prompt);
+    } else {
+        utf8Prompt = "flawless seamless background fill, natural continuation of texture, pristine clean surface, smooth transition, high quality restoration, uninterrupted surface";
+    }
+    std::string utf8Negative = "text, watermark, logo, signature, letters, numbers, blur, smear, artifacts, boundary lines, seam, defect";
+
+    // 6. Network Dispatch
+    bool isLocal = (profile.protocol == ApiProtocol::ComfyUI ||
+                    profile.protocol == ApiProtocol::StabilityInpaint ||
+                    profile.baseUrl.find("127.0.0.1") != std::string::npos ||
+                    profile.baseUrl.find("localhost") != std::string::npos);
+
+    std::string apiKey = DecryptApiKey(profile.encryptedApiKey);
+    if (!isLocal && apiKey.empty()) {
+        result.errorMessage = AppStrings::AiError_ApiKeyEmpty;
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    std::wstring wUrl = Utf8ToWide(profile.baseUrl);
+    URL_COMPONENTS urlComp{};
+    urlComp.dwStructSize = sizeof(urlComp);
+    wchar_t hostName[256] = { 0 };
+    wchar_t urlPath[1024] = { 0 };
+    urlComp.lpszHostName = hostName;
+    urlComp.dwHostNameLength = 256;
+    urlComp.lpszUrlPath = urlPath;
+    urlComp.dwUrlPathLength = 1024;
+
+    if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.size()), 0, &urlComp)) {
+        result.errorMessage = AppStrings::AiError_InvalidUrl;
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    std::wstring fullPath = urlPath;
+    if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
+
+    bool isGemini = (profile.protocol == ApiProtocol::GeminiNative);
+    bool isSd = (profile.protocol == ApiProtocol::StabilityInpaint);
+
+    std::string targetModel = profile.defaultModel;
+    if (targetModel.empty()) {
+        if (isGemini) targetModel = "nano-banana-pro-preview";
+        else if (isSd) targetModel = "default";
+        else targetModel = "dall-e-2";
+    }
+
+    if (isGemini) {
+        size_t openaiPos = fullPath.find(L"openai");
+        if (openaiPos != std::wstring::npos) fullPath = fullPath.substr(0, openaiPos);
+        size_t pos = fullPath.find(L"models");
+        if (pos != std::wstring::npos) fullPath = fullPath.substr(0, pos);
+        if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
+        if (fullPath == L"/") fullPath = L"/v1beta/";
+
+        fullPath += L"models/" + Utf8ToWide(targetModel);
+        if (targetModel.rfind("imagen-", 0) == 0) {
+            fullPath += L":predict";
+        } else {
+            fullPath += L":generateContent";
+        }
+    } else if (isSd) {
+        size_t pos = fullPath.find(L"sdapi");
+        if (pos != std::wstring::npos) fullPath = fullPath.substr(0, pos);
+        if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
+        fullPath += L"sdapi/v1/img2img";
+    } else {
+        if (fullPath.find(L"images/edits") == std::wstring::npos) {
+            fullPath += L"images/edits";
+        }
+    }
+
+    // Initialize WinHTTP Session
+    {
+        std::lock_guard<std::mutex> lock(m_taskMutex);
+        m_activeSession = WinHttpOpen(L"QuickView-AI-Inpaint/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!m_activeSession) {
+            result.errorMessage = AppStrings::AiError_InitWinHttpFailed;
+            m_isRunning.store(false);
+            if (callback) callback(result);
+            return;
+        }
+
+        DWORD recvTimeout = (profile.timeoutSeconds > 0) ? (profile.timeoutSeconds * 1000) : (isLocal ? 0 : 600000);
+        WinHttpSetTimeouts(m_activeSession, 5000, 10000, 30000, recvTimeout);
+
+        m_activeConnect = WinHttpConnect(m_activeSession, hostName, urlComp.nPort, 0);
+        if (!m_activeConnect) {
+            result.errorMessage = AppStrings::AiError_ConnectFailed;
+            m_isRunning.store(false);
+            if (callback) callback(result);
+            return;
+        }
+
+        DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
+        m_activeRequest = WinHttpOpenRequest(m_activeConnect, L"POST", fullPath.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+        if (!m_activeRequest) {
+            result.errorMessage = AppStrings::AiError_CreateReqFailed;
+            m_isRunning.store(false);
+            if (callback) callback(result);
+            return;
+        }
+    }
+
+    std::wstring headers;
+    std::string postPayload;
+
+    if (isGemini) {
+        headers = L"Content-Type: application/json\r\n";
+        if (!apiKey.empty()) {
+            headers += L"x-goog-api-key: " + Utf8ToWide(apiKey) + L"\r\n";
+        }
+
+        yyjson_mut_doc* doc = yyjson_mut_doc_new(nullptr);
+        yyjson_mut_val* root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+
+        yyjson_mut_val* contentsArr = yyjson_mut_arr(doc);
+        yyjson_mut_val* contentItem = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, contentItem, "role", "user");
+
+        yyjson_mut_val* partsArr = yyjson_mut_arr(doc);
+
+        std::string inpaintTaskDesc = "Task: Inpainting & Generative Fill. Modify only the masked area to seamlessly match the instruction: " +
+            utf8Prompt + ". Seamlessly blend the reconstructed region with the surrounding context, maintaining consistent lighting, texture, and colors. Output only the complete restored image.";
+        yyjson_mut_val* textPart = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, textPart, "text", inpaintTaskDesc.c_str());
+        yyjson_mut_arr_append(partsArr, textPart);
+
+        // 1. Original Image Slice
+        yyjson_mut_val* imgPart = yyjson_mut_obj(doc);
+        yyjson_mut_val* imgData = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, imgData, "mimeType", "image/png");
+        yyjson_mut_obj_add_str(doc, imgData, "data", sliceB64.c_str());
+        yyjson_mut_obj_add_val(doc, imgPart, "inlineData", imgData);
+        yyjson_mut_arr_append(partsArr, imgPart);
+
+        // 2. Binary Inpaint Mask (White = target inpaint zone, Black = preserved context)
+        yyjson_mut_val* maskPart = yyjson_mut_obj(doc);
+        yyjson_mut_val* maskData = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, maskData, "mimeType", "image/png");
+        yyjson_mut_obj_add_str(doc, maskData, "data", maskB64.c_str());
+        yyjson_mut_obj_add_val(doc, maskPart, "inlineData", maskData);
+        yyjson_mut_arr_append(partsArr, maskPart);
+
+        yyjson_mut_obj_add_val(doc, contentItem, "parts", partsArr);
+        yyjson_mut_arr_append(contentsArr, contentItem);
+        yyjson_mut_obj_add_val(doc, root, "contents", contentsArr);
+
+        // Request IMAGE response modality
+        yyjson_mut_val* genConfig = yyjson_mut_obj(doc);
+        yyjson_mut_val* respModalities = yyjson_mut_arr(doc);
+        yyjson_mut_arr_add_strcpy(doc, respModalities, "IMAGE");
+        yyjson_mut_obj_add_val(doc, genConfig, "responseModalities", respModalities);
+        yyjson_mut_obj_add_val(doc, root, "generationConfig", genConfig);
+
+        size_t pLen = 0;
+        char* pStr = yyjson_mut_write(doc, 0, &pLen);
+        postPayload.assign(pStr, pLen);
+        free(pStr);
+        yyjson_mut_doc_free(doc);
+    } else if (isSd) {
+        headers = L"Content-Type: application/json\r\n";
+        yyjson_mut_doc* doc = yyjson_mut_doc_new(nullptr);
+        yyjson_mut_val* root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+
+        yyjson_mut_obj_add_str(doc, root, "prompt", utf8Prompt.c_str());
+        yyjson_mut_obj_add_str(doc, root, "negative_prompt", utf8Negative.c_str());
+        yyjson_mut_obj_add_int(doc, root, "steps", 25);
+        yyjson_mut_obj_add_real(doc, root, "cfg_scale", 7.0);
+        yyjson_mut_obj_add_real(doc, root, "denoising_strength", 0.75);
+        yyjson_mut_obj_add_int(doc, root, "mask_blur", 4);
+        yyjson_mut_obj_add_int(doc, root, "inpainting_fill", 1);
+        yyjson_mut_obj_add_int(doc, root, "inpaint_full_res", 0);
+        yyjson_mut_obj_add_int(doc, root, "width", sliceW);
+        yyjson_mut_obj_add_int(doc, root, "height", sliceH);
+
+        yyjson_mut_val* initArr = yyjson_mut_arr(doc);
+        yyjson_mut_arr_append(initArr, yyjson_mut_str(doc, sliceB64.c_str()));
+        yyjson_mut_obj_add_val(doc, root, "init_images", initArr);
+        yyjson_mut_obj_add_str(doc, root, "mask", maskB64.c_str());
+
+        size_t pLen = 0;
+        char* pStr = yyjson_mut_write(doc, 0, &pLen);
+        postPayload.assign(pStr, pLen);
+        free(pStr);
+        yyjson_mut_doc_free(doc);
+    } else {
+        std::string boundary = "----QuickViewBoundary7MA4YWxkTrZu0gW";
+        headers = L"Content-Type: multipart/form-data; boundary=" + Utf8ToWide(boundary) + L"\r\n";
+        if (!apiKey.empty()) {
+            headers += L"Authorization: Bearer " + Utf8ToWide(apiKey) + L"\r\n";
+        }
+
+        std::string body;
+        auto addFormField = [&](const std::string& name, const std::string& value) {
+            body += "--" + boundary + "\r\n";
+            body += "Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n";
+            body += value + "\r\n";
+        };
+        auto addFileField = [&](const std::string& name, const std::string& filename, const std::vector<uint8_t>& fileBytes) {
+            body += "--" + boundary + "\r\n";
+            body += "Content-Disposition: form-data; name=\"" + name + "\"; filename=\"" + filename + "\"\r\n";
+            body += "Content-Type: image/png\r\n\r\n";
+            body.append(reinterpret_cast<const char*>(fileBytes.data()), fileBytes.size());
+            body += "\r\n";
+        };
+
+        addFormField("model", targetModel);
+        addFormField("prompt", utf8Prompt);
+        addFormField("response_format", "b64_json");
+        addFileField("image", "image.png", slicePngBytes);
+        addFileField("mask", "mask.png", maskPngBytes);
+
+        body += "--" + boundary + "--\r\n";
+        postPayload = std::move(body);
+    }
+
+    BOOL bSend = WinHttpSendRequest(m_activeRequest, headers.c_str(), static_cast<DWORD>(headers.size()),
+                                    postPayload.data(), static_cast<DWORD>(postPayload.size()), static_cast<DWORD>(postPayload.size()), 0);
+
+    if (!bSend || !WinHttpReceiveResponse(m_activeRequest, nullptr)) {
+        DWORD dwErr = GetLastError();
+        if (dwErr == ERROR_WINHTTP_CANNOT_CONNECT) {
+            result.mainTitle = L"连接失败 (12029)";
+            wchar_t buf[256];
+            swprintf_s(buf, L"无法连接到目标服务 [%s:%d]，连接被拒绝。", hostName, urlComp.nPort);
+            result.detailMessage = buf;
+            if (isLocal) {
+                result.actionAdvice = L"提示：检测到当前使用的是本地模型服务 (127.0.0.1)，请确认本地 SD WebUI / Forge / ComfyUI 是否已启动并开启 API；或者在设置中切换为在线云端模型 (如 Google Gemini)。";
+            } else {
+                result.actionAdvice = L"提示：请检查服务器地址、网络连接或代理设置。";
+            }
+        } else if (dwErr == ERROR_WINHTTP_TIMEOUT) {
+            result.mainTitle = L"请求超时 (12002)";
+            result.detailMessage = L"服务器未在配置的超时时间内响应。";
+            result.actionAdvice = L"提示：可尝试在模型配置中增加超时时间，或框选稍小的区域重试。";
+        } else if (dwErr == ERROR_WINHTTP_NAME_NOT_RESOLVED) {
+            result.mainTitle = L"DNS 解析失败 (12007)";
+            result.detailMessage = L"无法解析 Base URL 中的主机名。";
+            result.actionAdvice = L"提示：请检查网络连接、DNS 或系统代理配置。";
+        } else {
+            wchar_t buf[128];
+            swprintf_s(buf, L"网络传输错误 (%lu)", dwErr);
+            result.mainTitle = buf;
+            wchar_t detail[256];
+            swprintf_s(detail, L"与目标服务器 [%s:%d] 通信时发生底层 WinHTTP 传输错误。", hostName, urlComp.nPort);
+            result.detailMessage = detail;
+            result.actionAdvice = L"提示：请检查网络连接、VPN 或防火墙状态。";
+        }
+        result.errorMessage = result.mainTitle + L"\n" + result.detailMessage + L"\n" + result.actionAdvice;
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    DWORD statusCode = 0;
+    DWORD dwSize = sizeof(statusCode);
+    WinHttpQueryHeaders(m_activeRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &dwSize, WINHTTP_NO_HEADER_INDEX);
+
+    std::string respBody;
+    DWORD bytesAvailable = 0;
+    while (WinHttpQueryDataAvailable(m_activeRequest, &bytesAvailable) && bytesAvailable > 0) {
+        std::vector<char> buf(bytesAvailable);
+        DWORD bytesRead = 0;
+        if (WinHttpReadData(m_activeRequest, buf.data(), bytesAvailable, &bytesRead) && bytesRead > 0) {
+            respBody.append(buf.data(), bytesRead);
+        }
+    }
+
+    if (statusCode != 200) {
+        result.httpStatusCode = statusCode;
+        result.rawResponseBody = respBody;
+        ExtractSemanticError(statusCode, respBody, result.mainTitle, result.detailMessage, result.actionAdvice);
+        result.errorMessage = FormatAiErrorMessage(statusCode, respBody);
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    std::vector<uint8_t> aiImgBytes;
+    yyjson_doc* doc = yyjson_read(respBody.c_str(), respBody.size(), 0);
+    if (doc) {
+        yyjson_val* root = yyjson_doc_get_root(doc);
+        if (root) {
+            // 1. Try Gemini Native candidates structure
+            yyjson_val* candidates = yyjson_obj_get(root, "candidates");
+            if (candidates && yyjson_is_arr(candidates) && yyjson_arr_size(candidates) > 0) {
+                yyjson_val* firstCand = yyjson_arr_get(candidates, 0);
+                yyjson_val* candContent = yyjson_obj_get(firstCand, "content");
+                if (candContent) {
+                    yyjson_val* parts = yyjson_obj_get(candContent, "parts");
+                    if (parts && yyjson_is_arr(parts)) {
+                        size_t partCount = yyjson_arr_size(parts);
+                        for (size_t pIdx = 0; pIdx < partCount; ++pIdx) {
+                            yyjson_val* part = yyjson_arr_get(parts, pIdx);
+                            yyjson_val* inData = yyjson_obj_get(part, "inlineData");
+                            if (!inData) inData = yyjson_obj_get(part, "inline_data");
+                            if (inData) {
+                                yyjson_val* b64Val = yyjson_obj_get(inData, "data");
+                                if (b64Val && yyjson_is_str(b64Val)) {
+                                    const char* actualB64 = yyjson_get_str(b64Val);
+                                    DWORD binLen = 0;
+                                    if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
+                                        aiImgBytes.resize(binLen);
+                                        CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, aiImgBytes.data(), &binLen, nullptr, nullptr);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Try Google Imagen 3 predict structure
+            if (aiImgBytes.empty()) {
+                yyjson_val* vPreds = yyjson_obj_get(root, "predictions");
+                if (vPreds && yyjson_is_arr(vPreds) && yyjson_arr_size(vPreds) > 0) {
+                    yyjson_val* firstPred = yyjson_arr_get(vPreds, 0);
+                    yyjson_val* b64Val = yyjson_obj_get(firstPred, "bytesBase64Encoded");
+                    if (b64Val && yyjson_is_str(b64Val)) {
+                        const char* actualB64 = yyjson_get_str(b64Val);
+                        DWORD binLen = 0;
+                        if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
+                            aiImgBytes.resize(binLen);
+                            CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, aiImgBytes.data(), &binLen, nullptr, nullptr);
+                        }
+                    }
+                }
+            }
+
+            // 3. Try SD WebUI / Forge structure
+            if (aiImgBytes.empty()) {
+                yyjson_val* imagesArr = yyjson_obj_get(root, "images");
+                if (imagesArr && yyjson_is_arr(imagesArr) && yyjson_arr_size(imagesArr) > 0) {
+                    yyjson_val* firstImg = yyjson_arr_get(imagesArr, 0);
+                    if (firstImg && yyjson_is_str(firstImg)) {
+                        std::string b64 = yyjson_get_str(firstImg);
+                        size_t comma = b64.find(',');
+                        if (comma != std::string::npos) b64 = b64.substr(comma + 1);
+                        DWORD dwOut = 0;
+                        if (CryptStringToBinaryA(b64.c_str(), static_cast<DWORD>(b64.size()), CRYPT_STRING_BASE64, nullptr, &dwOut, nullptr, nullptr)) {
+                            aiImgBytes.resize(dwOut);
+                            CryptStringToBinaryA(b64.c_str(), static_cast<DWORD>(b64.size()), CRYPT_STRING_BASE64, aiImgBytes.data(), &dwOut, nullptr, nullptr);
+                        }
+                    }
+                }
+            }
+
+            // 4. Try OpenAI / SiliconFlow structure (data[0].b64_json or url)
+            if (aiImgBytes.empty()) {
+                yyjson_val* dataArr = yyjson_obj_get(root, "data");
+                if (dataArr && yyjson_is_arr(dataArr) && yyjson_arr_size(dataArr) > 0) {
+                    yyjson_val* firstObj = yyjson_arr_get(dataArr, 0);
+                    if (firstObj && yyjson_is_obj(firstObj)) {
+                        yyjson_val* b64Val = yyjson_obj_get(firstObj, "b64_json");
+                        if (b64Val && yyjson_is_str(b64Val)) {
+                            std::string b64 = yyjson_get_str(b64Val);
+                            DWORD dwOut = 0;
+                            if (CryptStringToBinaryA(b64.c_str(), static_cast<DWORD>(b64.size()), CRYPT_STRING_BASE64, nullptr, &dwOut, nullptr, nullptr)) {
+                                aiImgBytes.resize(dwOut);
+                                CryptStringToBinaryA(b64.c_str(), static_cast<DWORD>(b64.size()), CRYPT_STRING_BASE64, aiImgBytes.data(), &dwOut, nullptr, nullptr);
+                            }
+                        } else {
+                            yyjson_val* vUrl = yyjson_obj_get(firstObj, "url");
+                            if (vUrl && yyjson_is_str(vUrl)) {
+                                std::wstring imgUrl = Utf8ToWide(yyjson_get_str(vUrl));
+                                DownloadImageFromUrl(imgUrl, aiImgBytes);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        yyjson_doc_free(doc);
+    }
+
+    if (aiImgBytes.empty()) {
+        result.errorMessage = L"解析 AI 重绘结果图像数据为空";
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    // 7. Decode AI sub-image & Seamless Feathered Re-injection
+    std::vector<uint8_t> aiSubBgra;
+    uint32_t aiW = 0, aiH = 0, aiStride = 0;
+    if (!DecodeMemoryToBgra(aiImgBytes.data(), aiImgBytes.size(), aiSubBgra, aiW, aiH, aiStride) || aiSubBgra.empty()) {
+        result.errorMessage = L"解码 AI 返回的切片图像失败";
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    std::vector<uint8_t> alignedSubBgra;
+    if ((int)aiW != sliceW || (int)aiH != sliceH) {
+        alignedSubBgra.resize(static_cast<size_t>(sliceW) * sliceH * 4);
+        ResampleBgraExact(aiSubBgra.data(), aiW, aiH, aiStride,
+                          alignedSubBgra.data(), sliceW, sliceH, sliceW * 4);
+    } else {
+        alignedSubBgra = std::move(aiSubBgra);
+    }
+
+    // 8. Mask-Guided Feathered Blend strictly onto the user's selection region
+    std::vector<uint8_t> mergedBgra = std::move(origBgra);
+    BlendMaskGuidedFeathered(
+        mergedBgra.data(), origW, origH, origStride,
+        alignedSubBgra.data(), sliceX0, sliceY0, sliceW, sliceH, sliceW * 4,
+        selX0, selY0, selX1, selY1, 6);
+
+    // 9. Encode full merged frame to PNG
+    std::vector<uint8_t> finalMergedPng;
+    if (!EncodeToPngMemory(mergedBgra.data(), origW, origH, origStride, finalMergedPng)) {
+        result.errorMessage = L"合成最终图像失败";
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
+    }
+
+    result.success = true;
+    result.resultImageData = std::move(finalMergedPng);
+    result.imageWidth = origW;
+    result.imageHeight = origH;
+
+    m_isRunning.store(false);
+    if (callback) callback(result);
 }
 
 } // namespace QuickView::AI

@@ -204,6 +204,24 @@ void AiActionOverlay::TriggerAction(size_t index) {
     }).detach();
 }
 
+void AiActionOverlay::StartInpaintSelection() {
+    Hide();
+    g_cropState.Reset();
+    g_cropState.Mode = RegionInteractionMode::AiInpaint;
+    g_cropState.IsActive = true;
+    g_cropState.IsDragging = false;
+    g_cropState.InpaintInputFocused = false;
+    g_cropState.IsQuickActionVisible = false;
+    g_cropState.CropLeft = 0.0f;
+    g_cropState.CropTop = 0.0f;
+    g_cropState.CropRight = 0.0f;
+    g_cropState.CropBottom = 0.0f;
+
+    const wchar_t* guide = L"请使用鼠标左键框选重绘区域";
+    g_osd.Show(m_hwnd ? m_hwnd : g_mainHwnd, guide, false, false, D2D1::ColorF(0.4f, 0.8f, 1.0f), OSDPosition::Bottom, 4000);
+    RequestRepaint(QuickView::PaintLayer::All);
+}
+
 bool AiActionOverlay::OnKeyDown(WPARAM key) {
     if (!m_visible) return false;
 
@@ -220,7 +238,13 @@ bool AiActionOverlay::OnKeyDown(WPARAM key) {
         return true;
     }
 
-    // 2. Direct Numeric Keys 1..9 -> Trigger instantly
+    // 2. Direct Shortcut Key '0' or 'I' -> Trigger Inpainting Selection
+    if (key == '0' || key == 'I' || key == 'i') {
+        StartInpaintSelection();
+        return true;
+    }
+
+    // 3. Direct Numeric Keys 1..9 -> Trigger instantly
     if (key >= '1' && key <= '9') {
         int idx = static_cast<int>(key - '1');
         if (idx < count) {
@@ -229,7 +253,7 @@ bool AiActionOverlay::OnKeyDown(WPARAM key) {
         }
     }
 
-    // 3. Arrow Keys / Rotation Cycle
+    // 4. Arrow Keys / Rotation Cycle
     if (key == VK_UP) {
         if (count > 0) {
             m_selectedIndex = (m_selectedIndex - 1 + count) % count;
@@ -247,7 +271,7 @@ bool AiActionOverlay::OnKeyDown(WPARAM key) {
         return true;
     }
 
-    // 4. Enter -> Trigger Selected
+    // 5. Enter -> Trigger Selected
     if (key == VK_RETURN) {
         if (m_selectedIndex >= 0 && m_selectedIndex < count) {
             TriggerAction(m_selectedIndex);
@@ -262,7 +286,14 @@ bool AiActionOverlay::OnMouseMove(float x, float y) {
     if (!m_visible) return false;
 
     int prevHover = m_hoverIndex;
+    bool prevInpaintHover = m_hoverInpaintCard;
     m_hoverIndex = -1;
+    m_hoverInpaintCard = false;
+
+    if (x >= m_inpaintCardRect.left && x <= m_inpaintCardRect.right &&
+        y >= m_inpaintCardRect.top && y <= m_inpaintCardRect.bottom) {
+        m_hoverInpaintCard = true;
+    }
 
     for (size_t i = 0; i < m_itemRects.size(); ++i) {
         const auto& r = m_itemRects[i];
@@ -272,7 +303,7 @@ bool AiActionOverlay::OnMouseMove(float x, float y) {
         }
     }
 
-    if (m_hoverIndex != prevHover) {
+    if (m_hoverIndex != prevHover || m_hoverInpaintCard != prevInpaintHover) {
         RequestRepaint(QuickView::PaintLayer::Static);
         if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
     }
@@ -281,6 +312,13 @@ bool AiActionOverlay::OnMouseMove(float x, float y) {
 
 bool AiActionOverlay::OnLButtonDown(float x, float y) {
     if (!m_visible) return false;
+
+    // Check click on inpaint hero card
+    if (x >= m_inpaintCardRect.left && x <= m_inpaintCardRect.right &&
+        y >= m_inpaintCardRect.top && y <= m_inpaintCardRect.bottom) {
+        StartInpaintSelection();
+        return true;
+    }
 
     // Check click on action item
     for (size_t i = 0; i < m_itemRects.size(); ++i) {
@@ -325,9 +363,10 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
 
     float hudW = 400.0f * m_uiScale;
     float itemH = 46.0f * m_uiScale;
+    float inpaintCardH = 48.0f * m_uiScale;
     float headerH = 48.0f * m_uiScale;
     float padding = 12.0f * m_uiScale;
-    float hudH = headerH + count * (itemH + 6.0f * m_uiScale) + padding * 1.5f;
+    float hudH = headerH + inpaintCardH + 8.0f * m_uiScale + count * (itemH + 6.0f * m_uiScale) + padding * 1.5f;
 
     float hudX = (winW - hudW) * 0.5f;
     float hudY = (winH - hudH) * 0.38f; // Golden ratio positioning
@@ -391,8 +430,50 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
     const wchar_t* escText = AppStrings::AiAction_EscHint ? AppStrings::AiAction_EscHint : L"[Esc] Close";
     dc->DrawText(escText, static_cast<UINT32>(wcslen(escText)), m_fontDetail.Get(), escRect, m_brushTextDim.Get());
 
-    // Draw Items
     float curY = hudY + headerH;
+
+    // Draw Inpaint Hero Card
+    m_inpaintCardRect = D2D1::RectF(hudX + padding, curY, hudX + hudW - padding, curY + inpaintCardH);
+    D2D1_ROUNDED_RECT inpaintRounded = D2D1::RoundedRect(m_inpaintCardRect, 8.0f * m_uiScale, 8.0f * m_uiScale);
+
+    if (m_hoverInpaintCard) {
+        dc->FillRoundedRectangle(inpaintRounded, m_brushCardHover.Get());
+        dc->DrawRoundedRectangle(inpaintRounded, m_brushAccent.Get(), 1.5f * m_uiScale);
+    } else {
+        dc->FillRoundedRectangle(inpaintRounded, m_brushCard.Get());
+        dc->DrawRoundedRectangle(inpaintRounded, m_brushBorder.Get(), 1.0f * m_uiScale);
+    }
+
+    // Badge [ 0 ]
+    float badgeW = 22.0f * m_uiScale;
+    float badgeH = 22.0f * m_uiScale;
+    float badgeX = m_inpaintCardRect.left + 10.0f * m_uiScale;
+    float badgeY = m_inpaintCardRect.top + (inpaintCardH - badgeH) * 0.5f;
+    D2D1_RECT_F keycapRect = D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH);
+    D2D1_ROUNDED_RECT bodyR = D2D1::RoundedRect(keycapRect, 4.5f * m_uiScale, 4.5f * m_uiScale);
+    m_brushKeyBadge->SetColor(isLight ? D2D1::ColorF(0.92f, 0.94f, 0.98f, 1.0f) : D2D1::ColorF(0.20f, 0.22f, 0.28f, 1.0f));
+    dc->FillRoundedRectangle(bodyR, m_brushKeyBadge.Get());
+    dc->DrawRoundedRectangle(bodyR, m_brushBorder.Get(), 1.0f * m_uiScale);
+    dc->DrawText(L"0", 1, m_fontBadge.Get(), keycapRect, m_brushAccent.Get());
+
+    // Inpaint Card Title & Subtitle
+    float textX = badgeX + badgeW + 10.0f * m_uiScale;
+    D2D1_RECT_F textR = D2D1::RectF(textX, m_inpaintCardRect.top + 5.0f * m_uiScale, m_inpaintCardRect.right - 85.0f * m_uiScale, m_inpaintCardRect.top + 26.0f * m_uiScale);
+    const wchar_t* inpaintTitle = L"✨ 选区局部重绘 (AI Inpaint)";
+    dc->DrawText(inpaintTitle, static_cast<UINT32>(wcslen(inpaintTitle)), m_fontItem.Get(), textR, m_brushText.Get());
+
+    D2D1_RECT_F subR = D2D1::RectF(textX, m_inpaintCardRect.top + 26.0f * m_uiScale, m_inpaintCardRect.right - 85.0f * m_uiScale, m_inpaintCardRect.bottom - 4.0f * m_uiScale);
+    const wchar_t* inpaintSub = L"框选局部画面无痕消除或提示词替换";
+    dc->DrawText(inpaintSub, static_cast<UINT32>(wcslen(inpaintSub)), m_fontDetail.Get(), subR, m_brushTextDim.Get());
+
+    // Tag
+    D2D1_RECT_F inpaintTagR = D2D1::RectF(m_inpaintCardRect.right - 80.0f * m_uiScale, m_inpaintCardRect.top + (inpaintCardH - 18.0f * m_uiScale) * 0.5f, m_inpaintCardRect.right - 8.0f * m_uiScale, m_inpaintCardRect.bottom);
+    const wchar_t* tagInpaint = L"框选模式";
+    dc->DrawText(tagInpaint, static_cast<UINT32>(wcslen(tagInpaint)), m_fontDetail.Get(), inpaintTagR, m_brushAccent.Get());
+
+    curY += inpaintCardH + 8.0f * m_uiScale;
+
+    // Draw Items
     for (int i = 0; i < count; ++i) {
         const auto& act = actions[i];
         D2D1_RECT_F itemR = D2D1::RectF(hudX + padding, curY, hudX + hudW - padding, curY + itemH);

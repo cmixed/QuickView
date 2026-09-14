@@ -8612,6 +8612,70 @@ void SetLockWindowSize(HWND hwnd, bool locked) {
     RequestRepaint(PaintLayer::All);
 }
 
+// [AI Inpaint] Trigger Selection Inpainting
+static void TriggerInpaintCurrentSelection(HWND hwnd) {
+    if (!g_cropState.IsActive || g_cropState.Mode != RegionInteractionMode::AiInpaint) return;
+
+    int cropL = (int)std::round((std::min)(g_cropState.CropLeft, g_cropState.CropRight));
+    int cropT = (int)std::round((std::min)(g_cropState.CropTop, g_cropState.CropBottom));
+    int cropR = (int)std::round((std::max)(g_cropState.CropLeft, g_cropState.CropRight));
+    int cropB = (int)std::round((std::max)(g_cropState.CropTop, g_cropState.CropBottom));
+
+    int w = cropR - cropL;
+    int h = cropB - cropT;
+    if (w < 8 || h < 8) {
+        g_osd.Show(hwnd, L"选区过小，请先框选重绘区域", false, false, D2D1::ColorF(1.0f, 0.4f, 0.4f), OSDPosition::Bottom, 2000);
+        return;
+    }
+
+    std::wstring customPrompt = g_cropState.InpaintPromptBuffer;
+
+    g_cropState.Reset();
+    RequestRepaint(PaintLayer::All);
+
+    g_osd.StartPersistentTask(hwnd, L"✨ AI 局部重绘准备中 (Esc取消)...", D2D1::ColorF(0.4f, 0.8f, 1.0f), OSDPosition::Bottom, 0.05f);
+
+    auto taskFinished = std::make_shared<std::atomic<bool>>(false);
+
+    uint64_t currentTaskId = QuickView::AI::AiActionManager::Instance().ExecuteInpaint(
+        cropL, cropT, cropR, cropB, customPrompt, hwnd,
+        [taskFinished](const QuickView::AI::ExecutionResult& res) {
+            taskFinished->store(true);
+            if (!res.success) {
+                g_osd.EndPersistentTask(g_mainHwnd);
+                QuickView::AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
+                return;
+            }
+
+            if (!res.resultImageData.empty()) {
+                auto* pData = new QuickView::AI::AsyncAiImageResult();
+                pData->imageData = std::move(res.resultImageData);
+                pData->actionName = L"选区局部重绘";
+                pData->width = res.imageWidth;
+                pData->height = res.imageHeight;
+                PostMessageW(g_mainHwnd, QuickView::AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
+            } else {
+                g_osd.EndPersistentTask(g_mainHwnd);
+            }
+        });
+
+    std::thread([hwnd, currentTaskId, taskFinished]() {
+        auto startTime = std::chrono::steady_clock::now();
+        while (!taskFinished->load() && QuickView::AI::AiActionManager::Instance().IsRunning() && QuickView::AI::AiActionManager::Instance().GetCurrentTaskId() == currentTaskId) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            if (taskFinished->load() || !QuickView::AI::AiActionManager::Instance().IsRunning() || QuickView::AI::AiActionManager::Instance().GetCurrentTaskId() != currentTaskId) {
+                break;
+            }
+            auto elapsedSec = static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - startTime).count());
+            wchar_t msg[128] = { 0 };
+            swprintf_s(msg, L"✨ AI 局部重绘中 [%ds, Esc取消]...", elapsedSec);
+            float fakeProgress = 1.0f - std::exp(-static_cast<float>(elapsedSec) / 20.0f);
+            fakeProgress = (std::max)(0.05f, (std::min)(fakeProgress, 0.95f));
+            g_osd.UpdatePersistentTask(hwnd, msg, fakeProgress);
+        }
+    }).detach();
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     // [Loupe] While the loupe is active, intercept and ignore all mouse click and double-click events to prevent accidental zoom, navigation, or split-pane control during this time
     if (AppContext::GetInstance().Loupe.active) {
@@ -10791,6 +10855,12 @@ SKIP_EDGE_NAV:;
                      case 8: // Right
                          g_cropState.CropRight = (std::max)(imgX, g_cropState.DragStartCropLeft + minDim);
                          break;
+                     case 9: // Box Selection Drag (Direct drag-to-create selection)
+                         g_cropState.CropLeft = (std::min)(startImgX, imgX);
+                         g_cropState.CropTop = (std::min)(startImgY, imgY);
+                         g_cropState.CropRight = (std::max)(startImgX, imgX);
+                         g_cropState.CropBottom = (std::max)(startImgY, imgY);
+                         break;
                  }
                  RequestRepaint(PaintLayer::All);
              }
@@ -10814,10 +10884,10 @@ SKIP_EDGE_NAV:;
                      float imgDrawX = vpW * 0.5f + pane.view.PanX - (orientedSize.width * 0.5f * totalScale);
                      float imgDrawY = vpH * 0.5f + pane.view.PanY - (orientedSize.height * 0.5f * totalScale);
 
-                     float sLeft = g_cropState.CropLeft * totalScale + imgDrawX;
-                     float sTop = g_cropState.CropTop * totalScale + imgDrawY;
-                     float sRight = g_cropState.CropRight * totalScale + imgDrawX;
-                     float sBottom = g_cropState.CropBottom * totalScale + imgDrawY;
+                     float sLeft = (std::min)(g_cropState.CropLeft, g_cropState.CropRight) * totalScale + imgDrawX;
+                     float sTop = (std::min)(g_cropState.CropTop, g_cropState.CropBottom) * totalScale + imgDrawY;
+                     float sRight = (std::max)(g_cropState.CropLeft, g_cropState.CropRight) * totalScale + imgDrawX;
+                     float sBottom = (std::max)(g_cropState.CropTop, g_cropState.CropBottom) * totalScale + imgDrawY;
                      float cw = (sRight - sLeft) / 3.0f;
                      float ch = (sBottom - sTop) / 3.0f;
                      float hTol = 10.0f * g_uiScale;
@@ -10828,11 +10898,38 @@ SKIP_EDGE_NAV:;
 
                      if (!QuickView::ExportPanel::GetInstance().IsVisible()) {
                          HCURSOR targetCursor = nullptr;
-                         if (hitPt(sLeft, sTop) || hitPt(sRight, sBottom)) targetCursor = LoadCursor(nullptr, IDC_SIZENWSE);
-                         else if (hitPt(sRight, sTop) || hitPt(sLeft, sBottom)) targetCursor = LoadCursor(nullptr, IDC_SIZENESW);
-                         else if (hitPt(sLeft + cw * 1.5f, sTop) || hitPt(sLeft + cw * 1.5f, sBottom)) targetCursor = LoadCursor(nullptr, IDC_SIZENS);
-                         else if (hitPt(sLeft, sTop + ch * 1.5f) || hitPt(sRight, sTop + ch * 1.5f)) targetCursor = LoadCursor(nullptr, IDC_SIZEWE);
-                         else if (pt.x >= sLeft && pt.x <= sRight && pt.y >= sTop && pt.y <= sBottom) targetCursor = LoadCursor(nullptr, IDC_SIZEALL);
+                         if (g_cropState.Mode == RegionInteractionMode::AiInpaint) {
+                             auto hitBox = [pt](const D2D1_RECT_F& r) {
+                                 return (float)pt.x >= r.left && (float)pt.x <= r.right && (float)pt.y >= r.top && (float)pt.y <= r.bottom;
+                             };
+                             bool hExec = hitBox(g_cropState.InpaintExecuteBtnRect);
+                             bool hCancel = hitBox(g_cropState.InpaintCancelBtnRect);
+                             bool hInput = hitBox(g_cropState.InpaintInputRect);
+
+                             if (hExec != g_cropState.InpaintHoverExecute || hCancel != g_cropState.InpaintHoverCancel) {
+                                 g_cropState.InpaintHoverExecute = hExec;
+                                 g_cropState.InpaintHoverCancel = hCancel;
+                                 RequestRepaint(PaintLayer::Static);
+                             }
+                             if (hExec || hCancel) {
+                                 targetCursor = LoadCursor(nullptr, IDC_HAND);
+                             } else if (hInput) {
+                                 targetCursor = LoadCursor(nullptr, IDC_IBEAM);
+                             }
+                         }
+
+                         bool hasValidBox = (sRight - sLeft > 2.0f && sBottom - sTop > 2.0f);
+                         if (!targetCursor && hasValidBox) {
+                             if (hitPt(sLeft, sTop) || hitPt(sRight, sBottom)) targetCursor = LoadCursor(nullptr, IDC_SIZENWSE);
+                             else if (hitPt(sRight, sTop) || hitPt(sLeft, sBottom)) targetCursor = LoadCursor(nullptr, IDC_SIZENESW);
+                             else if (hitPt(sLeft + cw * 1.5f, sTop) || hitPt(sLeft + cw * 1.5f, sBottom)) targetCursor = LoadCursor(nullptr, IDC_SIZENS);
+                             else if (hitPt(sLeft, sTop + ch * 1.5f) || hitPt(sRight, sTop + ch * 1.5f)) targetCursor = LoadCursor(nullptr, IDC_SIZEWE);
+                             else if (pt.x >= sLeft && pt.x <= sRight && pt.y >= sTop && pt.y <= sBottom) targetCursor = LoadCursor(nullptr, IDC_SIZEALL);
+                         }
+
+                         if (!targetCursor && g_cropState.Mode == RegionInteractionMode::AiInpaint) {
+                             targetCursor = LoadCursor(nullptr, IDC_CROSS);
+                         }
 
                          if (targetCursor) {
                              SetCursor(targetCursor);
@@ -11710,10 +11807,10 @@ SKIP_EDGE_NAV:;
                     float imgDrawX = vpW * 0.5f + pane.view.PanX - (orientedSize.width * 0.5f * totalScale);
                     float imgDrawY = vpH * 0.5f + pane.view.PanY - (orientedSize.height * 0.5f * totalScale);
 
-                    float sLeft = g_cropState.CropLeft * totalScale + imgDrawX;
-                    float sTop = g_cropState.CropTop * totalScale + imgDrawY;
-                    float sRight = g_cropState.CropRight * totalScale + imgDrawX;
-                    float sBottom = g_cropState.CropBottom * totalScale + imgDrawY;
+                    float sLeft = (std::min)(g_cropState.CropLeft, g_cropState.CropRight) * totalScale + imgDrawX;
+                    float sTop = (std::min)(g_cropState.CropTop, g_cropState.CropBottom) * totalScale + imgDrawY;
+                    float sRight = (std::max)(g_cropState.CropLeft, g_cropState.CropRight) * totalScale + imgDrawX;
+                    float sBottom = (std::max)(g_cropState.CropTop, g_cropState.CropBottom) * totalScale + imgDrawY;
                     float cw = (sRight - sLeft) / 3.0f;
                     float ch = (sBottom - sTop) / 3.0f;
                     float hTol = 10.0f * g_uiScale;
@@ -11722,25 +11819,51 @@ SKIP_EDGE_NAV:;
                         return (float)pt.x >= r.left && (float)pt.x <= r.right && (float)pt.y >= r.top && (float)pt.y <= r.bottom;
                     };
 
-                    if (hitCapsule(g_cropState.WidthCapsuleRect)) {
-                        g_cropState.FocusedField = CropState::InputField::Width;
-                        swprintf_s(g_cropState.InputBuffer, L"%d", (int)std::round(g_cropState.CropRight - g_cropState.CropLeft));
-                        g_cropState.InputLen = (int)wcslen(g_cropState.InputBuffer);
-                        SetTimer(hwnd, TIMER_ID_SETTINGS_CARET, 500, nullptr);
-                        RequestRepaint(PaintLayer::All);
-                        return 0;
-                    } else if (hitCapsule(g_cropState.HeightCapsuleRect)) {
-                        g_cropState.FocusedField = CropState::InputField::Height;
-                        swprintf_s(g_cropState.InputBuffer, L"%d", (int)std::round(g_cropState.CropBottom - g_cropState.CropTop));
-                        g_cropState.InputLen = (int)wcslen(g_cropState.InputBuffer);
-                        SetTimer(hwnd, TIMER_ID_SETTINGS_CARET, 500, nullptr);
-                        RequestRepaint(PaintLayer::All);
-                        return 0;
-                    } else {
-                        if (g_cropState.FocusedField != CropState::InputField::None) {
-                            g_cropState.FocusedField = CropState::InputField::None;
+                    if (g_cropState.Mode == RegionInteractionMode::AiInpaint) {
+                        if (hitCapsule(g_cropState.InpaintExecuteBtnRect)) {
+                            TriggerInpaintCurrentSelection(hwnd);
+                            return 0;
+                        }
+                        if (hitCapsule(g_cropState.InpaintCancelBtnRect)) {
+                            g_cropState.Reset();
+                            RequestRepaint(PaintLayer::All);
+                            return 0;
+                        }
+                        if (hitCapsule(g_cropState.InpaintInputRect)) {
+                            g_cropState.InpaintInputFocused = true;
+                            SetTimer(hwnd, TIMER_ID_SETTINGS_CARET, 500, nullptr);
+                            RequestRepaint(PaintLayer::All);
+                            return 0;
+                        }
+                        if (hitCapsule(g_cropState.InpaintCapsuleRect)) {
+                            return 0;
+                        }
+                        if (g_cropState.InpaintInputFocused) {
+                            g_cropState.InpaintInputFocused = false;
                             KillTimer(hwnd, TIMER_ID_SETTINGS_CARET);
                             RequestRepaint(PaintLayer::All);
+                        }
+                    } else {
+                        if (hitCapsule(g_cropState.WidthCapsuleRect)) {
+                            g_cropState.FocusedField = CropState::InputField::Width;
+                            swprintf_s(g_cropState.InputBuffer, L"%d", (int)std::round(g_cropState.CropRight - g_cropState.CropLeft));
+                            g_cropState.InputLen = (int)wcslen(g_cropState.InputBuffer);
+                            SetTimer(hwnd, TIMER_ID_SETTINGS_CARET, 500, nullptr);
+                            RequestRepaint(PaintLayer::All);
+                            return 0;
+                        } else if (hitCapsule(g_cropState.HeightCapsuleRect)) {
+                            g_cropState.FocusedField = CropState::InputField::Height;
+                            swprintf_s(g_cropState.InputBuffer, L"%d", (int)std::round(g_cropState.CropBottom - g_cropState.CropTop));
+                            g_cropState.InputLen = (int)wcslen(g_cropState.InputBuffer);
+                            SetTimer(hwnd, TIMER_ID_SETTINGS_CARET, 500, nullptr);
+                            RequestRepaint(PaintLayer::All);
+                            return 0;
+                        } else {
+                            if (g_cropState.FocusedField != CropState::InputField::None) {
+                                g_cropState.FocusedField = CropState::InputField::None;
+                                KillTimer(hwnd, TIMER_ID_SETTINGS_CARET);
+                                RequestRepaint(PaintLayer::All);
+                            }
                         }
                     }
 
@@ -11749,10 +11872,12 @@ SKIP_EDGE_NAV:;
                         float imgX = 0.0f, imgY = 0.0f;
                         if (ScreenToImageSpace(hwnd, pt.x, pt.y, imgX, imgY, PaneSlot::Primary)) {
                             SetCapture(hwnd);
+                            auto prevMode = g_cropState.Mode;
                             g_cropState.Reset();
+                            g_cropState.Mode = prevMode;
                             g_cropState.IsActive = true;
                             g_cropState.IsDragging = true;
-                            g_cropState.ActiveHandle = 5; // Special handle for defining initial region
+                            g_cropState.ActiveHandle = 9; // Special handle for defining initial region
                             g_cropState.DragStartMousePos = pt;
 
                             imgX = (std::max)(0.0f, (std::min)(imgX, orientedSize.width));
@@ -11766,10 +11891,12 @@ SKIP_EDGE_NAV:;
                             g_cropState.DragStartCropTop = (int)imgY;
                             g_cropState.DragStartCropRight = (int)imgX;
                             g_cropState.DragStartCropBottom = (int)imgY;
-                            g_cropState.IsQuickActionVisible = true;
+                            g_cropState.IsQuickActionVisible = false;
 
-                            g_toolbar.SetCropMode(true);
-                            g_toolbar.SetVisible(true);
+                            if (g_cropState.Mode != RegionInteractionMode::AiInpaint) {
+                                g_toolbar.SetCropMode(true);
+                                g_toolbar.SetVisible(true);
+                            }
 
                             RequestRepaint(PaintLayer::All);
                             return 0;
@@ -11781,15 +11908,18 @@ SKIP_EDGE_NAV:;
                     };
 
                     int hitHandle = -1;
-                    if (hitPt(sLeft, sTop)) hitHandle = 0; // TopLeft
-                    else if (hitPt(sRight, sTop)) hitHandle = 1; // TopRight
-                    else if (hitPt(sLeft, sBottom)) hitHandle = 2; // BottomLeft
-                    else if (hitPt(sRight, sBottom)) hitHandle = 3; // BottomRight
-                    else if (hitPt(sLeft + cw * 1.5f, sTop)) hitHandle = 5; // Top
-                    else if (hitPt(sLeft + cw * 1.5f, sBottom)) hitHandle = 6; // Bottom
-                    else if (hitPt(sLeft, sTop + ch * 1.5f)) hitHandle = 7; // Left
-                    else if (hitPt(sRight, sTop + ch * 1.5f)) hitHandle = 8; // Right
-                    else if (pt.x >= sLeft && pt.x <= sRight && pt.y >= sTop && pt.y <= sBottom) hitHandle = 4; // Center Move
+                    bool hasValidBox = (sRight - sLeft > 2.0f && sBottom - sTop > 2.0f);
+                    if (hasValidBox) {
+                        if (hitPt(sLeft, sTop)) hitHandle = 0; // TopLeft
+                        else if (hitPt(sRight, sTop)) hitHandle = 1; // TopRight
+                        else if (hitPt(sLeft, sBottom)) hitHandle = 2; // BottomLeft
+                        else if (hitPt(sRight, sBottom)) hitHandle = 3; // BottomRight
+                        else if (hitPt(sLeft + cw * 1.5f, sTop)) hitHandle = 5; // Top
+                        else if (hitPt(sLeft + cw * 1.5f, sBottom)) hitHandle = 6; // Bottom
+                        else if (hitPt(sLeft, sTop + ch * 1.5f)) hitHandle = 7; // Left
+                        else if (hitPt(sRight, sTop + ch * 1.5f)) hitHandle = 8; // Right
+                        else if (pt.x >= sLeft && pt.x <= sRight && pt.y >= sTop && pt.y <= sBottom) hitHandle = 4; // Center Move
+                    }
 
                     if (hitHandle != -1) {
                         SetCapture(hwnd);
@@ -11803,6 +11933,31 @@ SKIP_EDGE_NAV:;
                         g_cropState.IsQuickActionVisible = true;
                         RequestRepaint(PaintLayer::All);
                         return 0;
+                    }
+
+                    // [AI Inpaint] Clicking anywhere in image directly begins dragging a new selection box
+                    if (g_cropState.Mode == RegionInteractionMode::AiInpaint) {
+                        float imgX = 0.0f, imgY = 0.0f;
+                        if (ScreenToImageSpace(hwnd, pt.x, pt.y, imgX, imgY, PaneSlot::Primary)) {
+                            SetCapture(hwnd);
+                            imgX = std::clamp(imgX, 0.0f, orientedSize.width);
+                            imgY = std::clamp(imgY, 0.0f, orientedSize.height);
+
+                            g_cropState.IsDragging = true;
+                            g_cropState.ActiveHandle = 9; // Box selection drag
+                            g_cropState.DragStartMousePos = pt;
+                            g_cropState.CropLeft = imgX;
+                            g_cropState.CropTop = imgY;
+                            g_cropState.CropRight = imgX;
+                            g_cropState.CropBottom = imgY;
+                            g_cropState.DragStartCropLeft = (int)imgX;
+                            g_cropState.DragStartCropTop = (int)imgY;
+                            g_cropState.DragStartCropRight = (int)imgX;
+                            g_cropState.DragStartCropBottom = (int)imgY;
+                            g_cropState.IsQuickActionVisible = false;
+                            RequestRepaint(PaintLayer::All);
+                            return 0;
+                        }
                     }
                 }
             }
@@ -12349,11 +12504,32 @@ SKIP_EDGE_NAV:;
             ReleaseCapture();
             g_cropState.IsDragging = false;
             g_cropState.ActiveHandle = -1;
-            g_cropState.IsQuickActionVisible = true;
-            g_toolbar.SetCropMode(true);
-            g_toolbar.SetVisible(true);
-            RECT rcWnd; GetClientRect(hwnd, &rcWnd);
-            g_toolbar.UpdateLayout((float)rcWnd.right, (float)rcWnd.bottom);
+
+            // Ensure coordinates are properly ordered
+            if (g_cropState.CropLeft > g_cropState.CropRight) std::swap(g_cropState.CropLeft, g_cropState.CropRight);
+            if (g_cropState.CropTop > g_cropState.CropBottom) std::swap(g_cropState.CropTop, g_cropState.CropBottom);
+
+            if (g_cropState.Mode == RegionInteractionMode::AiInpaint) {
+                float w = g_cropState.CropRight - g_cropState.CropLeft;
+                float h = g_cropState.CropBottom - g_cropState.CropTop;
+                if (w < 4.0f || h < 4.0f) {
+                    g_cropState.CropLeft = g_cropState.CropRight = g_cropState.CropTop = g_cropState.CropBottom = 0.0f;
+                    g_cropState.IsQuickActionVisible = false;
+                    g_cropState.InpaintInputFocused = false;
+                    KillTimer(hwnd, TIMER_ID_SETTINGS_CARET);
+                } else {
+                    g_cropState.IsQuickActionVisible = true;
+                    g_cropState.InpaintInputFocused = true;
+                    SetTimer(hwnd, TIMER_ID_SETTINGS_CARET, 500, nullptr);
+                }
+            } else {
+                g_cropState.IsQuickActionVisible = true;
+                g_toolbar.SetCropMode(true);
+                g_toolbar.SetVisible(true);
+                RECT rcWnd; GetClientRect(hwnd, &rcWnd);
+                g_toolbar.UpdateLayout((float)rcWnd.right, (float)rcWnd.bottom);
+            }
+
             RequestRepaint(PaintLayer::All);
             return 0;
         }
@@ -12832,6 +13008,16 @@ SKIP_EDGE_NAV:;
             }
             return 0;
         }
+        if (g_cropState.IsActive && g_cropState.Mode == RegionInteractionMode::AiInpaint && g_cropState.InpaintInputFocused) {
+            if (wParam >= 32) {
+                if (g_cropState.InpaintPromptLen < 250) {
+                    g_cropState.InpaintPromptBuffer[g_cropState.InpaintPromptLen++] = (wchar_t)wParam;
+                    g_cropState.InpaintPromptBuffer[g_cropState.InpaintPromptLen] = L'\0';
+                    RequestRepaint(PaintLayer::Static);
+                }
+                return 0;
+            }
+        }
         if (g_cropState.IsActive && g_cropState.FocusedField != CropState::InputField::None) {
             const auto& pane = GetPaneContext(PaneSlot::Primary);
             int baseExif = pane.view.ExifOrientation;
@@ -12893,6 +13079,27 @@ SKIP_EDGE_NAV:;
                 QuickView::AI::AiActionManager::Instance().CancelCurrentTask();
                 g_osd.EndPersistentTask(hwnd, L"AI 任务已取消", false, D2D1::ColorF(D2D1::ColorF::LightSalmon), 1500);
                 return 0;
+            }
+        }
+        if (g_cropState.IsActive && g_cropState.Mode == RegionInteractionMode::AiInpaint) {
+            if (wParam == VK_ESCAPE) {
+                g_cropState.Reset();
+                RequestRepaint(PaintLayer::All);
+                return 0;
+            }
+            if (wParam == VK_RETURN) {
+                TriggerInpaintCurrentSelection(hwnd);
+                return 0;
+            }
+            if (g_cropState.InpaintInputFocused) {
+                if (wParam == VK_BACK) {
+                    if (g_cropState.InpaintPromptLen > 0) {
+                        g_cropState.InpaintPromptBuffer[--g_cropState.InpaintPromptLen] = L'\0';
+                        RequestRepaint(PaintLayer::Static);
+                    }
+                    return 0;
+                }
+                return 0; // Swallow other keys while typing
             }
         }
         if (wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL) {
@@ -12961,6 +13168,10 @@ SKIP_EDGE_NAV:;
         }
         if (g_cropState.IsActive && !QuickView::ExportPanel::GetInstance().IsVisible()) {
             if (wParam == VK_RETURN) {
+                if (g_cropState.Mode == RegionInteractionMode::AiInpaint) {
+                    TriggerInpaintCurrentSelection(hwnd);
+                    return 0;
+                }
                 int cropW = (int)(g_cropState.CropRight - g_cropState.CropLeft);
                 int cropH = (int)(g_cropState.CropBottom - g_cropState.CropTop);
                 if (cropW > 0 && cropH > 0) {

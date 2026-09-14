@@ -35,6 +35,7 @@ public:
     bool OnLButtonDown(float x, float y);
     bool OnMouseWheel(float delta);
     int GetHoverIndex() const { return m_hoverIndex; }
+    void StartInpaintSelection();
 
     // Set background command list for Geek Glass blur effect
     void SetGeekGlassData(ID2D1CommandList* list, const D2D1_MATRIX_3X2_F& transform) {
@@ -56,6 +57,8 @@ private:
     int m_hoverIndex = -1;
 
     D2D1_RECT_F m_hudRect = {};
+    D2D1_RECT_F m_inpaintCardRect = {};
+    bool m_hoverInpaintCard = false;
     std::vector<D2D1_RECT_F> m_itemRects;
 
     // D2D Resources

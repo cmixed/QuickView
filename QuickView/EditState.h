@@ -878,9 +878,15 @@ struct AppConfig {
 };
 
 // ============================================================================
-// Crop State (6.31.0)
+// Crop & Region Selection State (6.31.0)
 // ============================================================================
+enum class RegionInteractionMode : uint8_t {
+    Crop = 0,     // Physical crop mode (C key, green checkmark on toolbar)
+    AiInpaint     // AI selection inpainting mode (No destructive crop, AI capsule)
+};
+
 struct CropState {
+    RegionInteractionMode Mode = RegionInteractionMode::Crop;
     bool IsActive = false;
     bool IsDragging = false;
     bool IsQuickActionVisible = false;
@@ -908,10 +914,24 @@ struct CropState {
     D2D1_RECT_F WidthCapsuleRect = {};
     D2D1_RECT_F HeightCapsuleRect = {};
 
+    // AI Inpaint Interactive Capsule states
+    wchar_t InpaintPromptBuffer[256] = { 0 };
+    int InpaintPromptLen = 0;
+    bool InpaintInputFocused = false;
+    bool InpaintHoverExecute = false;
+    bool InpaintHoverCancel = false;
+    int InpaintHoverPreset = -1; // -1: None, 0: Seamless Remove, 1: Background Fill
+    D2D1_RECT_F InpaintCapsuleRect = {};
+    D2D1_RECT_F InpaintInputRect = {};
+    D2D1_RECT_F InpaintExecuteBtnRect = {};
+    D2D1_RECT_F InpaintCancelBtnRect = {};
+    D2D1_RECT_F InpaintPresetBtnRects[2] = {};
+
     bool ReachedEdgeX = false;
     bool ReachedEdgeY = false;
 
     void Reset() {
+        Mode = RegionInteractionMode::Crop;
         IsActive = false;
         IsDragging = false;
         IsQuickActionVisible = false;
@@ -928,6 +948,18 @@ struct CropState {
         InputBuffer[0] = L'\0';
         WidthCapsuleRect = {};
         HeightCapsuleRect = {};
+
+        InpaintPromptBuffer[0] = L'\0';
+        InpaintPromptLen = 0;
+        InpaintInputFocused = false;
+        InpaintHoverExecute = false;
+        InpaintHoverCancel = false;
+        InpaintHoverPreset = -1;
+        InpaintCapsuleRect = {};
+        InpaintInputRect = {};
+        InpaintExecuteBtnRect = {};
+        InpaintCancelBtnRect = {};
+        InpaintPresetBtnRects[0] = InpaintPresetBtnRects[1] = {};
     }
 };
 
