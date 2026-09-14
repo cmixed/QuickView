@@ -52,6 +52,13 @@ enum class OutputAspectRatio : uint8_t {
     Vertical_3_4            // 3:4 Vertical standard (864x1152)
 };
 
+// Target Output Resolution Policy for AI Image Generation
+enum class TargetResolution : uint8_t {
+    Res_1K = 0,             // 1K Standard (1024px)
+    Res_2K = 1,             // 2K High Definition (2048px - Recommended)
+    Res_4K = 2              // 4K Ultra HD (4096px - Native Gemini 3.1 / SD Hi-Res)
+};
+
 // Model Profile Descriptor (Connection credentials & Endpoint defaults)
 struct ModelProfile {
     std::string id;                         // Unique Profile ID (e.g. "gemini_official", "siliconflow")
@@ -75,6 +82,7 @@ struct ActionDesc {
     std::wstring negativePrompt;            // Optional negative prompt
     ScopeMode scopeMode = ScopeMode::Auto;  // Processing target scope
     OutputAspectRatio aspectRatio = OutputAspectRatio::Auto; // Target output aspect ratio & framing
+    TargetResolution targetResolution = TargetResolution::Res_2K; // Target output resolution policy (1K/2K/4K)
     float denoisingStrength = 0.35f;        // Denoising strength for img2img (0.0~1.0, default 0.35 for fidelity)
     int samplingSteps = 25;                 // Diffusion sampling steps (15~50, default 25)
     float cfgScale = 7.0f;                  // Prompt guidance scale (4.0~10.0, default 7.0)

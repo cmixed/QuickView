@@ -87,6 +87,7 @@ TEST_F(AiActionManagerTest, ConfigSerializationRoundTripWithDeepCopy) {
     actions[0].samplingSteps = 30;
     actions[0].cfgScale = 8.5f;
     actions[0].aspectRatio = QuickView::AI::OutputAspectRatio::Landscape_16_9;
+    actions[0].targetResolution = QuickView::AI::TargetResolution::Res_4K;
 
     EXPECT_TRUE(mgr.SaveConfig());
 
@@ -112,6 +113,7 @@ TEST_F(AiActionManagerTest, ConfigSerializationRoundTripWithDeepCopy) {
     EXPECT_EQ(reloadedActions[0].samplingSteps, 30);
     EXPECT_FLOAT_EQ(reloadedActions[0].cfgScale, 8.5f);
     EXPECT_EQ(reloadedActions[0].aspectRatio, QuickView::AI::OutputAspectRatio::Landscape_16_9);
+    EXPECT_EQ(reloadedActions[0].targetResolution, QuickView::AI::TargetResolution::Res_4K);
 }
 
 TEST_F(AiActionManagerTest, ResetToDefaultsRestoresCleanState) {

@@ -808,6 +808,9 @@ bool AiActionManager::LoadConfig() {
             yyjson_val* aspect = yyjson_obj_get(aVal, "aspect_ratio");
             if (aspect) a.aspectRatio = static_cast<OutputAspectRatio>(yyjson_get_int(aspect));
 
+            yyjson_val* res = yyjson_obj_get(aVal, "target_resolution");
+            if (res) a.targetResolution = static_cast<TargetResolution>(yyjson_get_int(res));
+
             m_actions.push_back(a);
         }
     }
@@ -875,6 +878,7 @@ bool AiActionManager::SaveConfig() {
 
         yyjson_mut_obj_add_int(doc, aVal, "scope_mode", static_cast<int>(a.scopeMode));
         yyjson_mut_obj_add_int(doc, aVal, "aspect_ratio", static_cast<int>(a.aspectRatio));
+        yyjson_mut_obj_add_int(doc, aVal, "target_resolution", static_cast<int>(a.targetResolution));
         yyjson_mut_obj_add_real(doc, aVal, "denoising_strength", a.denoisingStrength);
         yyjson_mut_obj_add_int(doc, aVal, "sampling_steps", a.samplingSteps);
         yyjson_mut_obj_add_real(doc, aVal, "cfg_scale", a.cfgScale);
@@ -1130,47 +1134,51 @@ void AiActionManager::CancelCurrentTask() {
 }
 
 static void ComputeTargetDimensions(
-    OutputAspectRatio ratio, uint32_t srcW, uint32_t srcH,
+    OutputAspectRatio ratio, TargetResolution targetRes, uint32_t srcW, uint32_t srcH,
     int& outW, int& outH) {
+    int baseSize = 1024;
+    if (targetRes == TargetResolution::Res_2K) baseSize = 2048;
+    else if (targetRes == TargetResolution::Res_4K) baseSize = 3840;
+
     switch (ratio) {
         case OutputAspectRatio::Square_1_1:
-            outW = 1024;
-            outH = 1024;
+            outW = (targetRes == TargetResolution::Res_4K) ? 4096 : baseSize;
+            outH = (targetRes == TargetResolution::Res_4K) ? 4096 : baseSize;
             break;
         case OutputAspectRatio::Landscape_16_9:
-            outW = 1344;
-            outH = 768;
+            outW = (baseSize == 3840) ? 3840 : ((baseSize == 2048) ? 2560 : 1344);
+            outH = (baseSize == 3840) ? 2160 : ((baseSize == 2048) ? 1440 : 768);
             break;
         case OutputAspectRatio::Portrait_9_16:
-            outW = 768;
-            outH = 1344;
+            outW = (baseSize == 3840) ? 2160 : ((baseSize == 2048) ? 1440 : 768);
+            outH = (baseSize == 3840) ? 3840 : ((baseSize == 2048) ? 2560 : 1344);
             break;
         case OutputAspectRatio::Standard_4_3:
-            outW = 1152;
-            outH = 864;
+            outW = (baseSize == 3840) ? 3840 : ((baseSize == 2048) ? 2304 : 1152);
+            outH = (baseSize == 3840) ? 2880 : ((baseSize == 2048) ? 1728 : 864);
             break;
         case OutputAspectRatio::Vertical_3_4:
-            outW = 864;
-            outH = 1152;
+            outW = (baseSize == 3840) ? 2880 : ((baseSize == 2048) ? 1728 : 864);
+            outH = (baseSize == 3840) ? 3840 : ((baseSize == 2048) ? 2304 : 1152);
             break;
         case OutputAspectRatio::Auto:
         default:
             if (srcW > 0 && srcH > 0) {
                 float aspect = static_cast<float>(srcW) / static_cast<float>(srcH);
                 if (aspect >= 1.0f) {
-                    outW = (std::min<int>)(static_cast<int>(srcW), 1024);
+                    outW = baseSize;
                     outH = static_cast<int>(std::round(outW / aspect));
                 } else {
-                    outH = (std::min<int>)(static_cast<int>(srcH), 1024);
+                    outH = baseSize;
                     outW = static_cast<int>(std::round(outH * aspect));
                 }
                 outW = (outW / 64) * 64;
                 outH = (outH / 64) * 64;
-                outW = (std::max)(256, (std::min)(outW, 1536));
-                outH = (std::max)(256, (std::min)(outH, 1536));
+                outW = (std::max)(256, (std::min)(outW, 4096));
+                outH = (std::max)(256, (std::min)(outH, 4096));
             } else {
-                outW = 1024;
-                outH = 1024;
+                outW = baseSize;
+                outH = baseSize;
             }
             break;
     }
@@ -1386,7 +1394,7 @@ void AiActionManager::WorkerThread(
 
         int targetW = 1024;
         int targetH = 1024;
-        ComputeTargetDimensions(action.aspectRatio, imgW, imgH, targetW, targetH);
+        ComputeTargetDimensions(action.aspectRatio, action.targetResolution, imgW, imgH, targetW, targetH);
         yyjson_mut_obj_add_int(doc, root, "width", targetW);
         yyjson_mut_obj_add_int(doc, root, "height", targetH);
 
@@ -1441,6 +1449,30 @@ void AiActionManager::WorkerThread(
         }
         yyjson_mut_arr_append(msgs, userMsg);
     } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
+        const char* geminiSizeStr = "1K";
+        if (action.targetResolution == TargetResolution::Res_2K) geminiSizeStr = "2K";
+        else if (action.targetResolution == TargetResolution::Res_4K) geminiSizeStr = "4K";
+
+        const char* geminiAspect = "1:1";
+        switch (action.aspectRatio) {
+            case OutputAspectRatio::Landscape_16_9: geminiAspect = "16:9"; break;
+            case OutputAspectRatio::Portrait_9_16:  geminiAspect = "9:16"; break;
+            case OutputAspectRatio::Standard_4_3:   geminiAspect = "4:3"; break;
+            case OutputAspectRatio::Vertical_3_4:   geminiAspect = "3:4"; break;
+            case OutputAspectRatio::Square_1_1:     geminiAspect = "1:1"; break;
+            case OutputAspectRatio::Auto:
+            default:
+                if (imgW > 0 && imgH > 0) {
+                    float aspect = static_cast<float>(imgW) / static_cast<float>(imgH);
+                    if (aspect >= 1.5f) geminiAspect = "16:9";
+                    else if (aspect >= 1.15f) geminiAspect = "4:3";
+                    else if (aspect <= 0.65f) geminiAspect = "9:16";
+                    else if (aspect <= 0.85f) geminiAspect = "3:4";
+                    else geminiAspect = "1:1";
+                }
+                break;
+        }
+
         if (targetModel.rfind("imagen-", 0) == 0) {
             // Google Imagen 3 Predict Schema
             yyjson_mut_val* instancesArr = yyjson_mut_arr(doc);
@@ -1451,27 +1483,8 @@ void AiActionManager::WorkerThread(
 
             yyjson_mut_val* paramsObj = yyjson_mut_obj(doc);
             yyjson_mut_obj_add_int(doc, paramsObj, "sampleCount", 1);
-
-            const char* geminiAspect = "1:1";
-            switch (action.aspectRatio) {
-                case OutputAspectRatio::Landscape_16_9: geminiAspect = "16:9"; break;
-                case OutputAspectRatio::Portrait_9_16:  geminiAspect = "9:16"; break;
-                case OutputAspectRatio::Standard_4_3:   geminiAspect = "4:3"; break;
-                case OutputAspectRatio::Vertical_3_4:   geminiAspect = "3:4"; break;
-                case OutputAspectRatio::Square_1_1:     geminiAspect = "1:1"; break;
-                case OutputAspectRatio::Auto:
-                default:
-                    if (imgW > 0 && imgH > 0) {
-                        float aspect = static_cast<float>(imgW) / static_cast<float>(imgH);
-                        if (aspect >= 1.5f) geminiAspect = "16:9";
-                        else if (aspect >= 1.15f) geminiAspect = "4:3";
-                        else if (aspect <= 0.65f) geminiAspect = "9:16";
-                        else if (aspect <= 0.85f) geminiAspect = "3:4";
-                        else geminiAspect = "1:1";
-                    }
-                    break;
-            }
             yyjson_mut_obj_add_str(doc, paramsObj, "aspectRatio", geminiAspect);
+            yyjson_mut_obj_add_str(doc, paramsObj, "imageSize", geminiSizeStr);
             if (!action.negativePrompt.empty()) {
                 std::string utf8Neg = WideToUtf8(action.negativePrompt);
                 yyjson_mut_obj_add_str(doc, paramsObj, "negative_prompt", utf8Neg.c_str());
@@ -1504,12 +1517,19 @@ void AiActionManager::WorkerThread(
             yyjson_mut_arr_append(contentsArr, contentItem);
             yyjson_mut_obj_add_val(doc, root, "contents", contentsArr);
 
-            // Generation config: request both image and text modality
+            // Generation config: request both image and text modality with native resolution
             yyjson_mut_val* genConfig = yyjson_mut_obj(doc);
             yyjson_mut_val* respModalities = yyjson_mut_arr(doc);
             yyjson_mut_arr_add_strcpy(doc, respModalities, "IMAGE");
             yyjson_mut_arr_add_strcpy(doc, respModalities, "TEXT");
             yyjson_mut_obj_add_val(doc, genConfig, "responseModalities", respModalities);
+
+            // Inject imageConfig (aspectRatio + imageSize 1K/2K/4K for Google AI Studio / Gemini 3.1)
+            yyjson_mut_val* imgConfig = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, imgConfig, "aspectRatio", geminiAspect);
+            yyjson_mut_obj_add_str(doc, imgConfig, "imageSize", geminiSizeStr);
+            yyjson_mut_obj_add_val(doc, genConfig, "imageConfig", imgConfig);
+
             yyjson_mut_obj_add_val(doc, root, "generationConfig", genConfig);
         }
     } else if (effectiveProtocol == ApiProtocol::OpenAiImagesGenerate) {
@@ -1517,6 +1537,9 @@ void AiActionManager::WorkerThread(
         yyjson_mut_obj_add_str(doc, root, "prompt", utf8Prompt.c_str());
         yyjson_mut_obj_add_int(doc, root, "n", 1);
         yyjson_mut_obj_add_str(doc, root, "response_format", "b64_json");
+
+        const char* dalleQuality = (action.targetResolution == TargetResolution::Res_1K) ? "standard" : "hd";
+        yyjson_mut_obj_add_str(doc, root, "quality", dalleQuality);
 
         const char* dalleSize = "1024x1024";
         switch (action.aspectRatio) {

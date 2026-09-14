@@ -1074,11 +1074,13 @@ namespace {
         std::vector<int> actionStepsIndices;
         std::vector<int> actionCfgIndices;
         std::vector<int> actionAspectIndices;
+        std::vector<int> actionResolutionIndices;
         std::vector<std::wstring_view> timeoutOptions;
         std::vector<std::wstring_view> denoiseOptions;
         std::vector<std::wstring_view> stepsOptions;
         std::vector<std::wstring_view> cfgOptions;
         std::vector<std::wstring_view> aspectRatioOptions;
+        std::vector<std::wstring_view> resolutionOptions;
     };
     static AiUiState s_aiUi;
 
@@ -1220,13 +1222,17 @@ namespace {
                 AppStrings::Settings_Option_AiResOriginal ? AppStrings::Settings_Option_AiResOriginal : L"Unrestricted (Native)"
             };
 
-            s_aiUi.scopeOptions = {
-                AppStrings::Settings_Option_AiScopeAuto ? AppStrings::Settings_Option_AiScopeAuto : L"Auto (Selection First)",
-                AppStrings::Settings_Option_AiScopeForceFull ? AppStrings::Settings_Option_AiScopeForceFull : L"Force Full Image",
-                AppStrings::Settings_Option_AiScopeCropBlend ? AppStrings::Settings_Option_AiScopeCropBlend : L"Inpaint & Blend"
+            bool isZh = IsSimplifiedChinese();
+            s_aiUi.scopeOptions = isZh ? std::vector<std::wstring_view>{
+                L"自适应 (选区优先)",
+                L"整图处理",
+                L"选区修补融合"
+            } : std::vector<std::wstring_view>{
+                L"Auto (Selection First)",
+                L"Full Image",
+                L"Inpaint & Blend"
             };
 
-            bool isZh = IsSimplifiedChinese();
             s_aiUi.timeoutOptions = isZh ? std::vector<std::wstring_view>{
                 L"30 秒",
                 L"60 秒",
@@ -1244,63 +1250,73 @@ namespace {
             };
 
             s_aiUi.denoiseOptions = isZh ? std::vector<std::wstring_view>{
-                L"0.30 (极低微调，保持结构)",
-                L"0.35 (细节增强，主体锁定)",
-                L"0.40 (适度重构，商业质感)",
-                L"0.50 (半重绘，风格转换)",
-                L"0.70 (高重绘，无痕消除)"
+                L"0.30 (极弱微调)",
+                L"0.35 (平衡推荐)",
+                L"0.40 (适度重塑)",
+                L"0.50 (半重绘)",
+                L"0.70 (深度重绘)"
             } : std::vector<std::wstring_view>{
-                L"0.30 (Subtle, preserve structure)",
-                L"0.35 (Detail boost, subject lock)",
-                L"0.40 (Balanced rework, professional)",
-                L"0.50 (Semi-repaint, style transfer)",
-                L"0.70 (High redraw, clean inpaint)"
+                L"0.30 (Subtle)",
+                L"0.35 (Recommended)",
+                L"0.40 (Moderate)",
+                L"0.50 (Medium)",
+                L"0.70 (Strong Inpaint)"
             };
 
             s_aiUi.stepsOptions = isZh ? std::vector<std::wstring_view>{
-                L"15 步 (极速预览)",
-                L"20 步 (快速生成)",
-                L"25 步 (标准平衡 - 推荐)",
-                L"30 步 (高品质精细)",
-                L"40 步 (超高采样)",
+                L"15 步 (极速)",
+                L"20 步 (快速)",
+                L"25 步 (标准推荐)",
+                L"30 步 (高品质)",
+                L"40 步 (精细)",
                 L"50 步 (极致细节)"
             } : std::vector<std::wstring_view>{
-                L"15 Steps (Fast Preview)",
-                L"20 Steps (Quick Generation)",
-                L"25 Steps (Standard - Recommended)",
+                L"15 Steps (Fast)",
+                L"20 Steps (Quick)",
+                L"25 Steps (Recommended)",
                 L"30 Steps (High Quality)",
-                L"40 Steps (Ultra High Sampling)",
-                L"50 Steps (Maximum Detail)"
+                L"40 Steps (Ultra)",
+                L"50 Steps (Maximum)"
             };
 
             s_aiUi.cfgOptions = isZh ? std::vector<std::wstring_view>{
-                L"4.0 (弱引导，自然写实)",
+                L"4.0 (弱引导)",
                 L"5.5 (柔和平衡)",
-                L"7.0 (标准推荐 - 黄金比例)",
-                L"8.5 (强约束，强调特征)",
-                L"10.0 (超强遵循)"
+                L"7.0 (标准推荐)",
+                L"8.5 (强约束)",
+                L"10.0 (严苛遵循)"
             } : std::vector<std::wstring_view>{
-                L"4.0 (Subtle Guidance, Realistic)",
-                L"5.5 (Soft Balance)",
-                L"7.0 (Balanced - Golden Ratio)",
-                L"8.5 (Strong Prompt Adherence)",
-                L"10.0 (Strict Enforcement)"
+                L"4.0 (Subtle)",
+                L"5.5 (Soft)",
+                L"7.0 (Recommended)",
+                L"8.5 (Strong)",
+                L"10.0 (Strict)"
             };
 
             s_aiUi.aspectRatioOptions = isZh ? std::vector<std::wstring_view>{
-                L"自适应 (匹配原图尺寸与画幅)",
-                L"1:1 (正方形 - 1024x1024)",
-                L"16:9 (横屏宽屏 - 1344x768 / 1792x1024)",
-                L"9:16 (纵向壁纸 - 768x1344 / 1024x1792)",
-                L"4:3 (标准横向 - 1152x864)",
-                L"3:4 (标准纵向 - 864x1152)"
+                L"自适应 (匹配原图)",
+                L"1:1 (正方形)",
+                L"16:9 (横屏宽幅)",
+                L"9:16 (竖屏壁纸)",
+                L"4:3 (标准横屏)",
+                L"3:4 (标准竖屏)"
             } : std::vector<std::wstring_view>{
-                L"Auto (Match Source Aspect Ratio)",
-                L"1:1 (Square - 1024x1024)",
-                L"16:9 (Landscape - 1344x768 / 1792x1024)",
-                L"9:16 (Portrait - 768x1344 / 1024x1792)",
-                L"4:3 (Standard - 1152x864)",
-                L"3:4 (Vertical - 864x1152)"
+                L"Auto (Match Source)",
+                L"1:1 (Square)",
+                L"16:9 (Landscape)",
+                L"9:16 (Portrait)",
+                L"4:3 (Standard 4:3)",
+                L"3:4 (Vertical 3:4)"
+            };
+
+            s_aiUi.resolutionOptions = isZh ? std::vector<std::wstring_view>{
+                L"1K 标准 (1024px)",
+                L"2K 高清 (2048px - 推荐)",
+                L"4K 超清 (4096px)"
+            } : std::vector<std::wstring_view>{
+                L"1K Standard (1024px)",
+                L"2K HD (2048px - Recommended)",
+                L"4K Ultra HD (4096px)"
             };
 
             // Hybrid Model Combobox Options (Auto-fetch + Pick from list or Custom Input)
@@ -1369,6 +1385,7 @@ namespace {
         s_aiUi.actionProfileOptionViews.resize(actions.size());
         s_aiUi.actionScopeIndices.resize(actions.size(), 0);
         s_aiUi.actionAspectIndices.resize(actions.size(), 0);
+        s_aiUi.actionResolutionIndices.resize(actions.size(), 1);
         s_aiUi.actionDenoiseIndices.resize(actions.size(), 1);
         s_aiUi.actionStepsIndices.resize(actions.size(), 2);
         s_aiUi.actionCfgIndices.resize(actions.size(), 2);
@@ -1406,6 +1423,7 @@ namespace {
 
             s_aiUi.actionScopeIndices[i] = static_cast<int>(a.scopeMode);
             s_aiUi.actionAspectIndices[i] = static_cast<int>(a.aspectRatio);
+            s_aiUi.actionResolutionIndices[i] = static_cast<int>(a.targetResolution);
 
             int denoiseIdx = 1; // 0.35 default
             if (a.denoisingStrength <= 0.32f) denoiseIdx = 0;
@@ -1727,8 +1745,10 @@ namespace {
 
                 // Default Profile Marker & Switch Button
                 if (isDefault) {
-                    SettingsItem itemDefStatus = { AppStrings::Settings_Label_AiDefaultProfile ? AppStrings::Settings_Label_AiDefaultProfile : L"Default Provider", OptionType::InfoLabel };
-                    itemDefStatus.label = AppStrings::Settings_Label_AiDefaultProfile ? AppStrings::Settings_Label_AiDefaultProfile : L"★ Default Provider";
+                    SettingsItem itemDefStatus = { AppStrings::Settings_Label_AiDefaultProfile ? AppStrings::Settings_Label_AiDefaultProfile : L"Default Provider", OptionType::ActionButton };
+                    itemDefStatus.buttonText = AppStrings::Settings_Label_AiDefaultProfile ? AppStrings::Settings_Label_AiDefaultProfile : L"★ Default Provider";
+                    itemDefStatus.isDisabled = true;
+                    itemDefStatus.isActivated = true;
                     tabAi.items.push_back(itemDefStatus);
                 } else {
                     SettingsItem itemSetDef = { AppStrings::Settings_Label_AiDefaultProfile ? AppStrings::Settings_Label_AiDefaultProfile : L"Default Provider", OptionType::ActionButton };
@@ -1884,7 +1904,7 @@ namespace {
         tabAi.items.push_back({ L"", OptionType::Separator });
 
         // Add Profile Button (Allow advanced users to add more if desired, default is just 1)
-        SettingsItem itemAddProf = { AppStrings::Settings_Button_AiAddProf ? AppStrings::Settings_Button_AiAddProf : L"+ Add Model Provider", OptionType::ActionButton };
+        SettingsItem itemAddProf = { L"", OptionType::ActionButton };
         itemAddProf.buttonText = AppStrings::Settings_Button_AiAddProf ? AppStrings::Settings_Button_AiAddProf : L"+ Add Model Provider";
         itemAddProf.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
             auto& m = QuickView::AI::AiActionManager::Instance();
@@ -1908,7 +1928,7 @@ namespace {
         tabAi.items.push_back({ AppStrings::Settings_Header_AiActions ? AppStrings::Settings_Header_AiActions : L"AI Actions", OptionType::Header });
 
         // Add Action Button
-        SettingsItem itemAddAct = { AppStrings::Settings_Button_AiAddAction ? AppStrings::Settings_Button_AiAddAction : L"+ New AI Action", OptionType::ActionButton };
+        SettingsItem itemAddAct = { L"", OptionType::ActionButton };
         itemAddAct.buttonText = AppStrings::Settings_Button_AiAddAction ? AppStrings::Settings_Button_AiAddAction : L"+ New AI Action";
         itemAddAct.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
             auto& m = QuickView::AI::AiActionManager::Instance();
@@ -1920,6 +1940,7 @@ namespace {
             newAct.negativePrompt = L"blurry, noise, low quality, artifacts, distorted, bad quality";
             newAct.scopeMode = QuickView::AI::ScopeMode::Auto;
             newAct.aspectRatio = QuickView::AI::OutputAspectRatio::Auto;
+            newAct.targetResolution = QuickView::AI::TargetResolution::Res_2K;
             newAct.denoisingStrength = 0.35f;
             newAct.samplingSteps = 25;
             newAct.cfgScale = 7.0f;
@@ -1928,6 +1949,9 @@ namespace {
             if (ov) ov->RequestRebuild();
         };
         tabAi.items.push_back(itemAddAct);
+
+        // Breathing space below "+ New AI Action" button before action cards
+        tabAi.items.push_back({ L"spacing", OptionType::Separator });
 
         // Actions Accordion Cards
         for (size_t i = 0; i < actions.size(); ++i) {
@@ -1951,6 +1975,29 @@ namespace {
             tabAi.items.push_back(itemActCard);
 
             if (s_aiUi.actionExpanded[i]) {
+                // Determine effective protocol for this action to filter compatible parameters
+                QuickView::AI::ApiProtocol effectiveProto = QuickView::AI::ApiProtocol::GeminiNative;
+                const QuickView::AI::ModelProfile* boundProf = nullptr;
+                auto& mInstance = QuickView::AI::AiActionManager::Instance();
+                if (!a.modelProfileId.empty()) {
+                    boundProf = mInstance.FindProfile(a.modelProfileId);
+                }
+                if (!boundProf) {
+                    boundProf = mInstance.GetDefaultProfile();
+                }
+                bool isDiffusionOrInpaint = false;
+                if (boundProf) {
+                    effectiveProto = boundProf->protocol;
+                    if (effectiveProto == QuickView::AI::ApiProtocol::StabilityInpaint ||
+                        effectiveProto == QuickView::AI::ApiProtocol::ComfyUI ||
+                        effectiveProto == QuickView::AI::ApiProtocol::OpenAiImagesGenerate ||
+                        boundProf->baseUrl.find(":7860") != std::string::npos ||
+                        boundProf->baseUrl.find("sdapi") != std::string::npos ||
+                        boundProf->baseUrl.find(":8188") != std::string::npos) {
+                        isDiffusionOrInpaint = true;
+                    }
+                }
+
                 // Action Name Input
                 SettingsItem itemActName = { AppStrings::Settings_Label_AiActionName ? AppStrings::Settings_Label_AiActionName : L"Action Name", OptionType::Input, nullptr, nullptr, nullptr, &s_aiUi.actionNames[i] };
                 itemActName.pIntVal = reinterpret_cast<int*>(i);
@@ -2021,6 +2068,7 @@ namespace {
                             acts[aIdx].modelProfileId = pr[sel - 1].id;
                         }
                         m.SaveConfig();
+                        if (ov) ov->RequestRebuild();
                     }
                 };
                 tabAi.items.push_back(itemActProfile);
@@ -2028,6 +2076,9 @@ namespace {
                 // Scope Mode
                 SettingsItem itemScope;
                 itemScope.label = AppStrings::Settings_Label_AiScopeMode ? AppStrings::Settings_Label_AiScopeMode : L"Scope Mode";
+                itemScope.tooltipText = IsSimplifiedChinese() ? 
+                    L"控制动作的作用范围。自适应在存在选区时优先处理选区，否则处理整图；修补融合会将生成内容自然羽化贴回原图。" : 
+                    L"Controls processing scope. Auto uses active selection if present, otherwise full image. Inpaint & Blend seamlessly feathers back onto base canvas.";
                 itemScope.type = OptionType::ComboBox;
                 itemScope.pIntVal = &s_aiUi.actionScopeIndices[i];
                 itemScope.options = s_aiUi.scopeOptions;
@@ -2045,7 +2096,10 @@ namespace {
 
                 // Output Aspect Ratio & Framing ComboBox
                 SettingsItem itemAspect;
-                itemAspect.label = IsSimplifiedChinese() ? L"输出画幅与尺寸 (Aspect Ratio)" : L"Aspect Ratio & Framing";
+                itemAspect.label = IsSimplifiedChinese() ? L"输出画幅与尺寸" : L"Aspect Ratio & Framing";
+                itemAspect.tooltipText = IsSimplifiedChinese() ?
+                    L"控制输出画幅与尺寸比例。自适应严格匹配原图比例；1:1/16:9/9:16等预设比例将自动映射到对应标准分辨率（如 1344x768、1024x1024 等）。" :
+                    L"Controls output framing and resolution. Auto matches input aspect ratio. Presets (1:1, 16:9, 9:16) map to standard diffusion resolutions.";
                 itemAspect.type = OptionType::ComboBox;
                 itemAspect.pIntVal = &s_aiUi.actionAspectIndices[i];
                 itemAspect.options = s_aiUi.aspectRatioOptions;
@@ -2061,75 +2115,108 @@ namespace {
                 };
                 tabAi.items.push_back(itemAspect);
 
-                // Denoising Strength ComboBox
-                SettingsItem itemDenoise;
-                itemDenoise.label = IsSimplifiedChinese() ? L"重绘/去噪幅度" : L"Denoising Strength";
-                itemDenoise.type = OptionType::ComboBox;
-                itemDenoise.pIntVal = &s_aiUi.actionDenoiseIndices[i];
-                itemDenoise.options = s_aiUi.denoiseOptions;
-                itemDenoise.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                // Target Output Resolution ComboBox (1K / 2K / 4K)
+                SettingsItem itemRes;
+                itemRes.label = IsSimplifiedChinese() ? L"生成分辨率" : L"Output Resolution";
+                itemRes.tooltipText = IsSimplifiedChinese() ?
+                    L"指定 AI 图像生成的物理分辨率。Google Gemini (3.1/Imagen 3) 原生输出 1K/2K/4K；OpenAI (DALL-E 3) 自动启用 HD 细节模式；本地 SD / Forge 自动计算对应 2K/4K 像素宽高。" :
+                    L"Controls actual output image resolution. Injects official 1K/2K/4K parameters for Google Gemini/Imagen, enables HD quality for OpenAI, and scales pixel dimensions for SD.";
+                itemRes.type = OptionType::ComboBox;
+                itemRes.pIntVal = &s_aiUi.actionResolutionIndices[i];
+                itemRes.options = s_aiUi.resolutionOptions;
+                itemRes.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
                     if (!it || !it->pIntVal) return;
-                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionDenoiseIndices.data());
+                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionResolutionIndices.data());
                     auto& m = QuickView::AI::AiActionManager::Instance();
                     auto& acts = m.GetActions();
                     if (aIdx < acts.size()) {
-                        int choice = *it->pIntVal;
-                        if (choice == 0) acts[aIdx].denoisingStrength = 0.30f;
-                        else if (choice == 1) acts[aIdx].denoisingStrength = 0.35f;
-                        else if (choice == 2) acts[aIdx].denoisingStrength = 0.40f;
-                        else if (choice == 3) acts[aIdx].denoisingStrength = 0.50f;
-                        else if (choice == 4) acts[aIdx].denoisingStrength = 0.70f;
+                        acts[aIdx].targetResolution = static_cast<QuickView::AI::TargetResolution>(*it->pIntVal);
                         m.SaveConfig();
                     }
                 };
-                tabAi.items.push_back(itemDenoise);
+                tabAi.items.push_back(itemRes);
 
-                // Sampling Steps ComboBox
-                SettingsItem itemSteps;
-                itemSteps.label = IsSimplifiedChinese() ? L"采样步数 (Steps)" : L"Sampling Steps";
-                itemSteps.type = OptionType::ComboBox;
-                itemSteps.pIntVal = &s_aiUi.actionStepsIndices[i];
-                itemSteps.options = s_aiUi.stepsOptions;
-                itemSteps.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
-                    if (!it || !it->pIntVal) return;
-                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionStepsIndices.data());
-                    auto& m = QuickView::AI::AiActionManager::Instance();
-                    auto& acts = m.GetActions();
-                    if (aIdx < acts.size()) {
-                        int choice = *it->pIntVal;
-                        if (choice == 0) acts[aIdx].samplingSteps = 15;
-                        else if (choice == 1) acts[aIdx].samplingSteps = 20;
-                        else if (choice == 2) acts[aIdx].samplingSteps = 25;
-                        else if (choice == 3) acts[aIdx].samplingSteps = 30;
-                        else if (choice == 4) acts[aIdx].samplingSteps = 40;
-                        else if (choice == 5) acts[aIdx].samplingSteps = 50;
-                        m.SaveConfig();
-                    }
-                };
-                tabAi.items.push_back(itemSteps);
+                // Denoising Strength, Sampling Steps, and CFG Scale only apply to Diffusion/Inpainting engines
+                if (isDiffusionOrInpaint) {
+                    // Denoising Strength ComboBox
+                    SettingsItem itemDenoise;
+                    itemDenoise.label = IsSimplifiedChinese() ? L"重绘/去噪幅度" : L"Denoising Strength";
+                    itemDenoise.tooltipText = IsSimplifiedChinese() ?
+                        L"去噪重绘幅度（仅生图/扩散模型生效）。0.30~0.35 保留主体轮廓与结构，做无痕质感增强；0.50 以上大幅重构画面内容。" :
+                        L"Denoising strength for diffusion/inpaint. 0.30~0.35 preserves subject geometry; >0.50 allows significant re-imagining.";
+                    itemDenoise.type = OptionType::ComboBox;
+                    itemDenoise.pIntVal = &s_aiUi.actionDenoiseIndices[i];
+                    itemDenoise.options = s_aiUi.denoiseOptions;
+                    itemDenoise.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                        if (!it || !it->pIntVal) return;
+                        size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionDenoiseIndices.data());
+                        auto& m = QuickView::AI::AiActionManager::Instance();
+                        auto& acts = m.GetActions();
+                        if (aIdx < acts.size()) {
+                            int choice = *it->pIntVal;
+                            if (choice == 0) acts[aIdx].denoisingStrength = 0.30f;
+                            else if (choice == 1) acts[aIdx].denoisingStrength = 0.35f;
+                            else if (choice == 2) acts[aIdx].denoisingStrength = 0.40f;
+                            else if (choice == 3) acts[aIdx].denoisingStrength = 0.50f;
+                            else if (choice == 4) acts[aIdx].denoisingStrength = 0.70f;
+                            m.SaveConfig();
+                        }
+                    };
+                    tabAi.items.push_back(itemDenoise);
 
-                // Prompt Guidance (CFG Scale) ComboBox
-                SettingsItem itemCfg;
-                itemCfg.label = IsSimplifiedChinese() ? L"提示词引导系数 (CFG Scale)" : L"CFG Scale";
-                itemCfg.type = OptionType::ComboBox;
-                itemCfg.pIntVal = &s_aiUi.actionCfgIndices[i];
-                itemCfg.options = s_aiUi.cfgOptions;
-                itemCfg.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
-                    if (!it || !it->pIntVal) return;
-                    size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionCfgIndices.data());
-                    auto& m = QuickView::AI::AiActionManager::Instance();
-                    auto& acts = m.GetActions();
-                    if (aIdx < acts.size()) {
-                        int choice = *it->pIntVal;
-                        if (choice == 0) acts[aIdx].cfgScale = 4.0f;
-                        else if (choice == 1) acts[aIdx].cfgScale = 5.5f;
-                        else if (choice == 2) acts[aIdx].cfgScale = 7.0f;
-                        else if (choice == 3) acts[aIdx].cfgScale = 8.5f;
-                        else if (choice == 4) acts[aIdx].cfgScale = 10.0f;
-                        m.SaveConfig();
-                    }
-                };
-                tabAi.items.push_back(itemCfg);
+                    // Sampling Steps ComboBox
+                    SettingsItem itemSteps;
+                    itemSteps.label = IsSimplifiedChinese() ? L"采样步数 (Steps)" : L"Sampling Steps";
+                    itemSteps.tooltipText = IsSimplifiedChinese() ?
+                        L"扩散迭代步数（仅生图/扩散模型生效）。25 步为兼顾画质与耗时的推荐平衡点；更高步数细节更细腻但耗时成倍增加。" :
+                        L"Sampling iterations for diffusion. 25 steps is the recommended golden balance between quality and latency.";
+                    itemSteps.type = OptionType::ComboBox;
+                    itemSteps.pIntVal = &s_aiUi.actionStepsIndices[i];
+                    itemSteps.options = s_aiUi.stepsOptions;
+                    itemSteps.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                        if (!it || !it->pIntVal) return;
+                        size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionStepsIndices.data());
+                        auto& m = QuickView::AI::AiActionManager::Instance();
+                        auto& acts = m.GetActions();
+                        if (aIdx < acts.size()) {
+                            int choice = *it->pIntVal;
+                            if (choice == 0) acts[aIdx].samplingSteps = 15;
+                            else if (choice == 1) acts[aIdx].samplingSteps = 20;
+                            else if (choice == 2) acts[aIdx].samplingSteps = 25;
+                            else if (choice == 3) acts[aIdx].samplingSteps = 30;
+                            else if (choice == 4) acts[aIdx].samplingSteps = 40;
+                            else if (choice == 5) acts[aIdx].samplingSteps = 50;
+                            m.SaveConfig();
+                        }
+                    };
+                    tabAi.items.push_back(itemSteps);
+
+                    // Prompt Guidance (CFG Scale) ComboBox
+                    SettingsItem itemCfg;
+                    itemCfg.label = IsSimplifiedChinese() ? L"提示词引导 (CFG)" : L"CFG Scale";
+                    itemCfg.tooltipText = IsSimplifiedChinese() ?
+                        L"提示词引导系数（仅生图/扩散模型生效）。数值越大画面越严格依从文字提示词，推荐 7.0 黄金比例；过高可能导致画面过饱和或失真。" :
+                        L"Classifier-Free Guidance scale. Controls prompt adherence. 7.0 is the recommended golden ratio.";
+                    itemCfg.type = OptionType::ComboBox;
+                    itemCfg.pIntVal = &s_aiUi.actionCfgIndices[i];
+                    itemCfg.options = s_aiUi.cfgOptions;
+                    itemCfg.onChange = []([[maybe_unused]] SettingsOverlay* ov, [[maybe_unused]] SettingsItem* it) {
+                        if (!it || !it->pIntVal) return;
+                        size_t aIdx = static_cast<size_t>(it->pIntVal - s_aiUi.actionCfgIndices.data());
+                        auto& m = QuickView::AI::AiActionManager::Instance();
+                        auto& acts = m.GetActions();
+                        if (aIdx < acts.size()) {
+                            int choice = *it->pIntVal;
+                            if (choice == 0) acts[aIdx].cfgScale = 4.0f;
+                            else if (choice == 1) acts[aIdx].cfgScale = 5.5f;
+                            else if (choice == 2) acts[aIdx].cfgScale = 7.0f;
+                            else if (choice == 3) acts[aIdx].cfgScale = 8.5f;
+                            else if (choice == 4) acts[aIdx].cfgScale = 10.0f;
+                            m.SaveConfig();
+                        }
+                    };
+                    tabAi.items.push_back(itemCfg);
+                }
 
                 // Delete Action Button
                 SettingsItem itemDelAct = { AppStrings::Settings_Button_AiDeleteAction ? AppStrings::Settings_Button_AiDeleteAction : L"Delete Action", OptionType::ActionButton };
@@ -5303,20 +5390,24 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
                 item.interactRect = {};
                 item.interactRect2 = {};
 
-            // 1. Separator Type (Clean page or section divider line)
+            // 1. Separator Type (Clean page or section divider line, or pure spacing if label == "spacing")
             if (item.type == OptionType::Separator) {
                 insideAccordionCard = false;
-                contentY += 8.0f * s;
-                float origOpacity = m_brushBorder->GetOpacity();
-                m_brushBorder->SetOpacity(origOpacity * 0.45f);
-                pRT->DrawLine(
-                    D2D1::Point2F(contentX, contentY),
-                    D2D1::Point2F(contentX + contentW, contentY),
-                    m_brushBorder.Get(),
-                    1.0f * s
-                );
-                m_brushBorder->SetOpacity(origOpacity);
-                contentY += 14.0f * s;
+                if (item.label == L"spacing") {
+                    contentY += 12.0f * s;
+                } else {
+                    contentY += 8.0f * s;
+                    float origOpacity = m_brushBorder->GetOpacity();
+                    m_brushBorder->SetOpacity(origOpacity * 0.45f);
+                    pRT->DrawLine(
+                        D2D1::Point2F(contentX, contentY),
+                        D2D1::Point2F(contentX + contentW, contentY),
+                        m_brushBorder.Get(),
+                        1.0f * s
+                    );
+                    m_brushBorder->SetOpacity(origOpacity);
+                    contentY += 14.0f * s;
+                }
                 m_settingsContentHeight = (contentY - startContentY > m_settingsContentHeight) ? (contentY - startContentY) : m_settingsContentHeight;
                 continue;
             }
