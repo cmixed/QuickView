@@ -17314,41 +17314,46 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          float targetPanX = 0.0f;
          float targetPanY = 0.0f;
 
-         if (windowAnchor) {
-             // Screen invariant anchor equation: compensates for window center movement across translation
-             const float dx_old = (float)windowAnchor->x - oldCenterScreenX;
-             const float dy_old = (float)windowAnchor->y - oldCenterScreenY;
-             const float dx_new = (float)windowAnchor->x - newCenterScreenX;
-             const float dy_new = (float)windowAnchor->y - newCenterScreenY;
-
-             targetPanX = startPanX * scaleRatio + (dx_new - scaleRatio * dx_old);
-             targetPanY = startPanY * scaleRatio + (dy_new - scaleRatio * dy_old);
-         } else {
-             // Center zoom: compensate for window center movement so image center remains invariant on screen
-             const float deltaCenterX = newCenterScreenX - oldCenterScreenX;
-             const float deltaCenterY = newCenterScreenY - oldCenterScreenY;
-             targetPanX = startPanX * scaleRatio - deltaCenterX;
-             targetPanY = startPanY * scaleRatio - deltaCenterY;
-         }
-
-         // [Zero-Jitter C0 Viewport Clamping]
-         // When scaled image dimension fits inside the client viewport, strictly center it (Pan = 0).
-         // When overflowing, smoothly clamp pan to avoid border jumping.
          const float scaledW = vs.VisualSize.width * newTotalScale;
          const float scaledH = vs.VisualSize.height * newTotalScale;
          const float maxPanX = (std::max)(0.0f, (scaledW - (float)targetW) * 0.5f);
          const float maxPanY = (std::max)(0.0f, (scaledH - effFinalWinH) * 0.5f);
 
-         if (maxPanX <= 0.5f) {
+         if (maxPanX <= 0.5f && maxPanY <= 0.5f) {
+             // [Pure Window Resize Zoom]
+             // The outer window boundaries already accurately scale and anchor to mouse/center.
+             // Keep content strictly centered inside viewport to prevent conflicting internal shifts and jitter.
              targetPanX = 0.0f;
-         } else {
-             targetPanX = (std::clamp)(targetPanX, -maxPanX, maxPanX);
-         }
-
-         if (maxPanY <= 0.5f) {
              targetPanY = 0.0f;
          } else {
-             targetPanY = (std::clamp)(targetPanY, -maxPanY, maxPanY);
+             // [Overflow Zoom]
+             // Window size is clamped by screen or max limits. Engage internal viewport translation.
+             if (windowAnchor) {
+                 const float dx_old = (float)windowAnchor->x - oldCenterScreenX;
+                 const float dy_old = (float)windowAnchor->y - oldCenterScreenY;
+                 const float dx_new = (float)windowAnchor->x - newCenterScreenX;
+                 const float dy_new = (float)windowAnchor->y - newCenterScreenY;
+
+                 targetPanX = startPanX * scaleRatio + (dx_new - scaleRatio * dx_old);
+                 targetPanY = startPanY * scaleRatio + (dy_new - scaleRatio * dy_old);
+             } else {
+                 const float deltaCenterX = newCenterScreenX - oldCenterScreenX;
+                 const float deltaCenterY = newCenterScreenY - oldCenterScreenY;
+                 targetPanX = startPanX * scaleRatio - deltaCenterX;
+                 targetPanY = startPanY * scaleRatio - deltaCenterY;
+             }
+
+             if (maxPanX <= 0.5f) {
+                 targetPanX = 0.0f;
+             } else {
+                 targetPanX = (std::clamp)(targetPanX, -maxPanX, maxPanX);
+             }
+
+             if (maxPanY <= 0.5f) {
+                 targetPanY = 0.0f;
+             } else {
+                 targetPanY = (std::clamp)(targetPanY, -maxPanY, maxPanY);
+             }
          }
 
          // Direct Mode - Snap to target immediately with atomic DComp barrier
@@ -17393,8 +17398,8 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
          if (oldZoom < 0.0001f) oldZoom = 0.0001f;
          float newZoom = newTotalScale / baseFit;
          
-         // Apply Zoom Ratio to Pan if Center Point Provided
-         const POINT* viewportAnchor = centerPt;
+         // Apply Zoom Ratio to Pan respecting MouseAnchoredWindowZoom config
+         const POINT* viewportAnchor = (g_config.MouseAnchoredWindowZoom ? centerPt : nullptr);
          if (viewportAnchor) {
              float zoomRatio = newZoom / oldZoom;
              POINT pt = *viewportAnchor;
@@ -17411,10 +17416,29 @@ void PerformSmartZoom(HWND hwnd, float newTotalScale, const POINT* centerPt, boo
              GetPaneContext(PaneSlot::Primary).view.PanX = GetPaneContext(PaneSlot::Primary).view.PanX * zoomRatio + dx * (1.0f - zoomRatio);
              GetPaneContext(PaneSlot::Primary).view.PanY = GetPaneContext(PaneSlot::Primary).view.PanY * zoomRatio + dy * (1.0f - zoomRatio);
          } else {
-             // Center Zoom (for Keyboard)
+             // Center Zoom (for Keyboard or when MouseAnchoredWindowZoom is disabled)
              float zoomRatio = newZoom / oldZoom;
              GetPaneContext(PaneSlot::Primary).view.PanX *= zoomRatio;
              GetPaneContext(PaneSlot::Primary).view.PanY *= zoomRatio;
+         }
+
+         // [Zero-Jitter Viewport Clamping]
+         // When zoomed out to fit or smaller, strictly snap to center (Pan = 0).
+         const float scaledW = vs.VisualSize.width * newTotalScale;
+         const float scaledH = vs.VisualSize.height * newTotalScale;
+         const float maxPanX = (std::max)(0.0f, (scaledW - winW) * 0.5f);
+         const float maxPanY = (std::max)(0.0f, (scaledH - effWinH) * 0.5f);
+
+         if (maxPanX <= 0.5f) {
+             GetPaneContext(PaneSlot::Primary).view.PanX = 0.0f;
+         } else {
+             GetPaneContext(PaneSlot::Primary).view.PanX = (std::clamp)(GetPaneContext(PaneSlot::Primary).view.PanX, -maxPanX, maxPanX);
+         }
+
+         if (maxPanY <= 0.5f) {
+             GetPaneContext(PaneSlot::Primary).view.PanY = 0.0f;
+         } else {
+             GetPaneContext(PaneSlot::Primary).view.PanY = (std::clamp)(GetPaneContext(PaneSlot::Primary).view.PanY, -maxPanY, maxPanY);
          }
          
          GetPaneContext(PaneSlot::Primary).view.Zoom = newZoom;
