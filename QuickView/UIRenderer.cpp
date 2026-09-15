@@ -4028,12 +4028,21 @@ void UIRenderer::DrawCompactInfo(ID2D1DeviceContext* dc) {
     float nonTextW = 70.0f * s;
     float panelW = nonTextW + textW;
     float margin = 8.0f * s;
-    float winCtrlW = GetWindowControlsWidth();
+    float minAllowedLeft = margin;
+    float winCtrlW = (g_runtime.InfoPanelAlignY == 0) ? GetWindowControlsWidth() : 0.0f;
     float maxAllowedRight = (float)m_width - winCtrlW - margin;
 
-    // Check if full panel exceeds available length
-    float targetStartX = (g_runtime.InfoPanelAlignX == 0) ? (g_runtime.InfoPanelX * s) : ((float)m_width - panelW - g_runtime.InfoPanelX * s);
-    float availablePanelW = maxAllowedRight - targetStartX;
+    // Determine available horizontal space based on anchor alignment
+    float availablePanelW = 0.0f;
+    if (g_runtime.InfoPanelAlignX == 0) {
+        // Left-aligned: anchor at startX, expand towards the right up to maxAllowedRight
+        float targetStartX = (std::max)(minAllowedLeft, g_runtime.InfoPanelX * s);
+        availablePanelW = (std::max)(0.0f, maxAllowedRight - targetStartX);
+    } else {
+        // Right-aligned: anchor at targetEndX, expand towards the left down to minAllowedLeft
+        float targetEndX = (std::min)(maxAllowedRight, (float)m_width - g_runtime.InfoPanelX * s);
+        availablePanelW = (std::max)(0.0f, targetEndX - minAllowedLeft);
+    }
 
     if (!m_animState.IsAnimated && panelW > availablePanelW && availablePanelW > 0.0f) {
         auto fullFileOpt = FormatLiteField(L"File", g_currentMetadata, g_imagePath, nullptr, s, this, 0.0f);
@@ -4072,8 +4081,7 @@ void UIRenderer::DrawCompactInfo(ID2D1DeviceContext* dc) {
         startY = (float)m_height - panelH - g_runtime.InfoPanelY * s;
     }
     
-    margin = 8.0f * s;
-    startX = std::clamp(startX, margin, (std::max)(margin, (float)m_width - panelW - margin));
+    startX = std::clamp(startX, minAllowedLeft, (std::max)(minAllowedLeft, maxAllowedRight - panelW));
     startY = std::clamp(startY, topBoundary + margin, (std::max)(topBoundary + margin, (float)m_height - panelH - margin));
     
     // Layout and Geometry
@@ -4420,7 +4428,9 @@ void UIRenderer::DrawInfoPanel(ID2D1DeviceContext* dc) {
     }
     
     float margin = 8.0f * s;
-    startX = std::clamp(startX, margin, (std::max)(margin, (float)m_width - width - margin));
+    float winCtrlW = (g_runtime.InfoPanelAlignY == 0) ? GetWindowControlsWidth() : 0.0f;
+    float maxAllowedRight = (float)m_width - winCtrlW - margin;
+    startX = std::clamp(startX, margin, (std::max)(margin, maxAllowedRight - width));
     startY = std::clamp(startY, topBoundary + margin, (std::max)(topBoundary + margin, (float)m_height - height - margin));
     
     const std::wstring& allowedItems = g_runtime.ShowCompareInfo ? g_config.InfoPanelFullItemsCompare : g_config.InfoPanelFullItemsNormal;
