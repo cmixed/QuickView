@@ -1454,7 +1454,7 @@ namespace {
 
     void BuildAiActionsTab(SettingsTab& tabAi, [[maybe_unused]] SettingsOverlay* overlay) {
         tabAi.name = AppStrings::Settings_Tab_Ai ? AppStrings::Settings_Tab_Ai : L"AI Actions";
-        tabAi.icon = Icons::SuperResolution;
+        tabAi.icon = Icons::AiAction;
 
         bool isZh = IsSimplifiedChinese();
         SyncFromAiManager();

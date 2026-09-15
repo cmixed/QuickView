@@ -13,6 +13,8 @@ namespace QuickView::UI {
 // We track the factory pointer and invalidate on mismatch.
 static ID2D1Factory* s_cachedFactory = nullptr;
 static std::unordered_map<const GeekIcons::VectorIcon*, ComPtr<ID2D1PathGeometry>> s_geometryCache;
+static ComPtr<IDWriteFactory> s_dwriteFactory;
+static std::unordered_map<int, ComPtr<IDWriteTextFormat>> s_sparkleFormatCache;
 static std::mutex s_cacheMutex;
 
 static ComPtr<ID2D1PathGeometry> BuildGeometry(ID2D1Factory* factory, const GeekIcons::VectorIcon& icon) {
@@ -74,7 +76,54 @@ void GeekIconRenderer::DrawVectorIcon(
     ID2D1Brush* brush,
     float rotationAngle)
 {
-    if (!dc || !icon.commands || icon.count == 0 || !brush) return;
+    if (!dc || !brush) return;
+
+    // Special path: AiAction glyph represents "✨" rendered directly via DirectWrite (Zero-cost, no bezier vector bloat)
+    if (&icon == &GeekIcons::AiActionVector || (!icon.commands && icon.count == 0)) {
+        float rectW = rect.right - rect.left;
+        float rectH = rect.bottom - rect.top;
+        float iconSize = (std::min)(rectW, rectH);
+        if (iconSize <= 1.0f) return;
+
+        int targetFontSize = static_cast<int>(std::round(iconSize * 0.92f));
+        if (targetFontSize < 8) targetFontSize = 8;
+
+        ComPtr<IDWriteTextFormat> textFormat;
+        {
+            std::lock_guard<std::mutex> lock(s_cacheMutex);
+            auto it = s_sparkleFormatCache.find(targetFontSize);
+            if (it != s_sparkleFormatCache.end()) {
+                textFormat = it->second;
+            } else {
+                if (!s_dwriteFactory) {
+                    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(s_dwriteFactory.GetAddressOf()));
+                }
+                if (s_dwriteFactory) {
+                    if (SUCCEEDED(s_dwriteFactory->CreateTextFormat(
+                        L"Segoe UI",
+                        nullptr,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_FONT_STYLE_NORMAL,
+                        DWRITE_FONT_STRETCH_NORMAL,
+                        static_cast<float>(targetFontSize),
+                        L"",
+                        &textFormat)))
+                    {
+                        textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                        textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                        s_sparkleFormatCache[targetFontSize] = textFormat;
+                    }
+                }
+            }
+        }
+
+        if (textFormat) {
+            dc->DrawText(L"✨", 1, textFormat.Get(), rect, brush);
+        }
+        return;
+    }
+
+    if (!icon.commands || icon.count == 0) return;
 
     ComPtr<ID2D1Factory> factory;
     dc->GetFactory(&factory);
