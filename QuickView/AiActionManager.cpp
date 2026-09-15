@@ -1128,7 +1128,9 @@ void AiActionManager::BlendMaskGuidedFeathered(
 // --- Execution & Task Lifecycle ---
 uint64_t AiActionManager::ExecuteAction(
     const ActionDesc& action, HWND hwnd,
-    std::function<void(const ExecutionResult&)> onComplete) {
+    std::function<void(const ExecutionResult&)> onComplete,
+    std::wstring_view customPrompt,
+    int cropL, int cropT, int cropR, int cropB) {
 
     CancelCurrentTask();
 
@@ -1155,6 +1157,35 @@ uint64_t AiActionManager::ExecuteAction(
 
     ModelProfile profCopy = *profile;
     ActionDesc actCopy = action;
+
+    // Macro replacement for {prompt} or customPrompt injection
+    if (!customPrompt.empty()) {
+        size_t macroPos = actCopy.promptTemplate.find(L"{prompt}");
+        if (macroPos != std::wstring::npos) {
+            actCopy.promptTemplate.replace(macroPos, 8, customPrompt);
+        } else {
+            if (!actCopy.promptTemplate.empty()) actCopy.promptTemplate += L"\n";
+            actCopy.promptTemplate += customPrompt;
+        }
+    } else {
+        size_t macroPos = actCopy.promptTemplate.find(L"{prompt}");
+        if (macroPos != std::wstring::npos) {
+            actCopy.promptTemplate.erase(macroPos, 8);
+        }
+    }
+
+    // Check if we should execute inpaint / region selection
+    bool hasSelection = (std::abs(cropR - cropL) >= 8 && std::abs(cropB - cropT) >= 8);
+    bool shouldInpaint = (actCopy.scopeMode == ScopeMode::CropAndBlend) ||
+                         (actCopy.scopeMode == ScopeMode::Auto && hasSelection);
+
+    if (shouldInpaint && hasSelection) {
+        std::wstring promptCopy = actCopy.promptTemplate;
+        std::thread([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete]() {
+            InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete);
+        }).detach();
+        return taskId;
+    }
 
     std::thread([this, taskId, actCopy, profCopy, hwnd, onComplete]() {
         WorkerThread(taskId, actCopy, profCopy, hwnd, onComplete);

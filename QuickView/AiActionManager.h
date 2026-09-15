@@ -57,7 +57,11 @@ public:
     static std::string DecryptApiKey(std::string_view cipherBase64);
 
     // --- Execution & Task Lifecycle ---
-    uint64_t ExecuteAction(const ActionDesc& action, HWND hwnd, std::function<void(const ExecutionResult&)> onComplete);
+    uint64_t ExecuteAction(
+        const ActionDesc& action, HWND hwnd,
+        std::function<void(const ExecutionResult&)> onComplete,
+        std::wstring_view customPrompt = L"",
+        int cropL = 0, int cropT = 0, int cropR = 0, int cropB = 0);
     uint64_t ExecuteInpaint(
         int cropL, int cropT, int cropR, int cropB,
         std::wstring_view customPrompt,

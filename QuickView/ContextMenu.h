@@ -58,6 +58,7 @@ enum ContextMenuCommand : UINT {
     // [Transform & AI] Group
     IDM_ENTER_CROP_MODE,
     IDM_SUPER_RESOLUTION,
+    IDM_AI_ACTION,
     IDM_ROTATE_CW,
     IDM_ROTATE_CCW,
     IDM_FLIP_H,

@@ -8624,42 +8624,70 @@ static void TriggerInpaintCurrentSelection(HWND hwnd) {
     int w = cropR - cropL;
     int h = cropB - cropT;
     if (w < 8 || h < 8) {
-        g_osd.Show(hwnd, L"选区过小，请先框选重绘区域", false, false, D2D1::ColorF(1.0f, 0.4f, 0.4f), OSDPosition::Bottom, 2000);
+        const wchar_t* tooSmall = AppStrings::OSD_AiSelectionTooSmall ? AppStrings::OSD_AiSelectionTooSmall : L"选区过小，请先框选重绘区域";
+        g_osd.Show(hwnd, tooSmall, false, false, D2D1::ColorF(1.0f, 0.4f, 0.4f), OSDPosition::Bottom, 2000);
         return;
     }
 
-    std::wstring customPrompt = g_cropState.InpaintPromptBuffer;
+    std::string pendingActId = g_cropState.PendingActionId;
+    std::wstring customPrompt = g_cropState.PendingCustomPrompt;
 
     g_cropState.Reset();
     RequestRepaint(PaintLayer::All);
 
-    g_osd.StartPersistentTask(hwnd, L"✨ AI 局部重绘准备中 (Esc取消)...", D2D1::ColorF(0.4f, 0.8f, 1.0f), OSDPosition::Bottom, 0.05f);
+    // If an action was pending, execute that action with selection coordinates
+    const QuickView::AI::ActionDesc* pendingAct = nullptr;
+    if (!pendingActId.empty()) {
+        const auto& actions = QuickView::AI::AiActionManager::Instance().GetActions();
+        for (const auto& a : actions) {
+            if (a.id == pendingActId) {
+                pendingAct = &a;
+                break;
+            }
+        }
+    }
+
+    std::wstring actName = pendingAct ? pendingAct->name : (AppStrings::AiAction_InpaintTitle ? AppStrings::AiAction_InpaintTitle : L"选区局部重绘");
+    wchar_t startMsg[256] = { 0 };
+    const wchar_t* prepFmt = AppStrings::OSD_AiPreparing ? AppStrings::OSD_AiPreparing : L"✨ AI: %s 准备中 (Esc取消)...";
+    swprintf_s(startMsg, prepFmt, actName.c_str());
+    g_osd.StartPersistentTask(hwnd, startMsg, D2D1::ColorF(0.4f, 0.8f, 1.0f), OSDPosition::Bottom, 0.05f);
 
     auto taskFinished = std::make_shared<std::atomic<bool>>(false);
 
-    uint64_t currentTaskId = QuickView::AI::AiActionManager::Instance().ExecuteInpaint(
-        cropL, cropT, cropR, cropB, customPrompt, hwnd,
-        [taskFinished](const QuickView::AI::ExecutionResult& res) {
-            taskFinished->store(true);
-            if (!res.success) {
-                g_osd.EndPersistentTask(g_mainHwnd);
-                QuickView::AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
-                return;
-            }
+    auto onCompleteCallback = [taskFinished, actName](const QuickView::AI::ExecutionResult& res) {
+        taskFinished->store(true);
+        if (!res.success) {
+            g_osd.EndPersistentTask(g_mainHwnd);
+            QuickView::AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
+            return;
+        }
 
-            if (!res.resultImageData.empty()) {
-                auto* pData = new QuickView::AI::AsyncAiImageResult();
-                pData->imageData = std::move(res.resultImageData);
-                pData->actionName = L"选区局部重绘";
-                pData->width = res.imageWidth;
-                pData->height = res.imageHeight;
-                PostMessageW(g_mainHwnd, QuickView::AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
-            } else {
-                g_osd.EndPersistentTask(g_mainHwnd);
-            }
-        });
+        if (!res.resultImageData.empty()) {
+            auto* pData = new QuickView::AI::AsyncAiImageResult();
+            pData->imageData = std::move(res.resultImageData);
+            pData->actionName = actName;
+            pData->width = res.imageWidth;
+            pData->height = res.imageHeight;
+            PostMessageW(g_mainHwnd, QuickView::AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
+        } else if (!res.textContent.empty()) {
+            std::wstring displayMsg = actName + L": " + res.textContent;
+            g_osd.EndPersistentTask(g_mainHwnd, displayMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 8000);
+        } else {
+            g_osd.EndPersistentTask(g_mainHwnd);
+        }
+    };
 
-    std::thread([hwnd, currentTaskId, taskFinished]() {
+    uint64_t currentTaskId = 0;
+    if (pendingAct) {
+        currentTaskId = QuickView::AI::AiActionManager::Instance().ExecuteAction(
+            *pendingAct, hwnd, onCompleteCallback, customPrompt, cropL, cropT, cropR, cropB);
+    } else {
+        currentTaskId = QuickView::AI::AiActionManager::Instance().ExecuteInpaint(
+            cropL, cropT, cropR, cropB, customPrompt, hwnd, onCompleteCallback);
+    }
+
+    std::thread([hwnd, actName, currentTaskId, taskFinished]() {
         auto startTime = std::chrono::steady_clock::now();
         while (!taskFinished->load() && QuickView::AI::AiActionManager::Instance().IsRunning() && QuickView::AI::AiActionManager::Instance().GetCurrentTaskId() == currentTaskId) {
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -8667,8 +8695,9 @@ static void TriggerInpaintCurrentSelection(HWND hwnd) {
                 break;
             }
             auto elapsedSec = static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - startTime).count());
-            wchar_t msg[128] = { 0 };
-            swprintf_s(msg, L"✨ AI 局部重绘中 [%ds, Esc取消]...", elapsedSec);
+            wchar_t msg[256] = { 0 };
+            const wchar_t* procFmt = AppStrings::OSD_AiProcessingElapsed ? AppStrings::OSD_AiProcessingElapsed : L"✨ AI: %s 处理中 [%ds, Esc取消]...";
+            swprintf_s(msg, procFmt, actName.c_str(), elapsedSec);
             float fakeProgress = 1.0f - std::exp(-static_cast<float>(elapsedSec) / 20.0f);
             fakeProgress = (std::max)(0.05f, (std::min)(fakeProgress, 0.95f));
             g_osd.UpdatePersistentTask(hwnd, msg, fakeProgress);
@@ -8775,6 +8804,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_CTLCOLOREDIT: {
         HDC hdc = (HDC)wParam;
         HWND hEdit = (HWND)lParam;
+        if (reinterpret_cast<HWND>(lParam) == QuickView::UI::AiActionOverlay::Instance().GetPromptEditHwnd()) {
+            bool isLight = IsLightThemeActive();
+            COLORREF textClr = isLight ? RGB(20, 20, 25) : RGB(240, 240, 245);
+            COLORREF bgClr = isLight ? RGB(235, 240, 248) : RGB(23, 26, 33);
+            SetTextColor(hdc, textClr);
+            SetBkColor(hdc, bgClr);
+            static HBRUSH s_hbrLight = CreateSolidBrush(RGB(235, 240, 248));
+            static HBRUSH s_hbrDark = CreateSolidBrush(RGB(23, 26, 33));
+            return reinterpret_cast<LRESULT>(isLight ? s_hbrLight : s_hbrDark);
+        }
         if (AppContext::GetInstance().Dialog.IsVisible && hEdit == AppContext::GetInstance().Dialog.hEdit) {
             const bool useLightTheme = IsLightThemeActive();
             const COLORREF bg = useLightTheme ? RGB(246, 248, 251) : RGB(30, 30, 30);
@@ -9083,32 +9122,37 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         auto& primaryPane = GetPaneContext(PaneSlot::Primary);
         if (aiRes->imageData.empty() || !primaryPane.resource) {
-            g_osd.EndPersistentTask(hwnd, L"AI 生成结果为空", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            const wchar_t* emptyMsg = AppStrings::OSD_AiEmptyResult ? AppStrings::OSD_AiEmptyResult : L"AI 生成结果为空";
+            g_osd.EndPersistentTask(hwnd, emptyMsg, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
             return 0;
         }
 
         IWICImagingFactory* wic = g_renderEngine ? g_renderEngine->GetWICFactory() : nullptr;
         if (!wic) {
-            g_osd.EndPersistentTask(hwnd, L"初始化图像解码器失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            const wchar_t* decFail = AppStrings::OSD_AiDecodeFailed ? AppStrings::OSD_AiDecodeFailed : L"解码 AI 图像失败";
+            g_osd.EndPersistentTask(hwnd, decFail, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
             return 0;
         }
 
         ComPtr<IStream> stream;
         stream.Attach(SHCreateMemStream(aiRes->imageData.data(), static_cast<UINT>(aiRes->imageData.size())));
         if (!stream) {
-            g_osd.EndPersistentTask(hwnd, L"读取图像内存流失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            const wchar_t* decFail = AppStrings::OSD_AiDecodeFailed ? AppStrings::OSD_AiDecodeFailed : L"解码 AI 图像失败";
+            g_osd.EndPersistentTask(hwnd, decFail, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
             return 0;
         }
 
         ComPtr<IWICBitmapDecoder> decoder;
         if (FAILED(wic->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder)) || !decoder) {
-            g_osd.EndPersistentTask(hwnd, L"解析 AI 图像格式失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            const wchar_t* decFail = AppStrings::OSD_AiDecodeFailed ? AppStrings::OSD_AiDecodeFailed : L"解码 AI 图像失败";
+            g_osd.EndPersistentTask(hwnd, decFail, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
             return 0;
         }
 
         ComPtr<IWICBitmapFrameDecode> frame;
         if (FAILED(decoder->GetFrame(0, &frame)) || !frame) {
-            g_osd.EndPersistentTask(hwnd, L"解码 AI 图像帧失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            const wchar_t* decFail = AppStrings::OSD_AiDecodeFailed ? AppStrings::OSD_AiDecodeFailed : L"解码 AI 图像帧失败";
+            g_osd.EndPersistentTask(hwnd, decFail, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
             return 0;
         }
 
@@ -9173,7 +9217,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             const wchar_t* succMsg = AppStrings::OSD_AiGenerationSuccess ? AppStrings::OSD_AiGenerationSuccess : L"AI 处理完成！已进入卷帘对比模式";
             g_osd.EndPersistentTask(hwnd, succMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 3000);
         } else {
-            g_osd.EndPersistentTask(hwnd, L"创建 GPU 纹理失败", true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
+            const wchar_t* texFail = AppStrings::OSD_AiTextureFailed ? AppStrings::OSD_AiTextureFailed : L"创建 GPU 纹理失败";
+            g_osd.EndPersistentTask(hwnd, texFail, true, D2D1::ColorF(1.0f, 0.3f, 0.3f), 3000);
         }
         return 0;
     }
@@ -9829,6 +9874,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             int y = ptTL.y + 6;
             
             SetWindowPos(AppContext::GetInstance().Dialog.hInputHost, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+            QuickView::UI::AiActionOverlay::Instance().UpdateHostPosition();
         }
         return 0;
 
@@ -10904,7 +10952,6 @@ SKIP_EDGE_NAV:;
                              };
                              bool hExec = hitBox(g_cropState.InpaintExecuteBtnRect);
                              bool hCancel = hitBox(g_cropState.InpaintCancelBtnRect);
-                             bool hInput = hitBox(g_cropState.InpaintInputRect);
 
                              if (hExec != g_cropState.InpaintHoverExecute || hCancel != g_cropState.InpaintHoverCancel) {
                                  g_cropState.InpaintHoverExecute = hExec;
@@ -10913,8 +10960,6 @@ SKIP_EDGE_NAV:;
                              }
                              if (hExec || hCancel) {
                                  targetCursor = LoadCursor(nullptr, IDC_HAND);
-                             } else if (hInput) {
-                                 targetCursor = LoadCursor(nullptr, IDC_IBEAM);
                              }
                          }
 
@@ -11829,19 +11874,8 @@ SKIP_EDGE_NAV:;
                             RequestRepaint(PaintLayer::All);
                             return 0;
                         }
-                        if (hitCapsule(g_cropState.InpaintInputRect)) {
-                            g_cropState.InpaintInputFocused = true;
-                            SetTimer(hwnd, TIMER_ID_SETTINGS_CARET, 500, nullptr);
-                            RequestRepaint(PaintLayer::All);
-                            return 0;
-                        }
                         if (hitCapsule(g_cropState.InpaintCapsuleRect)) {
                             return 0;
-                        }
-                        if (g_cropState.InpaintInputFocused) {
-                            g_cropState.InpaintInputFocused = false;
-                            KillTimer(hwnd, TIMER_ID_SETTINGS_CARET);
-                            RequestRepaint(PaintLayer::All);
                         }
                     } else {
                         if (hitCapsule(g_cropState.WidthCapsuleRect)) {
@@ -12515,12 +12549,8 @@ SKIP_EDGE_NAV:;
                 if (w < 4.0f || h < 4.0f) {
                     g_cropState.CropLeft = g_cropState.CropRight = g_cropState.CropTop = g_cropState.CropBottom = 0.0f;
                     g_cropState.IsQuickActionVisible = false;
-                    g_cropState.InpaintInputFocused = false;
-                    KillTimer(hwnd, TIMER_ID_SETTINGS_CARET);
                 } else {
                     g_cropState.IsQuickActionVisible = true;
-                    g_cropState.InpaintInputFocused = true;
-                    SetTimer(hwnd, TIMER_ID_SETTINGS_CARET, 500, nullptr);
                 }
             } else {
                 g_cropState.IsQuickActionVisible = true;
@@ -13008,16 +13038,6 @@ SKIP_EDGE_NAV:;
             }
             return 0;
         }
-        if (g_cropState.IsActive && g_cropState.Mode == RegionInteractionMode::AiInpaint && g_cropState.InpaintInputFocused) {
-            if (wParam >= 32) {
-                if (g_cropState.InpaintPromptLen < 250) {
-                    g_cropState.InpaintPromptBuffer[g_cropState.InpaintPromptLen++] = (wchar_t)wParam;
-                    g_cropState.InpaintPromptBuffer[g_cropState.InpaintPromptLen] = L'\0';
-                    RequestRepaint(PaintLayer::Static);
-                }
-                return 0;
-            }
-        }
         if (g_cropState.IsActive && g_cropState.FocusedField != CropState::InputField::None) {
             const auto& pane = GetPaneContext(PaneSlot::Primary);
             int baseExif = pane.view.ExifOrientation;
@@ -13090,16 +13110,6 @@ SKIP_EDGE_NAV:;
             if (wParam == VK_RETURN) {
                 TriggerInpaintCurrentSelection(hwnd);
                 return 0;
-            }
-            if (g_cropState.InpaintInputFocused) {
-                if (wParam == VK_BACK) {
-                    if (g_cropState.InpaintPromptLen > 0) {
-                        g_cropState.InpaintPromptBuffer[--g_cropState.InpaintPromptLen] = L'\0';
-                        RequestRepaint(PaintLayer::Static);
-                    }
-                    return 0;
-                }
-                return 0; // Swallow other keys while typing
             }
         }
         if (wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL) {
@@ -13553,6 +13563,11 @@ SKIP_EDGE_NAV:;
 
         if (wmId == IDM_SUPER_RESOLUTION) {
             HandleHotkeyAction(hwnd, HotkeyAction::SuperResolution);
+            return 0;
+        }
+
+        if (wmId == IDM_AI_ACTION) {
+            HandleHotkeyAction(hwnd, HotkeyAction::AiAction);
             return 0;
         }
 

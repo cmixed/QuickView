@@ -105,6 +105,7 @@ struct SettingsTab {
     std::wstring name;
     Icons::IconGlyph icon = nullptr;
     std::vector<SettingsItem> items;
+    bool isNew = false; // Flag to indicate newly added Tab
 };
 
 class SettingsOverlay {

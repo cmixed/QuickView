@@ -6586,7 +6586,6 @@ void UIRenderer::DrawCropOverlay(ID2D1DeviceContext* dc, HWND hwnd) {
             g_cropState.InpaintCapsuleRect = {};
             g_cropState.InpaintExecuteBtnRect = {};
             g_cropState.InpaintCancelBtnRect = {};
-            g_cropState.InpaintInputRect = {};
             return;
         }
 
@@ -6626,42 +6625,60 @@ void UIRenderer::DrawCropOverlay(ID2D1DeviceContext* dc, HWND hwnd) {
             drawInpaintHandle(sRight, sTop + ch * 1.5f, 8); // Right
         }
 
-        // 4. Interactive Action Capsule
+        // 4. Interactive Action Capsule (Minimalist Geek Capsule: [ ✨ 开始重绘 (Enter) ] [ ✕ 取消 (Esc) ])
         float selW = sRight - sLeft;
         float selH = sBottom - sTop;
-        if (!g_cropState.IsDragging && selW > 20.0f && selH > 20.0f) {
-            float capW = (std::min)(vpW - 30.0f, (std::max)(420.0f * m_uiScale, selW));
-            float capH = 40.0f * m_uiScale;
+        if (!g_cropState.IsDragging && selW > 15.0f && selH > 15.0f) {
+            float execBtnW = 120.0f * m_uiScale;
+            float closeBtnW = 68.0f * m_uiScale;
+            float padH = 6.0f * m_uiScale;
+            float capW = execBtnW + closeBtnW + padH * 3.0f;
+            float capH = 36.0f * m_uiScale;
             float capX = sLeft + (selW - capW) * 0.5f;
             capX = std::clamp(capX, 15.0f * m_uiScale, vpW - capW - 15.0f * m_uiScale);
 
-            float capY = sBottom + 12.0f * m_uiScale;
-            if (capY + capH > vpH - 20.0f * m_uiScale) {
-                capY = sTop - capH - 12.0f * m_uiScale;
+            float capY = sBottom + 10.0f * m_uiScale;
+            if (capY + capH > vpH - 15.0f * m_uiScale) {
+                capY = sTop - capH - 10.0f * m_uiScale;
                 if (capY < 10.0f * m_uiScale) {
-                    capY = sBottom - capH - 10.0f * m_uiScale;
+                    capY = sBottom - capH - 8.0f * m_uiScale;
                 }
             }
 
             D2D1_RECT_F capRect = D2D1::RectF(capX, capY, capX + capW, capY + capH);
             g_cropState.InpaintCapsuleRect = capRect;
 
-            ComPtr<ID2D1SolidColorBrush> capBg, capBorder, btnBg, btnHover, textDim;
-            dc->CreateSolidColorBrush(D2D1::ColorF(0.10f, 0.11f, 0.14f, 0.96f), &capBg);
+            ComPtr<ID2D1SolidColorBrush> capBg, capBorder, btnBg, btnHover;
+            dc->CreateSolidColorBrush(D2D1::ColorF(0.09f, 0.10f, 0.13f, 0.94f), &capBg);
             dc->CreateSolidColorBrush(D2D1::ColorF(0.25f, 0.30f, 0.40f, 0.85f), &capBorder);
-            dc->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.48f, 0.85f, 1.0f), &btnBg);
-            dc->CreateSolidColorBrush(D2D1::ColorF(0.10f, 0.58f, 0.95f, 1.0f), &btnHover);
-            dc->CreateSolidColorBrush(D2D1::ColorF(0.65f, 0.68f, 0.75f, 1.0f), &textDim);
+            dc->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.48f, 0.88f, 1.0f), &btnBg);
+            dc->CreateSolidColorBrush(D2D1::ColorF(0.12f, 0.58f, 0.98f, 1.0f), &btnHover);
 
             D2D1_ROUNDED_RECT roundCap = D2D1::RoundedRect(capRect, 8.0f * m_uiScale, 8.0f * m_uiScale);
             dc->FillRoundedRectangle(roundCap, capBg.Get());
             dc->DrawRoundedRectangle(roundCap, capBorder.Get(), 1.0f * m_uiScale);
 
-            // Close Button (✕)
-            float closeBtnW = 30.0f * m_uiScale;
-            float marginR = 6.0f * m_uiScale;
-            D2D1_RECT_F closeBtnRect = D2D1::RectF(capRect.right - marginR - closeBtnW, capRect.top + 6.0f * m_uiScale,
-                                                  capRect.right - marginR, capRect.bottom - 6.0f * m_uiScale);
+            // Execute Button
+            D2D1_RECT_F execBtnRect = D2D1::RectF(capRect.left + padH, capRect.top + padH * 0.7f,
+                                                 capRect.left + padH + execBtnW, capRect.bottom - padH * 0.7f);
+            g_cropState.InpaintExecuteBtnRect = execBtnRect;
+
+            D2D1_ROUNDED_RECT roundExec = D2D1::RoundedRect(execBtnRect, 5.0f * m_uiScale, 5.0f * m_uiScale);
+            dc->FillRoundedRectangle(roundExec, g_cropState.InpaintHoverExecute ? btnHover.Get() : btnBg.Get());
+            dc->DrawRoundedRectangle(roundExec, m_accentBrush.Get(), 1.0f * m_uiScale);
+
+            const wchar_t* execText = L"✨ 开始重绘 ↵";
+            ComPtr<IDWriteTextLayout> execLayout;
+            m_dwriteFactory->CreateTextLayout(execText, static_cast<UINT32>(wcslen(execText)), m_osdFormat.Get(), execBtnW, execBtnRect.bottom - execBtnRect.top, &execLayout);
+            if (execLayout) {
+                execLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                execLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                dc->DrawTextLayout(D2D1::Point2F(execBtnRect.left, execBtnRect.top), execLayout.Get(), m_whiteBrush.Get());
+            }
+
+            // Close Button (✕ 取消)
+            D2D1_RECT_F closeBtnRect = D2D1::RectF(execBtnRect.right + padH, execBtnRect.top,
+                                                  execBtnRect.right + padH + closeBtnW, execBtnRect.bottom);
             g_cropState.InpaintCancelBtnRect = closeBtnRect;
 
             D2D1_ROUNDED_RECT roundClose = D2D1::RoundedRect(closeBtnRect, 5.0f * m_uiScale, 5.0f * m_uiScale);
@@ -6669,66 +6686,19 @@ void UIRenderer::DrawCropOverlay(ID2D1DeviceContext* dc, HWND hwnd) {
                 ComPtr<ID2D1SolidColorBrush> redHover;
                 dc->CreateSolidColorBrush(D2D1::ColorF(0.85f, 0.25f, 0.25f, 0.9f), &redHover);
                 dc->FillRoundedRectangle(roundClose, redHover.Get());
+            } else {
+                ComPtr<ID2D1SolidColorBrush> cancelBg;
+                dc->CreateSolidColorBrush(D2D1::ColorF(0.18f, 0.20f, 0.25f, 0.85f), &cancelBg);
+                dc->FillRoundedRectangle(roundClose, cancelBg.Get());
             }
             dc->DrawRoundedRectangle(roundClose, capBorder.Get(), 0.8f * m_uiScale);
+            const wchar_t* cancelText = L"✕ 取消";
             ComPtr<IDWriteTextLayout> closeLayout;
-            m_dwriteFactory->CreateTextLayout(L"✕", 1, m_osdFormat.Get(), closeBtnW, closeBtnRect.bottom - closeBtnRect.top, &closeLayout);
+            m_dwriteFactory->CreateTextLayout(cancelText, static_cast<UINT32>(wcslen(cancelText)), m_osdFormat.Get(), closeBtnW, closeBtnRect.bottom - closeBtnRect.top, &closeLayout);
             if (closeLayout) {
                 closeLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 closeLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 dc->DrawTextLayout(D2D1::Point2F(closeBtnRect.left, closeBtnRect.top), closeLayout.Get(), m_whiteBrush.Get());
-            }
-
-            // Execute Button (✨ 重绘)
-            float btnW = 68.0f * m_uiScale;
-            D2D1_RECT_F execBtnRect = D2D1::RectF(closeBtnRect.left - marginR - btnW, capRect.top + 6.0f * m_uiScale,
-                                                 closeBtnRect.left - marginR, capRect.bottom - 6.0f * m_uiScale);
-            g_cropState.InpaintExecuteBtnRect = execBtnRect;
-
-            D2D1_ROUNDED_RECT roundExec = D2D1::RoundedRect(execBtnRect, 5.0f * m_uiScale, 5.0f * m_uiScale);
-            dc->FillRoundedRectangle(roundExec, g_cropState.InpaintHoverExecute ? btnHover.Get() : btnBg.Get());
-            dc->DrawRoundedRectangle(roundExec, m_accentBrush.Get(), 1.0f * m_uiScale);
-
-            const wchar_t* execText = L"✨ 重绘";
-            ComPtr<IDWriteTextLayout> execLayout;
-            m_dwriteFactory->CreateTextLayout(execText, static_cast<UINT32>(wcslen(execText)), m_osdFormat.Get(), btnW, execBtnRect.bottom - execBtnRect.top, &execLayout);
-            if (execLayout) {
-                execLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-                execLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                dc->DrawTextLayout(D2D1::Point2F(execBtnRect.left, execBtnRect.top), execLayout.Get(), m_whiteBrush.Get());
-            }
-
-            // Prompt Input Box
-            float inputX = capRect.left + 8.0f * m_uiScale;
-            float inputR = execBtnRect.left - 8.0f * m_uiScale;
-            D2D1_RECT_F inputRect = D2D1::RectF(inputX, capRect.top + 6.0f * m_uiScale, inputR, capRect.bottom - 6.0f * m_uiScale);
-            g_cropState.InpaintInputRect = inputRect;
-
-            D2D1_ROUNDED_RECT roundInput = D2D1::RoundedRect(inputRect, 5.0f * m_uiScale, 5.0f * m_uiScale);
-            ComPtr<ID2D1SolidColorBrush> inputBg;
-            dc->CreateSolidColorBrush(D2D1::ColorF(0.06f, 0.07f, 0.09f, 0.85f), &inputBg);
-            dc->FillRoundedRectangle(roundInput, inputBg.Get());
-            dc->DrawRoundedRectangle(roundInput, g_cropState.InpaintInputFocused ? m_accentBrush.Get() : capBorder.Get(),
-                                    g_cropState.InpaintInputFocused ? 1.5f * m_uiScale : 1.0f * m_uiScale);
-
-            wchar_t displayBuf[280] = { 0 };
-            bool showCaret = g_cropState.InpaintInputFocused && ((GetTickCount64() / 500) % 2 == 0);
-            if (g_cropState.InpaintPromptLen > 0) {
-                swprintf_s(displayBuf, L"%s%s", g_cropState.InpaintPromptBuffer, showCaret ? L"|" : L"");
-                ComPtr<IDWriteTextLayout> promptLayout;
-                m_dwriteFactory->CreateTextLayout(displayBuf, static_cast<UINT32>(wcslen(displayBuf)), m_osdFormat.Get(), inputR - inputX - 12.0f * m_uiScale, inputRect.bottom - inputRect.top, &promptLayout);
-                if (promptLayout) {
-                    promptLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                    dc->DrawTextLayout(D2D1::Point2F(inputX + 6.0f * m_uiScale, inputRect.top), promptLayout.Get(), m_whiteBrush.Get());
-                }
-            } else {
-                const wchar_t* placeholder = g_cropState.InpaintInputFocused ? (showCaret ? L"|" : L"") : L"输入替换提示词，留空默认为智能无痕消除...";
-                ComPtr<IDWriteTextLayout> phLayout;
-                m_dwriteFactory->CreateTextLayout(placeholder, static_cast<UINT32>(wcslen(placeholder)), m_osdFormat.Get(), inputR - inputX - 12.0f * m_uiScale, inputRect.bottom - inputRect.top, &phLayout);
-                if (phLayout) {
-                    phLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                    dc->DrawTextLayout(D2D1::Point2F(inputX + 6.0f * m_uiScale, inputRect.top), phLayout.Get(), textDim.Get());
-                }
             }
         }
         return;

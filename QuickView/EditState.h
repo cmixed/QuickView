@@ -915,17 +915,15 @@ struct CropState {
     D2D1_RECT_F HeightCapsuleRect = {};
 
     // AI Inpaint Interactive Capsule states
-    wchar_t InpaintPromptBuffer[256] = { 0 };
-    int InpaintPromptLen = 0;
-    bool InpaintInputFocused = false;
     bool InpaintHoverExecute = false;
     bool InpaintHoverCancel = false;
-    int InpaintHoverPreset = -1; // -1: None, 0: Seamless Remove, 1: Background Fill
     D2D1_RECT_F InpaintCapsuleRect = {};
-    D2D1_RECT_F InpaintInputRect = {};
     D2D1_RECT_F InpaintExecuteBtnRect = {};
     D2D1_RECT_F InpaintCancelBtnRect = {};
-    D2D1_RECT_F InpaintPresetBtnRects[2] = {};
+
+    // Pending Action Context when inpaint selection is triggered for a specific action
+    std::string PendingActionId;
+    std::wstring PendingCustomPrompt;
 
     bool ReachedEdgeX = false;
     bool ReachedEdgeY = false;
@@ -949,17 +947,13 @@ struct CropState {
         WidthCapsuleRect = {};
         HeightCapsuleRect = {};
 
-        InpaintPromptBuffer[0] = L'\0';
-        InpaintPromptLen = 0;
-        InpaintInputFocused = false;
         InpaintHoverExecute = false;
         InpaintHoverCancel = false;
-        InpaintHoverPreset = -1;
         InpaintCapsuleRect = {};
-        InpaintInputRect = {};
         InpaintExecuteBtnRect = {};
         InpaintCancelBtnRect = {};
-        InpaintPresetBtnRects[0] = InpaintPresetBtnRects[1] = {};
+        PendingActionId.clear();
+        PendingCustomPrompt.clear();
     }
 };
 

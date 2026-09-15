@@ -3401,6 +3401,14 @@ void SettingsOverlay::BuildMenu() {
         if (action == HotkeyAction::Loupe) {
             item.tooltipText = AppStrings::Settings_Tooltip_LoupeHotkey;
         }
+        if (action == HotkeyAction::SuperResolution) {
+            // [NEW-Badge] Added in v6.52.0 (AI Super-Resolution Hotkey)
+            item.isNewOption = true;
+        }
+        if (action == HotkeyAction::AiAction) {
+            // [NEW-Badge] Added in v6.52.0 (AI Action Hotkey)
+            item.isNewOption = true;
+        }
         // Apply pending conflict status if any
         if (m_lastConflictAction == action && GetTickCount() - m_lastConflictTime < 3000) {
             item.statusText = m_lastConflictMsg;
@@ -4656,6 +4664,8 @@ void SettingsOverlay::BuildMenu() {
     // --- AI Actions Tab ---
     SettingsTab tabAiActions;
     BuildAiActionsTab(tabAiActions, this);
+    // [NEW-Badge] Added in v6.52.0 (AI Actions Tab)
+    tabAiActions.isNew = true;
     m_tabs.push_back(tabAiActions);
 
     // --- 5. Advanced ---
@@ -5332,6 +5342,25 @@ void SettingsOverlay::Render(ID2D1DeviceContext* pRT, float winW, float winH) {
             D2D1_RECT_F textRect = D2D1::RectF(hudX + 65.0f * s, tabY, hudX + sidebarW - 10.0f * s, tabY + 40.0f * s);
             m_textFormatItem->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             pRT->DrawText(tab.name.c_str(), (UINT32)tab.name.length(), m_textFormatItem.Get(), textRect, isActive ? m_brushText.Get() : m_brushTextDim.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+
+            if (tab.isNew) {
+                float textW = 55.0f * s;
+                ComPtr<IDWriteTextLayout> tabLayout;
+                if (SUCCEEDED(m_dwriteFactory->CreateTextLayout(
+                        tab.name.c_str(), (UINT32)tab.name.length(), m_textFormatItem.Get(),
+                        sidebarW - 75.0f * s, 40.0f * s, &tabLayout))) {
+                    DWRITE_TEXT_METRICS metrics = {};
+                    if (SUCCEEDED(tabLayout->GetMetrics(&metrics))) {
+                        textW = ceilf(metrics.widthIncludingTrailingWhitespace);
+                    }
+                }
+                float badgeW = 24.0f * s;
+                float badgeH = 11.0f * s;
+                float maxBadgeX = hudX + sidebarW - badgeW - 6.0f * s;
+                float badgeX = (std::min)(hudX + 65.0f * s + textW + 6.0f * s, maxBadgeX);
+                float badgeY = tabY + (40.0f * s - badgeH) / 2.0f;
+                DrawNewBadge(pRT, badgeX, badgeY, s);
+            }
 
             tabY += 45.0f * s;
         }

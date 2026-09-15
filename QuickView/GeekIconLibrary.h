@@ -166,6 +166,7 @@ namespace GeekIcons {
     inline IconGlyph Contact          = &ContactVector;
     inline IconGlyph Passthrough      = &PassthroughVector;
     inline IconGlyph SuperResolution  = &VisualsVector;
+    inline IconGlyph AiAction         = &VisualsVector;
 
     // --- Aliases & Batch 1 Mapping ---
     inline IconGlyph Close            = &CancelVector;

@@ -113,6 +113,7 @@ const wchar_t *Settings_Header_PoweredBy = nullptr;
 const wchar_t *Context_Open = nullptr;
 const wchar_t *Context_Crop = nullptr;
 const wchar_t *Context_SuperResolution = nullptr;
+const wchar_t *Context_AiAction = nullptr;
 const wchar_t *Context_OpenWith = nullptr;
 const wchar_t *Context_Edit = nullptr;
 const wchar_t *Context_ShowInExplorer = nullptr;
@@ -671,9 +672,31 @@ const wchar_t *AiAction_EscHint = nullptr;
 const wchar_t *AiAction_ScopeCropAndBlend = nullptr;
 const wchar_t *AiAction_ScopeForceFull = nullptr;
 const wchar_t *AiAction_ScopeAuto = nullptr;
+const wchar_t *AiAction_FooterQuickKeys = nullptr;
+const wchar_t *AiAction_Placeholder = nullptr;
+const wchar_t *AiAction_InpaintTitle = nullptr;
+const wchar_t *AiAction_InpaintDesc = nullptr;
+const wchar_t *AiAction_InpaintTag = nullptr;
+const wchar_t *AiAction_AdhocPrefix = nullptr;
+const wchar_t *AiAction_AdhocSend = nullptr;
+const wchar_t *AiAction_CurrentModel = nullptr;
+const wchar_t *AiAction_NoModelSelected = nullptr;
 const wchar_t *OSD_AiProcessing = nullptr;
 const wchar_t *OSD_AiGenerationSuccess = nullptr;
 const wchar_t *OSD_AiFailedPrefix = nullptr;
+const wchar_t *OSD_AiPreparing = nullptr;
+const wchar_t *OSD_AiProcessingElapsed = nullptr;
+const wchar_t *OSD_AiConnecting = nullptr;
+const wchar_t *OSD_AiSamplingProgress = nullptr;
+const wchar_t *OSD_AiSamplingProgressEta = nullptr;
+const wchar_t *OSD_AiAdhocPrompt = nullptr;
+const wchar_t *OSD_AiTaskCancelled = nullptr;
+const wchar_t *OSD_AiInpaintGuide = nullptr;
+const wchar_t *OSD_AiInpaintGuideActionFormat = nullptr;
+const wchar_t *OSD_AiSelectionTooSmall = nullptr;
+const wchar_t *OSD_AiEmptyResult = nullptr;
+const wchar_t *OSD_AiDecodeFailed = nullptr;
+const wchar_t *OSD_AiTextureFailed = nullptr;
 const wchar_t *Settings_Tab_Ai = nullptr;
 const wchar_t *Settings_Header_AiProviders = nullptr;
 const wchar_t *Settings_Desc_AiProviders = nullptr;
@@ -814,6 +837,7 @@ struct LanguageTable {
     const wchar_t *OSD_CropCopied;
     const wchar_t *Context_Crop;
     const wchar_t *Context_SuperResolution;
+    const wchar_t *Context_AiAction;
     const wchar_t *Checkbox_AlwaysSaveLossless;
     const wchar_t *Checkbox_AlwaysSaveEdgeAdapted;
     const wchar_t *Checkbox_AlwaysSaveLossy;
@@ -1407,9 +1431,31 @@ struct LanguageTable {
     const wchar_t *AiAction_ScopeCropAndBlend;
     const wchar_t *AiAction_ScopeForceFull;
     const wchar_t *AiAction_ScopeAuto;
+    const wchar_t *AiAction_FooterQuickKeys;
+    const wchar_t *AiAction_Placeholder;
+    const wchar_t *AiAction_InpaintTitle;
+    const wchar_t *AiAction_InpaintDesc;
+    const wchar_t *AiAction_InpaintTag;
+    const wchar_t *AiAction_AdhocPrefix;
+    const wchar_t *AiAction_AdhocSend;
+    const wchar_t *AiAction_CurrentModel;
+    const wchar_t *AiAction_NoModelSelected;
     const wchar_t *OSD_AiProcessing;
     const wchar_t *OSD_AiGenerationSuccess;
     const wchar_t *OSD_AiFailedPrefix;
+    const wchar_t *OSD_AiPreparing;
+    const wchar_t *OSD_AiProcessingElapsed;
+    const wchar_t *OSD_AiConnecting;
+    const wchar_t *OSD_AiSamplingProgress;
+    const wchar_t *OSD_AiSamplingProgressEta;
+    const wchar_t *OSD_AiAdhocPrompt;
+    const wchar_t *OSD_AiTaskCancelled;
+    const wchar_t *OSD_AiInpaintGuide;
+    const wchar_t *OSD_AiInpaintGuideActionFormat;
+    const wchar_t *OSD_AiSelectionTooSmall;
+    const wchar_t *OSD_AiEmptyResult;
+    const wchar_t *OSD_AiDecodeFailed;
+    const wchar_t *OSD_AiTextureFailed;
     const wchar_t *Settings_Tab_Ai;
     const wchar_t *Settings_Header_AiProviders;
     const wchar_t *Settings_Desc_AiProviders;
@@ -1547,6 +1593,7 @@ static const LanguageTable Table_EN = {
     L"Copied crop selection", // OSD_CropCopied
     L"Crop", // Context_Crop
     L"AI Super-Resolution", // Context_SuperResolution
+    L"AI Action", // Context_AiAction
     L"Always Save Lossless Transforms", // Checkbox_AlwaysSaveLossless
     L"Always Save Edge-Adapted", // Checkbox_AlwaysSaveEdgeAdapted
     L"Always Save Re-Encoded", // Checkbox_AlwaysSaveLossy
@@ -2135,14 +2182,36 @@ static const LanguageTable Table_EN = {
     L"Enter display name for this AI action:", // Dialog_AiActionNamePrompt
     L"Configure Endpoint", // Dialog_AiBaseUrlTitle
     L"Enter OpenAI / ComfyUI compatible API Base URL:", // Dialog_AiBaseUrlPrompt
-    L"AI Actions", // AiAction_Title
+    L"AI Command Palette", // AiAction_Title
     L"[Esc] Close", // AiAction_EscHint
     L"Inpaint Selection", // AiAction_ScopeCropAndBlend
     L"Full Image", // AiAction_ScopeForceFull
     L"Auto Scope", // AiAction_ScopeAuto
+    L"Press 1~9 / 0 to execute", // AiAction_FooterQuickKeys
+    L"Type prompt, or search presets...", // AiAction_Placeholder
+    L"AI Inpaint & Erase", // AiAction_InpaintTitle
+    L"Select region to erase or replace seamlessly", // AiAction_InpaintDesc
+    L"Selection", // AiAction_InpaintTag
+    L"✨ Send Prompt: \"", // AiAction_AdhocPrefix
+    L"Enter to Send", // AiAction_AdhocSend
+    L"Current Model", // AiAction_CurrentModel
+    L"No Model Selected", // AiAction_NoModelSelected
     L"AI Processing: %s (Esc to cancel)...", // OSD_AiProcessing
     L"AI generation completed! Entering Wipe Compare mode", // OSD_AiGenerationSuccess
     L"AI Failed: ", // OSD_AiFailedPrefix
+    L"AI: %s preparing (Esc to cancel)...", // OSD_AiPreparing
+    L"AI: %s processing [%ds, Esc to cancel]...", // OSD_AiProcessingElapsed
+    L"AI: Connecting to %s (Esc to cancel)...", // OSD_AiConnecting
+    L"AI Sampling: %d%% (%d/%d steps) [%ds, Esc to cancel]", // OSD_AiSamplingProgress
+    L"AI Sampling: %d%% (%d/%d steps, ~%.0fs left) [%ds, Esc to cancel]", // OSD_AiSamplingProgressEta
+    L"Ad-hoc Prompt", // OSD_AiAdhocPrompt
+    L"AI task cancelled", // OSD_AiTaskCancelled
+    L"Select a region to inpaint with left mouse button (Enter to run, Esc to cancel)", // OSD_AiInpaintGuide
+    L"Select a region with left mouse button, press Enter to run [%s]", // OSD_AiInpaintGuideActionFormat
+    L"Selection too small, please select an area to inpaint", // OSD_AiSelectionTooSmall
+    L"AI generation returned empty result", // OSD_AiEmptyResult
+    L"Failed to decode AI image result", // OSD_AiDecodeFailed
+    L"Failed to create GPU texture for AI image", // OSD_AiTextureFailed
     L"AI Actions", // Settings_Tab_Ai
     L"AI Model Providers", // Settings_Header_AiProviders
     L"Manage AI endpoints, DPAPI-secured keys, and model identifiers.", // Settings_Desc_AiProviders
@@ -2280,6 +2349,7 @@ static const LanguageTable Table_CN = {
     L"已复制裁剪选区", // OSD_CropCopied
     L"裁剪", // Context_Crop
     L"AI 超分辨率", // Context_SuperResolution
+    L"AI 动作", // Context_AiAction
     L"总是保存无损变换", // Checkbox_AlwaysSaveLossless
     L"总是保存边缘优化结果", // Checkbox_AlwaysSaveEdgeAdapted
     L"总是保存重编码结果", // Checkbox_AlwaysSaveLossy
@@ -2868,14 +2938,36 @@ static const LanguageTable Table_CN = {
     L"请输入在 AI 动作面板中展示的名称：", // Dialog_AiActionNamePrompt
     L"配置接口地址", // Dialog_AiBaseUrlTitle
     L"请输入兼容 OpenAI / ComfyUI 格式的 API 基础端点地址 (Base URL)：", // Dialog_AiBaseUrlPrompt
-    L"AI 动作", // AiAction_Title
+    L"AI 指令台", // AiAction_Title
     L"[Esc] 退出", // AiAction_EscHint
     L"选区修补", // AiAction_ScopeCropAndBlend
     L"全图生成", // AiAction_ScopeForceFull
     L"自适应", // AiAction_ScopeAuto
+    L"按 1~9 / 0 快速执行", // AiAction_FooterQuickKeys
+    L"输入临时提示词，或搜索预设动作...", // AiAction_Placeholder
+    L"选区局部重绘 (AI Inpaint)", // AiAction_InpaintTitle
+    L"框选局部画面无痕消除或替换", // AiAction_InpaintDesc
+    L"框选模式", // AiAction_InpaintTag
+    L"✨ 发送临时指令: \"", // AiAction_AdhocPrefix
+    L"Enter 发送", // AiAction_AdhocSend
+    L"当前模型", // AiAction_CurrentModel
+    L"未选择模型", // AiAction_NoModelSelected
     L"AI 正在处理: %s (按 Esc 取消)...", // OSD_AiProcessing
     L"AI 生成完成！进入帘幕对比模式", // OSD_AiGenerationSuccess
     L"AI 执行失败: ", // OSD_AiFailedPrefix
+    L"AI: %s 准备中 (Esc取消)...", // OSD_AiPreparing
+    L"AI: %s 处理中 [%ds, Esc取消]...", // OSD_AiProcessingElapsed
+    L"AI 连接中: %s (Esc取消)...", // OSD_AiConnecting
+    L"AI 采样中: %d%% (%d/%d步) [耗时%ds, Esc取消]", // OSD_AiSamplingProgress
+    L"AI 采样中: %d%% (%d/%d步, 约剩%.0fs) [耗时%ds, Esc取消]", // OSD_AiSamplingProgressEta
+    L"临时指令", // OSD_AiAdhocPrompt
+    L"AI 任务已取消", // OSD_AiTaskCancelled
+    L"请使用鼠标左键框选局部重绘区域 (Enter 执行, Esc 取消)", // OSD_AiInpaintGuide
+    L"请使用鼠标左键框选区域，按 Enter 执行 [%s]", // OSD_AiInpaintGuideActionFormat
+    L"选区过小，请先框选重绘区域", // OSD_AiSelectionTooSmall
+    L"AI 生成结果为空", // OSD_AiEmptyResult
+    L"解码 AI 图像失败", // OSD_AiDecodeFailed
+    L"创建 GPU 纹理失败", // OSD_AiTextureFailed
     L"AI 动作", // Settings_Tab_Ai
     L"AI 模型服务商配置", // Settings_Header_AiProviders
     L"配置 AI 端点地址、DPAPI 安全密钥及大模型。", // Settings_Desc_AiProviders
@@ -3013,6 +3105,7 @@ static const LanguageTable Table_TW = {
     L"已複製裁剪選區", // OSD_CropCopied
     L"裁剪", // Context_Crop
     L"AI 超解析度", // Context_SuperResolution
+    L"AI 動作", // Context_AiAction
     L"總是儲存無損變換", // Checkbox_AlwaysSaveLossless
     L"總是儲存邊緣優化結果", // Checkbox_AlwaysSaveEdgeAdapted
     L"總是儲存重新編碼結果", // Checkbox_AlwaysSaveLossy
@@ -3601,14 +3694,36 @@ static const LanguageTable Table_TW = {
     L"請輸入在 AI 動作面板中顯示的名稱：", // Dialog_AiActionNamePrompt
     L"設定端點位址", // Dialog_AiBaseUrlTitle
     L"請輸入相容 OpenAI / ComfyUI 格式的 API 基礎端點位址 (Base URL)：", // Dialog_AiBaseUrlPrompt
-    L"AI 動作", // AiAction_Title
+    L"AI 指令台", // AiAction_Title
     L"[Esc] 結束", // AiAction_EscHint
     L"選區修補", // AiAction_ScopeCropAndBlend
     L"全圖生成", // AiAction_ScopeForceFull
     L"自適應", // AiAction_ScopeAuto
+    L"按 1~9 / 0 快速執行", // AiAction_FooterQuickKeys
+    L"輸入臨時提示詞，或搜尋預設動作...", // AiAction_Placeholder
+    L"選區局部重繪 (AI Inpaint)", // AiAction_InpaintTitle
+    L"框選局部畫面無痕消除或替換", // AiAction_InpaintDesc
+    L"框選模式", // AiAction_InpaintTag
+    L"✨ 傳送臨時指令: \"", // AiAction_AdhocPrefix
+    L"Enter 傳送", // AiAction_AdhocSend
+    L"目前模型", // AiAction_CurrentModel
+    L"未選擇模型", // AiAction_NoModelSelected
     L"AI 正在處理: %s (按 Esc 取消)...", // OSD_AiProcessing
     L"AI 生成完成！進入簾幕對比模式", // OSD_AiGenerationSuccess
     L"AI 執行失敗: ", // OSD_AiFailedPrefix
+    L"AI: %s 準備中 (Esc取消)...", // OSD_AiPreparing
+    L"AI: %s 處理中 [%ds, Esc取消]...", // OSD_AiProcessingElapsed
+    L"AI 連線中: %s (Esc取消)...", // OSD_AiConnecting
+    L"AI 採樣中: %d%% (%d/%d步) [耗時%ds, Esc取消]", // OSD_AiSamplingProgress
+    L"AI 採樣中: %d%% (%d/%d步, 約剩%.0fs) [耗時%ds, Esc取消]", // OSD_AiSamplingProgressEta
+    L"臨時指令", // OSD_AiAdhocPrompt
+    L"AI 任務已取消", // OSD_AiTaskCancelled
+    L"請使用滑鼠左鍵框選局部重繪區域 (Enter 執行, Esc 取消)", // OSD_AiInpaintGuide
+    L"請使用滑鼠左鍵框選區域，按 Enter 執行 [%s]", // OSD_AiInpaintGuideActionFormat
+    L"選區過小，請先框選重繪區域", // OSD_AiSelectionTooSmall
+    L"AI 生成結果為空", // OSD_AiEmptyResult
+    L"解碼 AI 影像失敗", // OSD_AiDecodeFailed
+    L"建立 GPU 紋理失敗", // OSD_AiTextureFailed
     L"AI 動作", // Settings_Tab_Ai
     L"AI 模型服務商設定", // Settings_Header_AiProviders
     L"管理 AI 端點位址、DPAPI 安全金鑰及模型。", // Settings_Desc_AiProviders
@@ -3746,6 +3861,7 @@ static const LanguageTable Table_JA = {
     L"クロップ範囲をコピーしました", // OSD_CropCopied
     L"クロップ", // Context_Crop
     L"AI 超解像", // Context_SuperResolution
+    L"AI アクション", // Context_AiAction
     L"常にロスレス変換で保存する", // Checkbox_AlwaysSaveLossless
     L"常にエッジ最適化で保存する", // Checkbox_AlwaysSaveEdgeAdapted
     L"常に再エンコードして保存する", // Checkbox_AlwaysSaveLossy
@@ -4334,14 +4450,36 @@ static const LanguageTable Table_JA = {
     L"AI アクションの表示名を入力してください：", // Dialog_AiActionNamePrompt
     L"エンドポイントの設定", // Dialog_AiBaseUrlTitle
     L"OpenAI / ComfyUI 互換の API ベース URL を入力してください：", // Dialog_AiBaseUrlPrompt
-    L"AI アクション", // AiAction_Title
+    L"AI コマンドパレット", // AiAction_Title
     L"[Esc] 閉じる", // AiAction_EscHint
     L"選択範囲の修復", // AiAction_ScopeCropAndBlend
     L"画像全体を生成", // AiAction_ScopeForceFull
     L"自動判定", // AiAction_ScopeAuto
+    L"数字キー 1~9 / 0 で即時実行", // AiAction_FooterQuickKeys
+    L"プロンプトを入力、またはプリセットを検索...", // AiAction_Placeholder
+    L"領域インペイント (AI Inpaint)", // AiAction_InpaintTitle
+    L"選択範囲を違和感なく消去または置換", // AiAction_InpaintDesc
+    L"範囲選択", // AiAction_InpaintTag
+    L"✨ プロンプトを送信: \"", // AiAction_AdhocPrefix
+    L"Enter 送信", // AiAction_AdhocSend
+    L"現在のモデル", // AiAction_CurrentModel
+    L"モデル未選択", // AiAction_NoModelSelected
     L"AI 処理中: %s (Esc でキャンセル)...", // OSD_AiProcessing
     L"AI 生成完了！ワイプ比較モードを開始します", // OSD_AiGenerationSuccess
     L"AI 処理失敗: ", // OSD_AiFailedPrefix
+    L"AI: %s 準備中 (Escでキャンセル)...", // OSD_AiPreparing
+    L"AI: %s 処理中 [%d秒, Escでキャンセル]...", // OSD_AiProcessingElapsed
+    L"AI 接続中: %s (Escでキャンセル)...", // OSD_AiConnecting
+    L"AI サンプリング中: %d%% (%d/%dステップ) [%d秒, Escでキャンセル]", // OSD_AiSamplingProgress
+    L"AI サンプリング中: %d%% (%d/%dステップ, 残り約%.0f秒) [%d秒, Escでキャンセル]", // OSD_AiSamplingProgressEta
+    L"カスタムプロンプト", // OSD_AiAdhocPrompt
+    L"AI タスクがキャンセルされました", // OSD_AiTaskCancelled
+    L"マウスの左ボタンで再描画範囲を選択してください (Enter で実行、Esc でキャンセル)", // OSD_AiInpaintGuide
+    L"マウスの左ボタンで範囲を選択し、Enter で [%s] を実行", // OSD_AiInpaintGuideActionFormat
+    L"選択範囲が小さすぎます。再描画範囲を選択してください", // OSD_AiSelectionTooSmall
+    L"AI 生成結果が空です", // OSD_AiEmptyResult
+    L"AI 画像のデコードに失敗しました", // OSD_AiDecodeFailed
+    L"GPU テクスチャの作成に失敗しました", // OSD_AiTextureFailed
     L"AI アクション", // Settings_Tab_Ai
     L"AI プロバイダー設定", // Settings_Header_AiProviders
     L"API エンドポイント、DPAPI 暗号化キー、モデルを管理します。", // Settings_Desc_AiProviders
@@ -4479,6 +4617,7 @@ static const LanguageTable Table_RU = {
     L"Область кадрирования скопирована", // OSD_CropCopied
     L"Кадрировать", // Context_Crop
     L"ИИ Супер-разрешение", // Context_SuperResolution
+    L"ИИ Действия", // Context_AiAction
     L"Всегда сохранять без потерь", // Checkbox_AlwaysSaveLossless
     L"Всегда сохранять с оптимизацией краёв", // Checkbox_AlwaysSaveEdgeAdapted
     L"Всегда сохранять перекодированное", // Checkbox_AlwaysSaveLossy
@@ -5067,14 +5206,36 @@ static const LanguageTable Table_RU = {
     L"Введите отображаемое имя для действия AI:", // Dialog_AiActionNamePrompt
     L"Настройка адреса сервера (Base URL)", // Dialog_AiBaseUrlTitle
     L"Введите базовый URL API, совместимый с OpenAI / ComfyUI:", // Dialog_AiBaseUrlPrompt
-    L"AI Действия", // AiAction_Title
+    L"ИИ Командная панель", // AiAction_Title
     L"[Esc] Закрыть", // AiAction_EscHint
     L"Восстановление области", // AiAction_ScopeCropAndBlend
     L"Всё изображение", // AiAction_ScopeForceFull
     L"Автовыбор", // AiAction_ScopeAuto
+    L"Клавиши 1~9 / 0 для быстрого запуска", // AiAction_FooterQuickKeys
+    L"Введите запрос или найдите действие...", // AiAction_Placeholder
+    L"Инпейнт выделения (AI Inpaint)", // AiAction_InpaintTitle
+    L"Выделите область для бесшовного удаления или замены", // AiAction_InpaintDesc
+    L"Выделение", // AiAction_InpaintTag
+    L"✨ Отправить запрос: \"", // AiAction_AdhocPrefix
+    L"Enter Отправить", // AiAction_AdhocSend
+    L"Текущая модель", // AiAction_CurrentModel
+    L"Модель не выбрана", // AiAction_NoModelSelected
     L"AI обрабатывает: %s (Esc для отмены)...", // OSD_AiProcessing
     L"Генерация завершена! Переход в режим сравнения шторкой", // OSD_AiGenerationSuccess
     L"Ошибка AI: ", // OSD_AiFailedPrefix
+    L"AI: %s подготовка (Esc для отмены)...", // OSD_AiPreparing
+    L"AI: %s обработка [%dс, Esc для отмены]...", // OSD_AiProcessingElapsed
+    L"AI подключение: %s (Esc для отмены)...", // OSD_AiConnecting
+    L"AI сэмплирование: %d%% (%d/%d шагов) [%dс, Esc для отмены]", // OSD_AiSamplingProgress
+    L"AI сэмплирование: %d%% (%d/%d шагов, ост.~%.0fс) [%dс, Esc для отмены]", // OSD_AiSamplingProgressEta
+    L"Пользовательский запрос", // OSD_AiAdhocPrompt
+    L"Задача AI отменена", // OSD_AiTaskCancelled
+    L"Выделите область левой кнопкой мыши (Enter - выполнить, Esc - отмена)", // OSD_AiInpaintGuide
+    L"Выделите область и нажмите Enter для запуска [%s]", // OSD_AiInpaintGuideActionFormat
+    L"Область слишком мала, выделите область заново", // OSD_AiSelectionTooSmall
+    L"Результат генерации AI пуст", // OSD_AiEmptyResult
+    L"Ошибка декодирования изображения AI", // OSD_AiDecodeFailed
+    L"Не удалось создать текстуру GPU", // OSD_AiTextureFailed
     L"AI Действия", // Settings_Tab_Ai
     L"Провайдеры AI моделей", // Settings_Header_AiProviders
     L"Управление адресами API, ключами (DPAPI) и моделями.", // Settings_Desc_AiProviders
@@ -5212,7 +5373,8 @@ static const LanguageTable Table_DE = {
     L"Zuschneide-Auswahl kopiert", // OSD_CropCopied
     L"Zuschneiden", // Context_Crop
     L"KI-Super-Resolution", // Context_SuperResolution
-    L"Immer verlustfrei speichern", // Checkbox_AlwaysSaveLossless
+    L"KI-Aktionen", // Context_AiAction
+    L"Immer verlustfreie speichern", // Checkbox_AlwaysSaveLossless
     L"Immer kantenoptimiert speichern", // Checkbox_AlwaysSaveEdgeAdapted
     L"Immer neu kodiert speichern", // Checkbox_AlwaysSaveLossy
     L"Ohne Bestätigung in den Papierkorb verschieben", // Checkbox_NeverConfirmDelete
@@ -5800,14 +5962,36 @@ static const LanguageTable Table_DE = {
     L"Geben Sie einen Anzeigenamen für die AI-Aktion ein:", // Dialog_AiActionNamePrompt
     L"Endpunkt-URL konfigurieren", // Dialog_AiBaseUrlTitle
     L"Geben Sie die OpenAI / ComfyUI kompatible Basis-URL ein:", // Dialog_AiBaseUrlPrompt
-    L"AI-Aktionen", // AiAction_Title
+    L"KI-Befehlskonsole", // AiAction_Title
     L"[Esc] Schließen", // AiAction_EscHint
     L"Bereich reparieren", // AiAction_ScopeCropAndBlend
     L"Gesamtes Bild", // AiAction_ScopeForceFull
     L"Automatisch", // AiAction_ScopeAuto
+    L"1~9 / 0 für Schnellausführung drücken", // AiAction_FooterQuickKeys
+    L"Prompt eingeben oder Presets suchen...", // AiAction_Placeholder
+    L"Bereichs-Inpaint (AI Inpaint)", // AiAction_InpaintTitle
+    L"Bereich auswählen zum nahtlosen Entfernen oder Ersetzen", // AiAction_InpaintDesc
+    L"Auswahlmodus", // AiAction_InpaintTag
+    L"✨ Prompt senden: \"", // AiAction_AdhocPrefix
+    L"Enter Senden", // AiAction_AdhocSend
+    L"Aktuelles Modell", // AiAction_CurrentModel
+    L"Kein Modell ausgewählt", // AiAction_NoModelSelected
     L"AI verarbeitet: %s (Esc zum Abbrechen)...", // OSD_AiProcessing
     L"AI-Generierung abgeschlossen! Wisch-Vergleichsmodus aktiv", // OSD_AiGenerationSuccess
     L"AI-Fehler: ", // OSD_AiFailedPrefix
+    L"AI: %s wird vorbereitet (Esc zum Abbrechen)...", // OSD_AiPreparing
+    L"AI: %s wird verarbeitet [%ds, Esc zum Abbrechen]...", // OSD_AiProcessingElapsed
+    L"AI verbindet: %s (Esc zum Abbrechen)...", // OSD_AiConnecting
+    L"AI-Sampling: %d%% (%d/%d Schritte) [%ds, Esc zum Abbrechen]", // OSD_AiSamplingProgress
+    L"AI-Sampling: %d%% (%d/%d Schritte, ca. %.0fs übrig) [%ds, Esc zum Abbrechen]", // OSD_AiSamplingProgressEta
+    L"Benutzerdefinierter Prompt", // OSD_AiAdhocPrompt
+    L"AI-Aufgabe abgebrochen", // OSD_AiTaskCancelled
+    L"Bereich mit linker Maustaste auswählen (Enter zum Ausführen, Esc zum Abbrechen)", // OSD_AiInpaintGuide
+    L"Bereich auswählen und Enter drücken zum Ausführen von [%s]", // OSD_AiInpaintGuideActionFormat
+    L"Auswahl zu klein, bitte Bereich zum Inpainten auswählen", // OSD_AiSelectionTooSmall
+    L"AI-Generierung lieferte leeres Ergebnis", // OSD_AiEmptyResult
+    L"Fehler beim Decodieren des AI-Bildes", // OSD_AiDecodeFailed
+    L"GPU-Textur konnte nicht erstellt werden", // OSD_AiTextureFailed
     L"AI-Aktionen", // Settings_Tab_Ai
     L"AI-Modellanbieter", // Settings_Header_AiProviders
     L"Verwalten Sie Endpunkte, DPAPI-Schlüssel und Modellkennungen.", // Settings_Desc_AiProviders
@@ -5945,6 +6129,7 @@ static const LanguageTable Table_ES = {
     L"Selección de recorte copiada", // OSD_CropCopied
     L"Recortar", // Context_Crop
     L"Superresolución IA", // Context_SuperResolution
+    L"Acciones IA", // Context_AiAction
     L"Siempre guardar sin pérdida", // Checkbox_AlwaysSaveLossless
     L"Siempre guardar con bordes optimizados", // Checkbox_AlwaysSaveEdgeAdapted
     L"Siempre guardar recodificado", // Checkbox_AlwaysSaveLossy
@@ -6533,14 +6718,36 @@ static const LanguageTable Table_ES = {
     L"Ingrese el nombre que se mostrará en el panel de IA:", // Dialog_AiActionNamePrompt
     L"Configurar URL del extremo", // Dialog_AiBaseUrlTitle
     L"Ingrese la URL base compatible con OpenAI / ComfyUI:", // Dialog_AiBaseUrlPrompt
-    L"Acciones IA", // AiAction_Title
+    L"Panel de Comandos IA", // AiAction_Title
     L"[Esc] Cerrar", // AiAction_EscHint
     L"Reparar selección", // AiAction_ScopeCropAndBlend
     L"Imagen completa", // AiAction_ScopeForceFull
     L"Automático", // AiAction_ScopeAuto
+    L"Pulse 1~9 / 0 para ejecución rápida", // AiAction_FooterQuickKeys
+    L"Escribe un prompt o busca acciones...", // AiAction_Placeholder
+    L"Inpaint de Selección (AI Inpaint)", // AiAction_InpaintTitle
+    L"Selecciona un área para borrar o reemplazar sin marcas", // AiAction_InpaintDesc
+    L"Modo Selección", // AiAction_InpaintTag
+    L"✨ Enviar prompt: \"", // AiAction_AdhocPrefix
+    L"Enter Enviar", // AiAction_AdhocSend
+    L"Modelo actual", // AiAction_CurrentModel
+    L"Ningún modelo seleccionado", // AiAction_NoModelSelected
     L"IA procesando: %s (Esc para cancelar)...", // OSD_AiProcessing
     L"¡Generación completada! Modo de comparación cortina activo", // OSD_AiGenerationSuccess
     L"Error de IA: ", // OSD_AiFailedPrefix
+    L"IA: %s preparando (Esc para cancelar)...", // OSD_AiPreparing
+    L"IA: %s procesando [%ds, Esc para cancelar]...", // OSD_AiProcessingElapsed
+    L"IA conectando: %s (Esc para cancelar)...", // OSD_AiConnecting
+    L"Muestreo IA: %d%% (%d/%d pasos) [%ds, Esc para cancelar]", // OSD_AiSamplingProgress
+    L"Muestreo IA: %d%% (%d/%d pasos, ~%.0fs restantes) [%ds, Esc para cancelar]", // OSD_AiSamplingProgressEta
+    L"Prompt temporal", // OSD_AiAdhocPrompt
+    L"Tarea de IA cancelada", // OSD_AiTaskCancelled
+    L"Seleccione un área con el botón izquierdo (Enter para ejecutar, Esc para cancelar)", // OSD_AiInpaintGuide
+    L"Seleccione un área y pulse Enter para ejecutar [%s]", // OSD_AiInpaintGuideActionFormat
+    L"Selección demasiado pequeña, elija un área para inpaint", // OSD_AiSelectionTooSmall
+    L"El resultado de la generación IA está vacío", // OSD_AiEmptyResult
+    L"Error al decodificar la imagen de IA", // OSD_AiDecodeFailed
+    L"Error al crear la textura GPU", // OSD_AiTextureFailed
     L"Acciones IA", // Settings_Tab_Ai
     L"Proveedores de modelos IA", // Settings_Header_AiProviders
     L"Administre extremos de API, claves cifradas (DPAPI) y modelos.", // Settings_Desc_AiProviders
@@ -6678,6 +6885,7 @@ static const LanguageTable Table_FR = {
     L"Sélection de recadrage copiée", // OSD_CropCopied
     L"Recadrer", // Context_Crop
     L"Super-Résolution IA", // Context_SuperResolution
+    L"Actions IA", // Context_AiAction
     L"Always Save Lossless Transforms", // Checkbox_AlwaysSaveLossless
     L"Always Save Edge-Adapted", // Checkbox_AlwaysSaveEdgeAdapted
     L"Always Save Re-Encoded", // Checkbox_AlwaysSaveLossy
@@ -7266,14 +7474,36 @@ static const LanguageTable Table_FR = {
     L"Saisissez le nom affiché pour l'action IA :", // Dialog_AiActionNamePrompt
     L"Configurer l'adresse du point de terminaison", // Dialog_AiBaseUrlTitle
     L"Saisissez l'URL de base compatible OpenAI / ComfyUI :", // Dialog_AiBaseUrlPrompt
-    L"Actions IA", // AiAction_Title
+    L"Palette de Commandes IA", // AiAction_Title
     L"[Échap] Fermer", // AiAction_EscHint
     L"Inpainting de la sélection", // AiAction_ScopeCropAndBlend
     L"Image entière", // AiAction_ScopeForceFull
     L"Automatique", // AiAction_ScopeAuto
+    L"Appuyez sur 1~9 / 0 pour exécution rapide", // AiAction_FooterQuickKeys
+    L"Saisir un prompt ou rechercher une action...", // AiAction_Placeholder
+    L"Inpaint de Sélection (AI Inpaint)", // AiAction_InpaintTitle
+    L"Sélectionner une zone pour effacer ou remplacer sans raccord", // AiAction_InpaintDesc
+    L"Mode Sélection", // AiAction_InpaintTag
+    L"✨ Envoyer le prompt: \"", // AiAction_AdhocPrefix
+    L"Enter Envoyer", // AiAction_AdhocSend
+    L"Modèle actuel", // AiAction_CurrentModel
+    L"Aucun modèle sélectionné", // AiAction_NoModelSelected
     L"IA en cours de traitement : %s (Échap pour annuler)...", // OSD_AiProcessing
     L"Génération IA terminée ! Mode comparaison par volet activé", // OSD_AiGenerationSuccess
     L"Échec de l'IA : ", // OSD_AiFailedPrefix
+    L"IA : %s préparation (Échap pour annuler)...", // OSD_AiPreparing
+    L"IA : %s traitement en cours [%ds, Échap pour annuler]...", // OSD_AiProcessingElapsed
+    L"IA connexion : %s (Échap pour annuler)...", // OSD_AiConnecting
+    L"Échantillonnage IA : %d%% (%d/%d étapes) [%ds, Échap pour annuler]", // OSD_AiSamplingProgress
+    L"Échantillonnage IA : %d%% (%d/%d étapes, reste env. %.0fs) [%ds, Échap pour annuler]", // OSD_AiSamplingProgressEta
+    L"Prompt temporaire", // OSD_AiAdhocPrompt
+    L"Tâche IA annulée", // OSD_AiTaskCancelled
+    L"Sélectionnez une zone avec le clic gauche (Entrée pour exécuter, Échap pour annuler)", // OSD_AiInpaintGuide
+    L"Sélectionnez une zone et appuyez sur Entrée pour exécuter [%s]", // OSD_AiInpaintGuideActionFormat
+    L"Zone trop petite, veuillez sélectionner une zone à retoucher", // OSD_AiSelectionTooSmall
+    L"La génération IA a renvoyé un résultat vide", // OSD_AiEmptyResult
+    L"Échec du décodage de l'image IA", // OSD_AiDecodeFailed
+    L"Échec de création de la texture GPU", // OSD_AiTextureFailed
     L"Actions IA", // Settings_Tab_Ai
     L"Fournisseurs de modèles IA", // Settings_Header_AiProviders
     L"Gérez les points de terminaison, les clés (DPAPI) et les modèles.", // Settings_Desc_AiProviders
@@ -7411,6 +7641,7 @@ void Apply(const LanguageTable& t) {
   OSD_CropCopied = t.OSD_CropCopied;
   Context_Crop = t.Context_Crop;
   Context_SuperResolution = t.Context_SuperResolution;
+  Context_AiAction = t.Context_AiAction;
   Checkbox_AlwaysSaveLossless = t.Checkbox_AlwaysSaveLossless;
   Checkbox_AlwaysSaveEdgeAdapted = t.Checkbox_AlwaysSaveEdgeAdapted;
   Checkbox_AlwaysSaveLossy = t.Checkbox_AlwaysSaveLossy;
@@ -8003,9 +8234,31 @@ void Apply(const LanguageTable& t) {
   AiAction_ScopeCropAndBlend = t.AiAction_ScopeCropAndBlend;
   AiAction_ScopeForceFull = t.AiAction_ScopeForceFull;
   AiAction_ScopeAuto = t.AiAction_ScopeAuto;
+  AiAction_FooterQuickKeys = t.AiAction_FooterQuickKeys;
+  AiAction_Placeholder = t.AiAction_Placeholder;
+  AiAction_InpaintTitle = t.AiAction_InpaintTitle;
+  AiAction_InpaintDesc = t.AiAction_InpaintDesc;
+  AiAction_InpaintTag = t.AiAction_InpaintTag;
+  AiAction_AdhocPrefix = t.AiAction_AdhocPrefix;
+  AiAction_AdhocSend = t.AiAction_AdhocSend;
+  AiAction_CurrentModel = t.AiAction_CurrentModel;
+  AiAction_NoModelSelected = t.AiAction_NoModelSelected;
   OSD_AiProcessing = t.OSD_AiProcessing;
   OSD_AiGenerationSuccess = t.OSD_AiGenerationSuccess;
   OSD_AiFailedPrefix = t.OSD_AiFailedPrefix;
+  OSD_AiPreparing = t.OSD_AiPreparing;
+  OSD_AiProcessingElapsed = t.OSD_AiProcessingElapsed;
+  OSD_AiConnecting = t.OSD_AiConnecting;
+  OSD_AiSamplingProgress = t.OSD_AiSamplingProgress;
+  OSD_AiSamplingProgressEta = t.OSD_AiSamplingProgressEta;
+  OSD_AiAdhocPrompt = t.OSD_AiAdhocPrompt;
+  OSD_AiTaskCancelled = t.OSD_AiTaskCancelled;
+  OSD_AiInpaintGuide = t.OSD_AiInpaintGuide;
+  OSD_AiInpaintGuideActionFormat = t.OSD_AiInpaintGuideActionFormat;
+  OSD_AiSelectionTooSmall = t.OSD_AiSelectionTooSmall;
+  OSD_AiEmptyResult = t.OSD_AiEmptyResult;
+  OSD_AiDecodeFailed = t.OSD_AiDecodeFailed;
+  OSD_AiTextureFailed = t.OSD_AiTextureFailed;
   Settings_Tab_Ai = t.Settings_Tab_Ai;
   Settings_Header_AiProviders = t.Settings_Header_AiProviders;
   Settings_Desc_AiProviders = t.Settings_Desc_AiProviders;
