@@ -14,12 +14,6 @@
 #include <shlwapi.h>
 #include <shellapi.h>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wignored-attributes"
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
-
 namespace QuickView {
 
 typedef bool (*QVX_InitFn)(const QVX_PluginHeader**);
@@ -1611,7 +1605,3 @@ void PluginHost::Shutdown() {
 
 } // namespace QuickView
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#pragma clang diagnostic pop
-#endif

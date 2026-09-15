@@ -747,7 +747,6 @@ void UIRenderer::OnResize(UINT width, UINT height) {
 // Main Render Entry Point
 // ============================================================================
 
-[[clang::noinline]]
 bool UIRenderer::RenderAll(HWND hwnd, float deltaTime) {
     if (!m_compEngine || !m_compEngine->IsInitialized()) return false;
     
@@ -827,7 +826,6 @@ bool UIRenderer::RenderAll(HWND hwnd, float deltaTime) {
 // Static Layer: Toolbar, Window Controls, Info Panel, Settings
 // ============================================================================
 
-[[clang::minsize, clang::noinline]]
 void UIRenderer::RenderStaticLayer(ID2D1DeviceContext* dc, HWND hwnd) {
     // Create brushes (each layer has a separate context and needs separate creation)
     // [Fix] Clear surface before drawing to prevent "ghosting" of previous state (e.g. pinned vs unpinned background)
@@ -964,7 +962,7 @@ extern int GetEffectiveExifOrientation(int orientation, const EditState& state);
 // inverse of the on-screen draw transform, then renders a crisp (nearest-
 // neighbour) magnified patch of the source bitmap in a box at the cursor. In
 // Compare mode the same image location is magnified on both panes at once.
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawLoupe(ID2D1DeviceContext* dc, HWND hwnd) {
+void UIRenderer::DrawLoupe(ID2D1DeviceContext* dc, HWND hwnd) {
     AppContext& app = AppContext::GetInstance();
     if (!app.Loupe.active || !g_config.LoupeEnabled) return;
 
@@ -1198,7 +1196,6 @@ extern int GetEffectiveExifOrientation(int orientation, const EditState& state);
     }
 }
 
-[[clang::noinline]]
 void UIRenderer::RenderDynamicLayer(ID2D1DeviceContext* dc, HWND hwnd) {
     // Create brushes
     ComPtr<ID2D1SolidColorBrush> whiteBrush, blackBrush, accentBrush;
@@ -1370,7 +1367,6 @@ void UIRenderer::RenderDynamicLayer(ID2D1DeviceContext* dc, HWND hwnd) {
 // Gallery Layer: Gallery Overlay
 // ============================================================================
 
-[[clang::minsize, clang::noinline]]
 void UIRenderer::RenderGalleryLayer(ID2D1DeviceContext* dc) {
     if (g_gallery.IsVisible() && !g_settingsOverlay.IsVisible() && !g_helpOverlay.IsVisible()) {
         D2D1_SIZE_F rtSize = D2D1::SizeF((float)m_width, (float)m_height);
@@ -1382,7 +1378,7 @@ void UIRenderer::RenderGalleryLayer(ID2D1DeviceContext* dc) {
 // Drawing Functions
 // ============================================================================
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
+void UIRenderer::DrawOSD(ID2D1DeviceContext* dc, HWND hwnd) {
     if (m_osdOpacity <= 0.01f) return;
     const float s = m_uiScale;
     // Background brushes
@@ -1630,7 +1626,7 @@ void UIRenderer::RenderGalleryLayer(ID2D1DeviceContext* dc) {
 }
 
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawDecodingStatus(ID2D1DeviceContext* dc, HWND hwnd) {
+void UIRenderer::DrawDecodingStatus(ID2D1DeviceContext* dc, HWND hwnd) {
     const int totalTiles = (m_telemetry.tileCount > 0) ? m_telemetry.tileCount : 0;
     int readyTiles = m_telemetry.tilesReady;
     if (readyTiles < 0) readyTiles = 0;
@@ -1851,7 +1847,7 @@ void UIRenderer::RenderGalleryLayer(ID2D1DeviceContext* dc) {
 }
 
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawWindowControls(ID2D1DeviceContext* dc, HWND hwnd) {
+void UIRenderer::DrawWindowControls(ID2D1DeviceContext* dc, HWND hwnd) {
     if (!m_showControls && m_winCtrlHover == -1) return;
     const float s = m_uiScale;
     float btnW = 28.0f * s;
@@ -2034,7 +2030,7 @@ void UIRenderer::RenderGalleryLayer(ID2D1DeviceContext* dc) {
     if (useLayer) dc->PopLayer();
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawBorderIndicators(ID2D1DeviceContext* dc) {
+void UIRenderer::DrawBorderIndicators(ID2D1DeviceContext* dc) {
     if (IsCompareModeActive()) return;
     if (m_width <= 0 || m_height <= 0) return;
     D2D1_SIZE_F imgSize = GetEffectiveImageSize();
@@ -2200,7 +2196,7 @@ float UIRenderer::GetWindowControlsWidth() const {
 // ============================================================================
 // HUD V4: Full-Stack Observability (Native D2D)
 // ============================================================================
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawDebugHUD(ID2D1DeviceContext* dc) {
+void UIRenderer::DrawDebugHUD(ID2D1DeviceContext* dc) {
     if (!m_debugFormat) return;
     // 0. Resources
     ComPtr<ID2D1SolidColorBrush> redBrush, yellowBrush, greenBrush, blueBrush, grayBrush, blackTransBrush, whiteBrush;
@@ -3006,7 +3002,6 @@ UIRenderer::TooltipInfo UIRenderer::GetTooltipInfo(std::wstring_view label) cons
     return { L"", L"", L"", L"" };
 }
 
-[[clang::minsize, clang::noinline]]
 std::vector<InfoRow> UIRenderer::BuildGridRows(const CImageLoader::ImageMetadata& metadata, const std::wstring& imagePath, bool showAdvanced, int positionIndex, size_t positionTotal) const {
     std::vector<InfoRow> rows;
     if (imagePath.empty()) return rows;
@@ -3701,7 +3696,7 @@ void UIRenderer::BuildInfoGrid() {
     m_infoGrid = BuildGridRows(g_currentMetadata, g_imagePath, false);
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawInfoGrid(ID2D1DeviceContext* dc, float startX, float startY, float width, const AdaptiveUiPalette& palette) {
+void UIRenderer::DrawInfoGrid(ID2D1DeviceContext* dc, float startX, float startY, float width, const AdaptiveUiPalette& palette) {
     if (m_infoGrid.empty() || !m_panelFormat) return;
     const float s = GetInfoPanelScale();
     ComPtr<ID2D1SolidColorBrush> brushMain, brushDim, brushHover;
@@ -3819,7 +3814,7 @@ void UIRenderer::BuildInfoGrid() {
     }
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawHistogram(ID2D1DeviceContext* dc, D2D1_RECT_F rect) {
+void UIRenderer::DrawHistogram(ID2D1DeviceContext* dc, D2D1_RECT_F rect) {
     if (g_currentMetadata.HistR.empty()) return;
     // Get factory from device context
     ComPtr<ID2D1Factory> factory;
@@ -3882,7 +3877,7 @@ void UIRenderer::BuildInfoGrid() {
     }
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawCompareHistogram(ID2D1DeviceContext* dc, D2D1_RECT_F rect, const CImageLoader::ImageMetadata& leftMeta, const CImageLoader::ImageMetadata& rightMeta) {
+void UIRenderer::DrawCompareHistogram(ID2D1DeviceContext* dc, D2D1_RECT_F rect, const CImageLoader::ImageMetadata& leftMeta, const CImageLoader::ImageMetadata& rightMeta) {
     // Get factory from device context
     ComPtr<ID2D1Factory> factory;
     dc->GetFactory(&factory);
@@ -3997,7 +3992,7 @@ void UIRenderer::BuildInfoGrid() {
     }
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawCompactInfo(ID2D1DeviceContext* dc) {
+void UIRenderer::DrawCompactInfo(ID2D1DeviceContext* dc) {
     if (IsCompareModeActive()) return;
     if (g_imagePath.empty() || !m_panelFormat) return;
     const float s = m_uiScale;
@@ -4393,7 +4388,7 @@ D2D1_COLOR_F UIRenderer::LerpColor(const D2D1_COLOR_F& a, const D2D1_COLOR_F& b,
         a.a + (b.a - a.a) * clamped);
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawInfoPanel(ID2D1DeviceContext* dc) {
+void UIRenderer::DrawInfoPanel(ID2D1DeviceContext* dc) {
     if (!g_runtime.ShowInfoPanel || !m_panelFormat) return;
     m_panelFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     m_panelFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -4562,7 +4557,7 @@ D2D1_COLOR_F UIRenderer::LerpColor(const D2D1_COLOR_F& a, const D2D1_COLOR_F& b,
     }
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawGridTooltip(ID2D1DeviceContext* dc) {
+void UIRenderer::DrawGridTooltip(ID2D1DeviceContext* dc) {
     if (!m_panelFormat) return;
     InfoRow row;
     if (m_hoverRowIndex >= 0 && m_hoverRowIndex < (int)m_infoGrid.size()) {
@@ -4601,7 +4596,7 @@ D2D1_COLOR_F UIRenderer::LerpColor(const D2D1_COLOR_F& a, const D2D1_COLOR_F& b,
     dc->DrawText(row.fullText.c_str(), (UINT32)row.fullText.length(), m_panelFormat.Get(), textRect, brushText.Get());
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawNavIndicators(ID2D1DeviceContext* dc) {
+void UIRenderer::DrawNavIndicators(ID2D1DeviceContext* dc) {
     // Only draw for Arrow mode (0)
     if (g_config.NavIndicator != 0) return;
     if (g_viewState.CompareActive && g_config.DisableEdgeNavInCompare) return;
@@ -4749,7 +4744,7 @@ D2D1_COLOR_F UIRenderer::LerpColor(const D2D1_COLOR_F& a, const D2D1_COLOR_F& b,
     drawArrow(arrowCenterX, arrowCenterY, g_viewState.EdgeHoverState == -1);
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawComparePaneIndicator(ID2D1DeviceContext* dc, HWND hwnd) {
+void UIRenderer::DrawComparePaneIndicator(ID2D1DeviceContext* dc, HWND hwnd) {
     int pane = 0;
     float splitRatio = 0.5f;
     bool isWipe = false;
@@ -4914,7 +4909,7 @@ namespace {
     }
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
+void UIRenderer::DrawCompareInfoHUD(ID2D1DeviceContext* dc) {
     const float s = GetInfoPanelScale();
     const float sUI = m_uiScale; // Window-level geometry (neck/hotspot) uses system DPI scale
     if (!g_runtime.ShowCompareInfo) {
@@ -5840,7 +5835,7 @@ static const wchar_t *GetWelcomeSubtitle() {
   return L"Extreme performance modern image viewer";
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawWelcomeScreen(ID2D1DeviceContext *dc) {
+void UIRenderer::DrawWelcomeScreen(ID2D1DeviceContext *dc) {
   // Ensure DWrite text formats are initialized with current UI scale
   EnsureTextFormats();
 
@@ -6156,7 +6151,7 @@ static const wchar_t *GetWelcomeSubtitle() {
                     Icons::FolderVector, m_hoverWelcomeBtn == 2);
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawWelcomeButton(ID2D1DeviceContext *dc, const D2D1_RECT_F &r,
+void UIRenderer::DrawWelcomeButton(ID2D1DeviceContext *dc, const D2D1_RECT_F &r,
                                    const wchar_t *text,
                                    const GeekIcons::VectorIcon &icon,
                                    int hoverState) {
@@ -6288,7 +6283,7 @@ static const wchar_t *GetWelcomeSubtitle() {
   }
 }
 
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawNavigator(ID2D1DeviceContext* dc) {
+void UIRenderer::DrawNavigator(ID2D1DeviceContext* dc) {
     if (m_width <= 0 || m_height <= 0) return;
     const float s = m_uiScale;
     
@@ -6557,7 +6552,7 @@ static const wchar_t *GetWelcomeSubtitle() {
 
 // ============================================================================
 // Crop Overlay Layer
-[[clang::minsize, clang::noinline]] void UIRenderer::DrawCropOverlay(ID2D1DeviceContext* dc, HWND hwnd) {
+void UIRenderer::DrawCropOverlay(ID2D1DeviceContext* dc, HWND hwnd) {
     if (!g_cropState.IsActive) return;
     // Hide crop overlay when Ctrl is held down while not dragging, providing clean raw image view before drawing new region
     if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 && !g_cropState.IsDragging) return;

@@ -30,12 +30,6 @@
 
 using Microsoft::WRL::ComPtr;
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wignored-attributes"
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
-
 namespace QuickView::Rating {
 
 namespace {
@@ -1761,7 +1755,3 @@ WriteStatus WriteRatingToImage(const std::wstring& path, int stars, bool allowTr
 
 } // namespace QuickView::Rating
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#pragma clang diagnostic pop
-#endif

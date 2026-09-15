@@ -16,12 +16,6 @@
 
 extern int GetEffectiveExifOrientation(int baseExif, const EditState& editState);
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wignored-attributes"
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
-
 static bool ReadAppsUseLightThemeRegistry(bool defaultValue) {
     DWORD value = defaultValue ? 1u : 0u;
     DWORD size = sizeof(value);
@@ -1144,7 +1138,3 @@ bool PrintPreviewUI::OnKeyDown(WPARAM key) {
 
 } // namespace QuickView
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#pragma clang diagnostic pop
-#endif

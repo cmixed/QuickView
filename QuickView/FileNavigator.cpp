@@ -1630,7 +1630,7 @@ std::wstring_view FileNavigator::GetPhysicalHostPath(std::wstring_view vfsPath) 
     return vfsPath;
 }
 
-__declspec(noinline) std::vector<std::wstring> FileNavigator::GetSortedSiblings(const std::filesystem::path& parentDir) {
+std::vector<std::wstring> FileNavigator::GetSortedSiblings(const std::filesystem::path& parentDir) {
     std::vector<std::wstring> siblings;
     std::error_code ec;
     namespace fs = std::filesystem;

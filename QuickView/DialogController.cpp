@@ -10,12 +10,6 @@
 #include "SettingsOverlay.h"
 #include "GeekWidgets.h"
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wignored-attributes"
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
-
 extern float g_uiScale;
 extern AppConfig g_config;
 extern HIMC g_defaultIMC;
@@ -839,7 +833,3 @@ DialogResult DialogController::ShowChoiceDialog(
     return m_context.Dialog.FinalResult;
 }
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#pragma clang diagnostic pop
-#endif

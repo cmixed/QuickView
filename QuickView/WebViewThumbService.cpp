@@ -13,9 +13,6 @@
 using namespace Microsoft::WRL;
 
 namespace QuickView {
-#if defined(__clang__)
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
 namespace {
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
@@ -388,7 +385,4 @@ HRESULT WebViewThumbService::RasterizeSvgToThumb(const std::vector<uint8_t>& utf
     return job.hr;
 }
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif
 } // namespace QuickView

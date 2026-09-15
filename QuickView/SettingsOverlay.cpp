@@ -45,12 +45,6 @@ extern HelpOverlay g_helpOverlay;
 extern OSDState g_osd;
 extern HWND g_mainHwnd;
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wignored-attributes"
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
-
 namespace {
 
 // SplitString alias for backward compat (delegates to shared StringUtils)
@@ -1360,7 +1354,6 @@ namespace {
         }
     }
 
-    [[clang::minsize, clang::noinline]]
     void BuildAiActionsTab(SettingsTab& tabAi, [[maybe_unused]] SettingsOverlay* overlay) {
         tabAi.name = AppStrings::Settings_Tab_Ai ? AppStrings::Settings_Tab_Ai : L"AI Actions";
         tabAi.icon = Icons::AiAction;
@@ -2153,7 +2146,6 @@ void SettingsOverlay::RebuildMenu() {
     BuildMenu();
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildGeneralTab(SettingsTab& tabGeneral) {
     tabGeneral.name = AppStrings::Settings_Tab_General;
     tabGeneral.icon = Icons::Settings;
@@ -2349,7 +2341,6 @@ void SettingsOverlay::BuildGeneralTab(SettingsTab& tabGeneral) {
     tabGeneral.items.push_back(itemPortable);
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildThemeTab(SettingsTab& tabTheme) {
     tabTheme.name = AppStrings::Settings_Tab_Theme;
     tabTheme.icon = Icons::Personalize;
@@ -2668,7 +2659,6 @@ void SettingsOverlay::BuildThemeTab(SettingsTab& tabTheme) {
     tabTheme.items.push_back(itemThemeManage);
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildVisualsTab(SettingsTab& tabVisuals) {
     tabVisuals.name = AppStrings::Settings_Tab_Visuals;
     tabVisuals.icon = Icons::Visuals;
@@ -3034,7 +3024,6 @@ void SettingsOverlay::BuildVisualsTab(SettingsTab& tabVisuals) {
     tabVisuals.items.push_back(itemLoupeShape);
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildControlTab(SettingsTab& tabControl) {
     tabControl.name = AppStrings::Settings_Tab_Controls;
     tabControl.icon = Icons::Control;
@@ -3216,7 +3205,6 @@ void SettingsOverlay::BuildControlTab(SettingsTab& tabControl) {
     }
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildKeysTab(SettingsTab& tabKeys) {
     tabKeys.name = AppStrings::Settings_Tab_Shortcuts;
     tabKeys.icon = Icons::Keyboard;
@@ -3321,7 +3309,6 @@ void SettingsOverlay::BuildKeysTab(SettingsTab& tabKeys) {
     }
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildImageTab(SettingsTab& tabImage) {
     tabImage.name = AppStrings::Settings_Tab_Image; 
     tabImage.icon = Icons::Image;
@@ -3682,7 +3669,6 @@ void SettingsOverlay::BuildImageTab(SettingsTab& tabImage) {
     tabImage.items.push_back({ AppStrings::Checkbox_AlwaysSaveLossy, OptionType::Toggle, &g_config.AlwaysSaveLossy });
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildPluginsTab(SettingsTab& tabPlugins) {
     tabPlugins.name = AppStrings::Settings_Tab_Plugins;
     tabPlugins.icon = Icons::FixExt;
@@ -4545,7 +4531,6 @@ void SettingsOverlay::BuildPluginsTab(SettingsTab& tabPlugins) {
     }
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildAdvancedTab(SettingsTab& tabAdvanced) {
     tabAdvanced.name = AppStrings::Settings_Tab_Advanced;
     tabAdvanced.icon = Icons::Advanced;
@@ -4725,7 +4710,6 @@ void SettingsOverlay::BuildAdvancedTab(SettingsTab& tabAdvanced) {
     tabAdvanced.items.push_back(itemReset);
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildAboutTab(SettingsTab& tabAbout) {
     tabAbout.name = AppStrings::Settings_Tab_About;
     tabAbout.icon = Icons::Info;
@@ -4842,7 +4826,6 @@ void SettingsOverlay::BuildAboutTab(SettingsTab& tabAbout) {
     tabAbout.items.push_back(itemCopy);
 }
 
-[[clang::minsize, clang::noinline]]
 void SettingsOverlay::BuildMenu() {
     m_pActiveCombo = nullptr;
     m_comboHoverIdx = -1;
@@ -8593,7 +8576,3 @@ void SettingsOverlay::DrawNewBadge(ID2D1DeviceContext* pRT, float badgeX, float 
     pRT->DrawText(L"NEW", 3, m_textFormatBadge.Get(), badgeRect, m_brushWhite.Get());
 }
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#pragma clang diagnostic pop
-#endif

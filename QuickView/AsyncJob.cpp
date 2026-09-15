@@ -2,10 +2,6 @@
 #include "AsyncJob.h"
 #include <process.h>
 
-#if defined(__clang__)
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
-
 namespace QuickView {
 
 void RunDetached(AsyncJob job) {
@@ -54,6 +50,3 @@ void PostThreadPool(AsyncJob job) {
 
 } // namespace QuickView
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

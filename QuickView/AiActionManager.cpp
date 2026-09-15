@@ -23,12 +23,6 @@
 extern OSDState g_osd;
 extern std::wstring GetCurrentActiveImagePath();
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wignored-attributes"
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
-
 namespace QuickView::AI {
 
 struct HttpExchangeResult {
@@ -42,7 +36,6 @@ struct HttpExchangeResult {
     std::wstring errorMessage;
 };
 
-[[clang::noinline]]
 static HttpExchangeResult SendRequestAndReadResponse(
     HINTERNET hRequest,
     const std::wstring& headers,
@@ -1524,7 +1517,6 @@ static void ComputeTargetDimensions(
     }
 }
 
-[[clang::noinline]]
 void AiActionManager::WorkerThread(
     uint64_t taskId, ActionDesc action, ModelProfile profile,
     HWND /*hwnd*/, std::function<void(const ExecutionResult&)> callback) {
@@ -2643,7 +2635,6 @@ uint64_t AiActionManager::ExecuteInpaint(
     return taskId;
 }
 
-[[clang::noinline]]
 void AiActionManager::InpaintWorkerThread(
     uint64_t taskId, int cropL, int cropT, int cropR, int cropB,
     std::wstring prompt, ModelProfile profile, HWND /*hwnd*/,
@@ -3004,7 +2995,3 @@ void AiActionManager::InpaintWorkerThread(
 
 } // namespace QuickView::AI
  
-#if defined(__clang__)
-#pragma clang attribute pop
-#pragma clang diagnostic pop
-#endif

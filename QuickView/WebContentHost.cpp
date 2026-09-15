@@ -18,10 +18,6 @@ using namespace Microsoft::WRL;
 
 namespace QuickView {
 
-#if defined(__clang__)
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
-
 namespace {
 
 void SetVisualOpacitySafe(IDCompositionVisual2* visual, float opacity) {
@@ -1075,9 +1071,5 @@ HRESULT WebContentHost::SetViewportReprojection(float scaleFactor, float panX, f
     return S_OK;
 }
 
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif
 
 } // namespace QuickView

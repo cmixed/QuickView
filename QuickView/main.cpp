@@ -4412,7 +4412,6 @@ static void EnsureWindowSizeForDialog(HWND hwnd) {
 
 // --- Logic Functions ---
 
-[[clang::minsize, clang::noinline]]
 bool SaveCurrentImage(bool saveAs) {
     if (!GetPaneContext(PaneSlot::Primary).editState.IsDirty && !saveAs) return true;
     
@@ -4812,9 +4811,6 @@ void ParseFixedZoomLevels() {
     );
 }
 
-#if defined(__clang__)
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
 
 static void WriteConfigInt(const wchar_t* section, const wchar_t* key, int value, const wchar_t* iniPath) {
     wchar_t buf[32];
@@ -4843,7 +4839,6 @@ static void WriteConfigBool(const wchar_t* section, const wchar_t* key, bool val
     WritePrivateProfileStringW(section, key, value ? L"1" : L"0", iniPath);
 }
 
-[[clang::minsize, clang::noinline]]
 void SaveConfig() {
     std::wstring iniPath;
     
@@ -5081,7 +5076,6 @@ void SaveConfig() {
     QuickView::PluginHost::Instance().SaveConfig(iniPath.c_str());
 }
 
-[[clang::minsize, clang::noinline]]
 void LoadConfig() {
     std::wstring iniPath = GetConfigPath();
     
@@ -5527,9 +5521,6 @@ void LoadConfig() {
     QuickView::PluginHost::Instance().LoadConfig(iniPath.c_str());
 }
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif
 
 void DiscardChanges() {
     // Save original path BEFORE reset (Reset clears it)
@@ -7913,7 +7904,6 @@ static void EnsureBootHydrated(HWND hwnd) {
     }
 }
 
-[[clang::minsize, clang::noinline]]
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCmdLine, int nCmdShow) {
     // Early capture of foreground window state before any QuickView initialization/window creation
     HWND hCmdFg = QuickView::ProcessRouter::ParseFgCaller();
@@ -8558,7 +8548,7 @@ static inline int HitTestEdgeNavZone(HWND hwnd, POINT pt, float winW, float winH
     return 0;
 }
 
-__declspec(noinline) static bool IsMouseOverUI(HWND hwnd, int x, int y) {
+static bool IsMouseOverUI(HWND hwnd, int x, int y) {
     if (g_cropState.IsActive || AppContext::GetInstance().Loupe.active) return true;
     if (g_settingsOverlay.IsVisible() || g_helpOverlay.IsVisible()) return true;
     if (AppContext::GetInstance().DialogCtrl && (AppContext::GetInstance().DialogCtrl->IsActive() || AppContext::GetInstance().Dialog.IsVisible)) return true;
@@ -8625,7 +8615,6 @@ void SetLockWindowSize(HWND hwnd, bool locked) {
 }
 
 // [AI Inpaint] Trigger Selection Inpainting
-[[clang::minsize, clang::noinline]]
 static void TriggerInpaintCurrentSelection(HWND hwnd) {
     if (!g_cropState.IsActive || g_cropState.Mode != RegionInteractionMode::AiInpaint) return;
 
@@ -8719,7 +8708,6 @@ static void TriggerInpaintCurrentSelection(HWND hwnd) {
 }
 
 
-[[clang::minsize, clang::noinline]]
 static LRESULT HandleWmCommand(HWND hwnd, WPARAM wParam, [[maybe_unused]] LPARAM lParam) {
         EnsureBootHydrated(hwnd);
         UINT cmdId = LOWORD(wParam);
@@ -18172,7 +18160,6 @@ static void ComparePairSideBySide(HWND hwnd, const std::wstring& renderedPath, c
     RequestRepaint(PaintLayer::All);
 }
 
-[[clang::minsize, clang::noinline]]
 bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
     [[maybe_unused]] bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     [[maybe_unused]] bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
