@@ -5,6 +5,7 @@ static constexpr const char* CURRENT_MODULE = "HeavyLanePool";
 #include "ImageLoaderSimd.h"
 #include "TileManager.h"
 #include "ToolProcessProtocol.h"
+#include "AsyncJob.h"
 #include <condition_variable>
 #include <semaphore>
 #include <algorithm>
@@ -2075,13 +2076,12 @@ void HeavyLanePool::TriggerPrefetch(std::shared_ptr<QuickView::MappedFile> mmf) 
     
     // [Touch-Up] Async Prefetch
     // This brings the REST of the file into valid RAM
-    std::thread([mmf]() {
+    QuickView::PostThreadPool([mmf]() {
          // Prefetch entire file? Or just likely next region?
          // For JPEG, data is sequential. Prefetch all.
          // Windows manages the specific pages.
          mmf->Prefetch(0, mmf->size());
-         
-    }).detach();
+    });
 }
 
 // ============================================================================

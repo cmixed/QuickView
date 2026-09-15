@@ -5,7 +5,28 @@
 #include <vector>
 #include <algorithm>
 
+#include <windows.h>
+#include <string_view>
+
 namespace QuickView {
+
+inline std::wstring Utf8ToWide(std::string_view utf8Str) {
+    if (utf8Str.empty()) return L"";
+    int req = MultiByteToWideChar(CP_UTF8, 0, utf8Str.data(), static_cast<int>(utf8Str.size()), nullptr, 0);
+    if (req <= 0) return L"";
+    std::wstring result(req, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8Str.data(), static_cast<int>(utf8Str.size()), result.data(), req);
+    return result;
+}
+
+inline std::string WideToUtf8(std::wstring_view wideStr) {
+    if (wideStr.empty()) return "";
+    int req = WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), static_cast<int>(wideStr.size()), nullptr, 0, nullptr, nullptr);
+    if (req <= 0) return "";
+    std::string result(req, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), static_cast<int>(wideStr.size()), result.data(), req, nullptr, nullptr);
+    return result;
+}
 
 // Split a wide string by delimiter, skipping empty tokens.
 // Trims leading/trailing whitespace from each token.

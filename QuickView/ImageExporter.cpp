@@ -13,6 +13,7 @@
 #include <ole2.h>
 #include <algorithm>
 #include <thread>
+#include "AsyncJob.h"
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
@@ -921,7 +922,7 @@ std::expected<void, std::wstring> ImageExporter::SetupDelayedClipboard(HWND hwnd
         session->generationId = ++g_preRenderGeneration;
         g_activePreRenderSession = session;
 
-        std::thread preRenderWorker([session, snapshot, hwnd]() {
+        QuickView::RunDetached([session, snapshot, hwnd]() {
             HGLOBAL hPng = nullptr;
             HGLOBAL hDib = nullptr;
             RenderClipboardDual(snapshot, hPng, hDib);
@@ -940,7 +941,6 @@ std::expected<void, std::wstring> ImageExporter::SetupDelayedClipboard(HWND hwnd
                 }
             }
         });
-        preRenderWorker.detach();
     }
 
     return {};

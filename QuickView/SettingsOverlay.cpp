@@ -1,5 +1,6 @@
 #include "CompareController.h"
 #include "StringUtils.h"
+#include "AsyncJob.h"
 #include "SettingsOverlay.h"
 #include "SettingsSliderMath.h"
 #include "ThemeSystem.h"
@@ -43,6 +44,12 @@ extern Toolbar g_toolbar; // [Fix] Allow Settings to update toolbar state direct
 extern HelpOverlay g_helpOverlay;
 extern OSDState g_osd;
 extern HWND g_mainHwnd;
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
 
 namespace {
 
@@ -168,69 +175,7 @@ SettingsThemePalette GetSettingsThemePalette() {
     };
 }
 
-/*
-AppStrings::Language GetResolvedSettingsLanguage() {
-    if (g_config.Language != (int)AppStrings::Language::Auto) {
-        return static_cast<AppStrings::Language>(g_config.Language);
-    }
-
-    const LANGID id = GetUserDefaultUILanguage();
-    switch (PRIMARYLANGID(id)) {
-        case LANG_CHINESE:
-            return AppStrings::Language::ChineseSimplified;
-        case LANG_JAPANESE:
-            return AppStrings::Language::Japanese;
-        case LANG_RUSSIAN:
-            return AppStrings::Language::Russian;
-        case LANG_GERMAN:
-            return AppStrings::Language::German;
-        case LANG_SPANISH:
-            return AppStrings::Language::Spanish;
-        default:
-            return AppStrings::Language::English;
-    }
-}
-*/
-
-/*
-const wchar_t* GetThemeSettingLabel() {
-    switch (GetResolvedSettingsLanguage()) {
-        case AppStrings::Language::ChineseSimplified: return L"主题";
-        case AppStrings::Language::ChineseTraditional: return L"主題";
-        case AppStrings::Language::Japanese: return L"テーマ";
-        case AppStrings::Language::Russian: return L"Тема";
-        case AppStrings::Language::German: return L"Design";
-        case AppStrings::Language::Spanish: return L"Tema";
-        default: return L"Theme";
-    }
-}
-
-const wchar_t* GetDarkThemeLabel() {
-    switch (GetResolvedSettingsLanguage()) {
-        case AppStrings::Language::ChineseSimplified: return L"深色";
-        case AppStrings::Language::ChineseTraditional: return L"深色";
-        case AppStrings::Language::Japanese: return L"ダーク";
-        case AppStrings::Language::Russian: return L"Темная";
-        case AppStrings::Language::German: return L"Dunkel";
-        case AppStrings::Language::Spanish: return L"Oscuro";
-        default: return L"Dark";
-    }
-}
-
-const wchar_t* GetLightThemeLabel() {
-    switch (GetResolvedSettingsLanguage()) {
-        case AppStrings::Language::ChineseSimplified: return L"浅色";
-        case AppStrings::Language::ChineseTraditional: return L"淺色";
-        case AppStrings::Language::Japanese: return L"ライト";
-        case AppStrings::Language::Russian: return L"Светлая";
-        case AppStrings::Language::German: return L"Hell";
-        case AppStrings::Language::Spanish: return L"Claro";
-        default: return L"Light";
-    }
-}
-*/
-}
-
+} // namespace
 
 std::wstring SettingsOverlay::GetAppVersion() {
     wchar_t fileName[MAX_PATH];
@@ -949,29 +894,7 @@ static LinkRects GetLinkButtonRects(const D2D1_RECT_F& itemRect, float s = 1.0f)
     return r;
 }
 
-/*
-static D2D1_RECT_F GetUpdateButtonRect(const D2D1_RECT_F& cardRect) {
-    float w = 120.0f;
-    float h = 32.0f;
-    return D2D1::RectF(cardRect.right - w - 16, cardRect.top + 16, cardRect.right - 16, cardRect.top + 16 + h);
-}
-*/
-/*
-static D2D1_RECT_F GetUpdateButtonRect(const D2D1_RECT_F& cardRect) {
-    // Full Width Button inside the "Action Row"
-    // We treat cardRect as the container row
-    // Mockup: Blue Button is wide.
-    return cardRect; // The item itself IS the button now
-}
-*/
-
 #include "EditState.h"
-
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wignored-attributes"
-#pragma clang attribute push([[clang::minsize]], apply_to = function)
-#endif
 
 extern AppConfig g_config;
 
@@ -1084,23 +1007,8 @@ namespace {
     };
     static AiUiState s_aiUi;
 
-    static std::string WideToUtf8(std::wstring_view wideStr) {
-        if (wideStr.empty()) return "";
-        int req = WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), static_cast<int>(wideStr.size()), nullptr, 0, nullptr, nullptr);
-        if (req <= 0) return "";
-        std::string result(req, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), static_cast<int>(wideStr.size()), result.data(), req, nullptr, nullptr);
-        return result;
-    }
-
-    [[maybe_unused]] static std::wstring Utf8ToWide(std::string_view utf8Str) {
-        if (utf8Str.empty()) return L"";
-        int req = MultiByteToWideChar(CP_UTF8, 0, utf8Str.data(), static_cast<int>(utf8Str.size()), nullptr, 0);
-        if (req <= 0) return L"";
-        std::wstring result(req, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, utf8Str.data(), static_cast<int>(utf8Str.size()), result.data(), req);
-        return result;
-    }
+    using QuickView::WideToUtf8;
+    using QuickView::Utf8ToWide;
 
     static std::wstring FormatMaskedKey(const std::wstring& plain) {
         if (plain.empty()) return L"";
@@ -1452,6 +1360,7 @@ namespace {
         }
     }
 
+    [[clang::minsize, clang::noinline]]
     void BuildAiActionsTab(SettingsTab& tabAi, [[maybe_unused]] SettingsOverlay* overlay) {
         tabAi.name = AppStrings::Settings_Tab_Ai ? AppStrings::Settings_Tab_Ai : L"AI Actions";
         tabAi.icon = Icons::AiAction;
@@ -2244,29 +2153,8 @@ void SettingsOverlay::RebuildMenu() {
     BuildMenu();
 }
 
-void SettingsOverlay::BuildMenu() {
-    m_pActiveCombo = nullptr;
-    m_comboHoverIdx = -1;
-    m_pActiveSlider = nullptr;
-    m_pHoverItem = nullptr;
-    m_tabs.clear();
-
-    // Compute active separator preset index
-    m_separatorPresetIndex = -1;
-    if (g_config.InfoPanelLiteSeparator == L" \u00b7 ") m_separatorPresetIndex = 0;
-    else if (g_config.InfoPanelLiteSeparator == L"  ") m_separatorPresetIndex = 1;
-    else if (g_config.InfoPanelLiteSeparator == L" | ") m_separatorPresetIndex = 2;
-    else if (g_config.InfoPanelLiteSeparator == L" - ") m_separatorPresetIndex = 3;
-
-    // [UX Fix] Sync 3-state border option from config
-    if (!g_config.GlassShowBorders) {
-        m_borderStrokeOption = 0; // None
-    } else {
-        m_borderStrokeOption = (g_config.GlassVectorStrokeWeightIndex == 1) ? 1 : 2; // 1=Fine, 2=Standard
-    }
-
-    // --- 1. General ---
-    SettingsTab tabGeneral;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildGeneralTab(SettingsTab& tabGeneral) {
     tabGeneral.name = AppStrings::Settings_Tab_General;
     tabGeneral.icon = Icons::Settings;
     
@@ -2459,11 +2347,10 @@ void SettingsOverlay::BuildMenu() {
         }
     };
     tabGeneral.items.push_back(itemPortable);
+}
 
-    m_tabs.push_back(tabGeneral);
-
-    // --- 2. Theme & Geek Glass ---
-    SettingsTab tabTheme;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildThemeTab(SettingsTab& tabTheme) {
     tabTheme.name = AppStrings::Settings_Tab_Theme;
     tabTheme.icon = Icons::Personalize;
 
@@ -2779,11 +2666,10 @@ void SettingsOverlay::BuildMenu() {
         }
     };
     tabTheme.items.push_back(itemThemeManage);
+}
 
-    m_tabs.push_back(tabTheme);
-    
-    // --- 3. Interface (Visuals) ---
-    SettingsTab tabVisuals;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildVisualsTab(SettingsTab& tabVisuals) {
     tabVisuals.name = AppStrings::Settings_Tab_Visuals;
     tabVisuals.icon = Icons::Visuals;
     
@@ -3146,11 +3032,10 @@ void SettingsOverlay::BuildMenu() {
     SettingsItem itemLoupeShape = { AppStrings::Settings_Label_LoupeShape, OptionType::Segment, nullptr, nullptr, &g_config.LoupeShape, nullptr, 0, 0, { AppStrings::Settings_Option_LoupeShapeSquare, AppStrings::Settings_Option_LoupeShapeCircle } };
     itemLoupeShape.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
     tabVisuals.items.push_back(itemLoupeShape);
+}
 
-    m_tabs.push_back(tabVisuals);
-
-    // --- 3. Controls ---
-    SettingsTab tabControl;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildControlTab(SettingsTab& tabControl) {
     tabControl.name = AppStrings::Settings_Tab_Controls;
     tabControl.icon = Icons::Control;
     
@@ -3329,10 +3214,10 @@ void SettingsOverlay::BuildMenu() {
         itemExitDelay.onChange = []([[maybe_unused]] SettingsOverlay* overlay, [[maybe_unused]] SettingsItem* item) { SaveConfig(); };
         tabControl.items.push_back(itemExitDelay);
     }
-    m_tabs.push_back(tabControl);
+}
 
-    // --- 4. Shortcuts ---
-    SettingsTab tabKeys;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildKeysTab(SettingsTab& tabKeys) {
     tabKeys.name = AppStrings::Settings_Tab_Shortcuts;
     tabKeys.icon = Icons::Keyboard;
  
@@ -3434,10 +3319,10 @@ void SettingsOverlay::BuildMenu() {
             tabKeys.items.push_back(undoItem);
         }
     }
-    m_tabs.push_back(tabKeys);
+}
 
-    // --- 4. Image & Edit ---
-    SettingsTab tabImage;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildImageTab(SettingsTab& tabImage) {
     tabImage.name = AppStrings::Settings_Tab_Image; 
     tabImage.icon = Icons::Image;
     
@@ -3795,10 +3680,10 @@ void SettingsOverlay::BuildMenu() {
     tabImage.items.push_back({ AppStrings::Checkbox_AlwaysSaveLossless, OptionType::Toggle, &g_config.AlwaysSaveLossless });
     tabImage.items.push_back({ AppStrings::Checkbox_AlwaysSaveEdgeAdapted, OptionType::Toggle, &g_config.AlwaysSaveEdgeAdapted });
     tabImage.items.push_back({ AppStrings::Checkbox_AlwaysSaveLossy, OptionType::Toggle, &g_config.AlwaysSaveLossy });
-    m_tabs.push_back(tabImage);
+}
 
-    // --- 5. Plugins (Modern Extensions Center & Market) ---
-    SettingsTab tabPlugins;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildPluginsTab(SettingsTab& tabPlugins) {
     tabPlugins.name = AppStrings::Settings_Tab_Plugins;
     tabPlugins.icon = Icons::FixExt;
 
@@ -4040,7 +3925,7 @@ void SettingsOverlay::BuildMenu() {
                                 extern HWND g_mainHwnd;
                                 if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                                std::thread([wFilename, url, curSha256, curModelId, overlay]() {
+                                QuickView::RunDetached([wFilename, url, curSha256, curModelId, overlay]() {
                                     auto progressCb = [](float progress, bool finished, bool success, void* uData) {
                                         auto* pOverlay = static_cast<SettingsOverlay*>(uData);
                                         char cbLog[512];
@@ -4081,7 +3966,7 @@ void SettingsOverlay::BuildMenu() {
                                         extern void RefreshImageDisplay(HWND hwnd);
                                         if (g_mainHwnd) RefreshImageDisplay(g_mainHwnd);
                                     }
-                                }).detach();
+                                });
                             }
                         };
                         tabPlugins.items.push_back(itemDl);
@@ -4544,7 +4429,7 @@ void SettingsOverlay::BuildMenu() {
                         extern HWND g_mainHwnd;
                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                        std::thread([wFile, dlUrl, expectedSha, overlay]() {
+                        QuickView::RunDetached([wFile, dlUrl, expectedSha, overlay]() {
                             auto progressCb = [](float progress, bool finished, bool success, void* uData) {
                                 auto* pOverlay = static_cast<SettingsOverlay*>(uData);
                                 {
@@ -4579,7 +4464,7 @@ void SettingsOverlay::BuildMenu() {
                                 extern void RefreshImageDisplay(HWND hwnd);
                                 if (g_mainHwnd) RefreshImageDisplay(g_mainHwnd);
                             }
-                        }).detach();
+                        });
                     };
                 } else {
                     itemMarketAction.buttonText = AppStrings::Settings_Button_InstallPlugin;
@@ -4611,7 +4496,7 @@ void SettingsOverlay::BuildMenu() {
                         extern HWND g_mainHwnd;
                         if (g_mainHwnd) InvalidateRect(g_mainHwnd, nullptr, FALSE);
 
-                        std::thread([wFile, dlUrl, expectedSha, overlay]() {
+                        QuickView::RunDetached([wFile, dlUrl, expectedSha, overlay]() {
                             auto progressCb = [](float progress, bool finished, bool success, void* uData) {
                                 auto* pOverlay = static_cast<SettingsOverlay*>(uData);
                                 {
@@ -4648,7 +4533,7 @@ void SettingsOverlay::BuildMenu() {
                                 extern void RefreshImageDisplay(HWND hwnd);
                                 if (g_mainHwnd) RefreshImageDisplay(g_mainHwnd);
                             }
-                        }).detach();
+                        });
                     };
                 }
                 tabPlugins.items.push_back(itemMarketAction);
@@ -4658,18 +4543,10 @@ void SettingsOverlay::BuildMenu() {
             }
         }
     }
+}
 
-    m_tabs.push_back(tabPlugins);
-
-    // --- AI Actions Tab ---
-    SettingsTab tabAiActions;
-    BuildAiActionsTab(tabAiActions, this);
-    // [NEW-Badge] Added in v6.52.0 (AI Actions Tab)
-    tabAiActions.isNew = true;
-    m_tabs.push_back(tabAiActions);
-
-    // --- 5. Advanced ---
-    SettingsTab tabAdvanced;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildAdvancedTab(SettingsTab& tabAdvanced) {
     tabAdvanced.name = AppStrings::Settings_Tab_Advanced;
     tabAdvanced.icon = Icons::Advanced;
     
@@ -4846,15 +4723,10 @@ void SettingsOverlay::BuildMenu() {
          // 5. Visual Feedback - Deferred to overlay->Render()
     };
     tabAdvanced.items.push_back(itemReset);
+}
 
-
-    m_tabs.push_back(tabAdvanced);
-
-
-
-    // --- 6. About ---
-    // --- 6. About ---
-    SettingsTab tabAbout;
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildAboutTab(SettingsTab& tabAbout) {
     tabAbout.name = AppStrings::Settings_Tab_About;
     tabAbout.icon = Icons::Info;
     
@@ -4968,9 +4840,84 @@ void SettingsOverlay::BuildMenu() {
     std::wstring copyrightStr = std::wstring(footerBuf) + L"\n" + AppStrings::Settings_Text_License;
     SettingsItem itemCopy = { copyrightStr, OptionType::CopyrightLabel };
     tabAbout.items.push_back(itemCopy);
-
-    m_tabs.push_back(tabAbout);
 }
+
+[[clang::minsize, clang::noinline]]
+void SettingsOverlay::BuildMenu() {
+    m_pActiveCombo = nullptr;
+    m_comboHoverIdx = -1;
+    m_pActiveSlider = nullptr;
+    m_pHoverItem = nullptr;
+    m_tabs.clear();
+
+    // Compute active separator preset index
+    m_separatorPresetIndex = -1;
+    if (g_config.InfoPanelLiteSeparator == L" \u00b7 ") m_separatorPresetIndex = 0;
+    else if (g_config.InfoPanelLiteSeparator == L"  ") m_separatorPresetIndex = 1;
+    else if (g_config.InfoPanelLiteSeparator == L" | ") m_separatorPresetIndex = 2;
+    else if (g_config.InfoPanelLiteSeparator == L" - ") m_separatorPresetIndex = 3;
+
+    // [UX Fix] Sync 3-state border option from config
+    if (!g_config.GlassShowBorders) {
+        m_borderStrokeOption = 0; // None
+    } else {
+        m_borderStrokeOption = (g_config.GlassVectorStrokeWeightIndex == 1) ? 1 : 2; // 1=Fine, 2=Standard
+    }
+
+    m_tabs.reserve(10);
+
+    // --- 1. General ---
+    SettingsTab tabGeneral;
+    BuildGeneralTab(tabGeneral);
+    m_tabs.push_back(std::move(tabGeneral));
+
+    // --- 2. Theme ---
+    SettingsTab tabTheme;
+    BuildThemeTab(tabTheme);
+    m_tabs.push_back(std::move(tabTheme));
+
+    // --- 3. Visuals ---
+    SettingsTab tabVisuals;
+    BuildVisualsTab(tabVisuals);
+    m_tabs.push_back(std::move(tabVisuals));
+
+    // --- 4. Control ---
+    SettingsTab tabControl;
+    BuildControlTab(tabControl);
+    m_tabs.push_back(std::move(tabControl));
+
+    // --- 5. Keys ---
+    SettingsTab tabKeys;
+    BuildKeysTab(tabKeys);
+    m_tabs.push_back(std::move(tabKeys));
+
+    // --- 6. Image ---
+    SettingsTab tabImage;
+    BuildImageTab(tabImage);
+    m_tabs.push_back(std::move(tabImage));
+
+    // --- 7. Plugins ---
+    SettingsTab tabPlugins;
+    BuildPluginsTab(tabPlugins);
+    m_tabs.push_back(std::move(tabPlugins));
+
+    // --- 8. AI Actions ---
+    SettingsTab tabAiActions;
+    BuildAiActionsTab(tabAiActions, this);
+    tabAiActions.isNew = true;
+    m_tabs.push_back(std::move(tabAiActions));
+
+    // --- 9. Advanced ---
+    SettingsTab tabAdvanced;
+    BuildAdvancedTab(tabAdvanced);
+    m_tabs.push_back(std::move(tabAdvanced));
+
+    // --- 10. About ---
+    SettingsTab tabAbout;
+    BuildAboutTab(tabAbout);
+    m_tabs.push_back(std::move(tabAbout));
+}
+
 
 bool SettingsOverlay::IsItemInteractive(const SettingsItem& item) const {
     if (item.isDisabled) return false;

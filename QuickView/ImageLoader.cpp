@@ -12,6 +12,7 @@
 
 #include "ImageLoader.h"
 #include "QuickViewETW.h"
+#include "AsyncJob.h"
 static constexpr const char *CURRENT_MODULE = "ImageLoader";
 #include "AnimationDecoder.h"
 #include "EditState.h"         // For g_runtime
@@ -9320,7 +9321,7 @@ HRESULT CImageLoader::LoadImageUnifiedInternal(LPCWSTR filePath,
 
           // Capture fileMap shared_ptr to keep memory alive without copying on
           // main thread
-          std::thread([fileMap, headroom, baseWidth, baseHeight, callback]() {
+          QuickView::RunDetached([fileMap, headroom, baseWidth, baseHeight, callback]() {
             HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
             if (FAILED(hrCo))
               return;
@@ -9479,7 +9480,7 @@ HRESULT CImageLoader::LoadImageUnifiedInternal(LPCWSTR filePath,
             }
 
             CoUninitialize();
-          }).detach();
+          });
         }
         return S_OK;
       }

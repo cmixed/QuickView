@@ -8,6 +8,7 @@
 #include <charconv>
 #include <algorithm>
 #include <thread>
+#include "AsyncJob.h"
 #include <winhttp.h>
 #include <wincrypt.h>
 #include <shlwapi.h>
@@ -1482,7 +1483,7 @@ bool PluginHost::DownloadModel(
 }
 
 void PluginHost::FetchRemoteManifestAsync(ManifestCallback callback, void* userData) {
-    std::thread([callback, userData]() {
+    QuickView::RunDetached([callback, userData]() {
         wchar_t tempDir[MAX_PATH];
         GetTempPathW(MAX_PATH, tempDir);
         std::wstring tempPath = std::wstring(tempDir) + L"quickview_plugins_manifest.json.tmp";
@@ -1565,7 +1566,7 @@ void PluginHost::FetchRemoteManifestAsync(ManifestCallback callback, void* userD
         if (callback) {
             callback(items, userData);
         }
-    }).detach();
+    });
 }
 
 void PluginHost::TriggerManifestFetch() {

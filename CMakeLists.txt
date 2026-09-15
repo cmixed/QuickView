@@ -59,6 +59,7 @@ option(ENABLE_LTO  "Enable Link Time Optimization (ThinLTO)" OFF)
 # ============================================================================
 set(QUICKVIEW_SOURCES
     QuickView/main.cpp
+    QuickView/AsyncJob.cpp
     QuickView/BootPreloader.cpp
     QuickView/ImageExporter.cpp
     QuickView/ExportPanel.cpp
@@ -216,7 +217,7 @@ if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # Pure peak performance flags for Hot-Path (Pure /O2, no compromise)
         target_compile_options(QuickView PRIVATE 
             /O2 /Gw /Gy /Zc:inline /GR- /fp:fast /GS- /EHs-c- /Z7
-            /clang:-flto=full
+            /clang:-flto=full /clang:-fno-exceptions
             /clang:-fwhole-program-vtables /clang:-fvirtual-function-elimination
             /clang:-fno-ident)
         target_link_options(QuickView PRIVATE /DEBUG /OPT:REF /OPT:ICF /opt:lldlto=3 "/MAP:${CMAKE_BINARY_DIR}/QuickView.map")
@@ -474,6 +475,7 @@ add_executable(QuickViewTests
     QuickView/QuickViewETW.cpp
     QuickView/AppStrings.cpp
     QuickView/Plugin/PluginHost.cpp
+    QuickView/AsyncJob.cpp
     third_party/yyjson/yyjson.c
     QuickView/pch.cpp
 )

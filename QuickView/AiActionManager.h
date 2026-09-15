@@ -137,6 +137,16 @@ private:
         std::wstring prompt, ModelProfile profile, HWND hwnd,
         std::function<void(const ExecutionResult&)> callback);
 
+    bool OpenAiHttpRequest(
+        const wchar_t* userAgent,
+        const wchar_t* hostName,
+        INTERNET_PORT port,
+        bool isHttps,
+        bool isLocal,
+        const std::wstring& fullPath,
+        int timeoutSeconds,
+        std::wstring& outError);
+
     std::vector<ModelProfile> m_profiles;
     std::vector<ActionDesc> m_actions;
     std::string m_defaultProfileId;

@@ -12,6 +12,9 @@
 #include "OSDState.h"
 #include "AppStrings.h"
 
+#include "StringUtils.h"
+#include "AsyncJob.h"
+
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "windowscodecs.lib")
@@ -20,24 +23,101 @@
 extern OSDState g_osd;
 extern std::wstring GetCurrentActiveImagePath();
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 namespace QuickView::AI {
 
-static std::wstring Utf8ToWide(std::string_view utf8Str) {
-    if (utf8Str.empty()) return L"";
-    int req = MultiByteToWideChar(CP_UTF8, 0, utf8Str.data(), static_cast<int>(utf8Str.size()), nullptr, 0);
-    if (req <= 0) return L"";
-    std::wstring result(req, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8Str.data(), static_cast<int>(utf8Str.size()), result.data(), req);
-    return result;
-}
+struct HttpExchangeResult {
+    bool ok = false;
+    bool interrupted = false;
+    DWORD statusCode = 0;
+    std::string body;
+    std::wstring mainTitle;
+    std::wstring detailMessage;
+    std::wstring actionAdvice;
+    std::wstring errorMessage;
+};
 
-static std::string WideToUtf8(std::wstring_view wideStr) {
-    if (wideStr.empty()) return "";
-    int req = WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), static_cast<int>(wideStr.size()), nullptr, 0, nullptr, nullptr);
-    if (req <= 0) return "";
-    std::string result(req, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), static_cast<int>(wideStr.size()), result.data(), req, nullptr, nullptr);
-    return result;
+[[clang::noinline]]
+static HttpExchangeResult SendRequestAndReadResponse(
+    HINTERNET hRequest,
+    const std::wstring& headers,
+    const void* payloadData,
+    DWORD payloadLen,
+    const wchar_t* hostName,
+    INTERNET_PORT port,
+    bool isLocal,
+    uint64_t expectedTaskId,
+    const std::atomic<uint64_t>& currentTaskId)
+{
+    HttpExchangeResult res;
+    BOOL bSend = WinHttpSendRequest(hRequest, headers.c_str(), static_cast<DWORD>(headers.size()),
+                                    const_cast<void*>(payloadData), payloadLen, payloadLen, 0);
+
+    if (!bSend || !WinHttpReceiveResponse(hRequest, nullptr)) {
+        DWORD dwErr = GetLastError();
+        if (dwErr == ERROR_WINHTTP_CANNOT_CONNECT) {
+            res.mainTitle = L"连接失败 (12029)";
+            wchar_t buf[256];
+            swprintf_s(buf, L"无法连接到目标服务 [%s:%d]，连接被拒绝。", hostName ? hostName : L"", port);
+            res.detailMessage = buf;
+            if (isLocal) {
+                res.actionAdvice = L"提示：检测到当前使用的是本地模型服务 (127.0.0.1)，请确认本地 SD WebUI / Forge / ComfyUI 是否已启动并开启 API；或者在设置中切换为在线云端模型 (如 Google Gemini)。";
+            } else {
+                res.actionAdvice = L"提示：请检查服务器地址、网络连接或代理设置。";
+            }
+        } else if (dwErr == ERROR_WINHTTP_TIMEOUT) {
+            res.mainTitle = L"请求超时 (12002)";
+            res.detailMessage = L"服务器未在配置的超时时间内响应。";
+            res.actionAdvice = L"提示：可尝试在模型配置中增加超时时间，或框选稍小的区域/降低步数重试。";
+        } else if (dwErr == ERROR_WINHTTP_NAME_NOT_RESOLVED) {
+            res.mainTitle = L"DNS 解析失败 (12007)";
+            res.detailMessage = L"无法解析 Base URL 中的主机名。";
+            res.actionAdvice = L"提示：请检查网络连接、DNS 或系统代理配置。";
+        } else {
+            wchar_t buf[128];
+            swprintf_s(buf, L"网络传输错误 (%lu)", dwErr);
+            res.mainTitle = buf;
+            wchar_t detail[256];
+            swprintf_s(detail, L"与目标服务器 [%s:%d] 通信时发生底层 WinHTTP 传输错误。", hostName ? hostName : L"", port);
+            res.detailMessage = detail;
+            res.actionAdvice = L"提示：请检查网络连接、VPN 或防火墙状态。";
+        }
+        res.errorMessage = res.mainTitle + L"\n" + res.detailMessage + L"\n" + res.actionAdvice;
+        return res;
+    }
+
+    DWORD statusCode = 0;
+    DWORD dwSize = sizeof(statusCode);
+    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                        WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &dwSize, WINHTTP_NO_HEADER_INDEX);
+    res.statusCode = statusCode;
+
+    DWORD bytesAvailable = 0;
+    while (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
+        if (expectedTaskId != currentTaskId.load()) {
+            res.interrupted = true;
+            return res;
+        }
+        std::vector<char> buf(bytesAvailable);
+        DWORD bytesRead = 0;
+        if (WinHttpReadData(hRequest, buf.data(), bytesAvailable, &bytesRead) && bytesRead > 0) {
+            res.body.append(buf.data(), bytesRead);
+        }
+    }
+
+    if (statusCode != 200) {
+        AiActionManager::ExtractSemanticError(statusCode, res.body, res.mainTitle, res.detailMessage, res.actionAdvice);
+        res.errorMessage = AiActionManager::FormatAiErrorMessage(statusCode, res.body);
+        return res;
+    }
+
+    res.ok = true;
+    return res;
 }
 
 static std::string BinaryToBase64(const uint8_t* data, size_t len) {
@@ -112,6 +192,156 @@ static bool DownloadImageFromUrl(const std::wstring& wUrl, std::vector<uint8_t>&
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
     return ok;
+}
+
+static bool Base64ToBinary(const char* b64, size_t b64Len, std::vector<uint8_t>& outBytes) {
+    if (!b64 || b64Len == 0) return false;
+    const char* comma = static_cast<const char*>(memchr(b64, ',', b64Len));
+    if (comma) {
+        size_t skip = static_cast<size_t>((comma + 1) - b64);
+        b64 += skip;
+        b64Len -= skip;
+    }
+    DWORD binLen = 0;
+    if (!CryptStringToBinaryA(b64, static_cast<DWORD>(b64Len), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
+        return false;
+    }
+    outBytes.resize(binLen);
+    if (!CryptStringToBinaryA(b64, static_cast<DWORD>(b64Len), CRYPT_STRING_BASE64, outBytes.data(), &binLen, nullptr, nullptr)) {
+        outBytes.clear();
+        return false;
+    }
+    return true;
+}
+
+static bool CrackEndpointUrl(
+    const std::string& baseUrl,
+    wchar_t hostName[256],
+    INTERNET_PORT& outPort,
+    bool& outIsHttps,
+    std::wstring& outPath,
+    std::wstring& outError)
+{
+    std::wstring wUrl = Utf8ToWide(baseUrl);
+    URL_COMPONENTS urlComp{};
+    urlComp.dwStructSize = sizeof(urlComp);
+    wchar_t localPath[1024] = { 0 };
+    urlComp.lpszHostName = hostName;
+    urlComp.dwHostNameLength = 256;
+    urlComp.lpszUrlPath = localPath;
+    urlComp.dwUrlPathLength = 1024;
+
+    if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.size()), 0, &urlComp)) {
+        outError = AppStrings::AiError_InvalidUrl;
+        return false;
+    }
+    outPort = urlComp.nPort;
+    outIsHttps = (urlComp.nScheme == INTERNET_SCHEME_HTTPS);
+    outPath = localPath;
+    if (outPath.empty() || outPath.back() != L'/') outPath += L'/';
+    return true;
+}
+
+static void ResolveGeminiPath(std::wstring& fullPath, const std::string& targetModel) {
+    size_t openaiPos = fullPath.find(L"openai");
+    if (openaiPos != std::wstring::npos) fullPath = fullPath.substr(0, openaiPos);
+    size_t pos = fullPath.find(L"models");
+    if (pos != std::wstring::npos) fullPath = fullPath.substr(0, pos);
+    if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
+    if (fullPath == L"/") fullPath = L"/v1beta/";
+
+    fullPath += L"models/" + Utf8ToWide(targetModel);
+    if (targetModel.rfind("imagen-", 0) == 0) {
+        fullPath += L":predict";
+    } else {
+        fullPath += L":generateContent";
+    }
+}
+
+static void ResolveSdPath(std::wstring& fullPath, bool isImg2Img) {
+    size_t pos = fullPath.find(L"sdapi");
+    if (pos != std::wstring::npos) fullPath = fullPath.substr(0, pos);
+    if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
+    fullPath += isImg2Img ? L"sdapi/v1/img2img" : L"sdapi/v1/txt2img";
+}
+
+static bool ExtractImageFromYyjson(yyjson_val* root, std::vector<uint8_t>& outImgBytes) {
+    if (!root) return false;
+
+    // 1. Try Gemini Native candidates[0].content.parts[*].inlineData.data
+    yyjson_val* candidates = yyjson_obj_get(root, "candidates");
+    if (candidates && yyjson_is_arr(candidates) && yyjson_arr_size(candidates) > 0) {
+        yyjson_val* firstCand = yyjson_arr_get(candidates, 0);
+        yyjson_val* candContent = yyjson_obj_get(firstCand, "content");
+        if (candContent) {
+            yyjson_val* parts = yyjson_obj_get(candContent, "parts");
+            if (parts && yyjson_is_arr(parts)) {
+                size_t partCount = yyjson_arr_size(parts);
+                for (size_t pIdx = 0; pIdx < partCount; ++pIdx) {
+                    yyjson_val* part = yyjson_arr_get(parts, pIdx);
+                    yyjson_val* inData = yyjson_obj_get(part, "inlineData");
+                    if (!inData) inData = yyjson_obj_get(part, "inline_data");
+                    if (inData) {
+                        yyjson_val* b64Val = yyjson_obj_get(inData, "data");
+                        if (b64Val && yyjson_is_str(b64Val)) {
+                            const char* s = yyjson_get_str(b64Val);
+                            if (Base64ToBinary(s, strlen(s), outImgBytes)) return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Try Google Imagen 3 predict structure: predictions[0].bytesBase64Encoded
+    yyjson_val* vPreds = yyjson_obj_get(root, "predictions");
+    if (vPreds && yyjson_is_arr(vPreds) && yyjson_arr_size(vPreds) > 0) {
+        yyjson_val* firstPred = yyjson_arr_get(vPreds, 0);
+        yyjson_val* b64Val = yyjson_obj_get(firstPred, "bytesBase64Encoded");
+        if (b64Val && yyjson_is_str(b64Val)) {
+            const char* s = yyjson_get_str(b64Val);
+            if (Base64ToBinary(s, strlen(s), outImgBytes)) return true;
+        }
+    }
+
+    // 3. Try SD WebUI / Forge structure: images[0] (base64 string or obj with url)
+    yyjson_val* imagesArr = yyjson_obj_get(root, "images");
+    if (imagesArr && yyjson_is_arr(imagesArr) && yyjson_arr_size(imagesArr) > 0) {
+        yyjson_val* firstImg = yyjson_arr_get(imagesArr, 0);
+        if (firstImg) {
+            if (yyjson_is_str(firstImg)) {
+                const char* s = yyjson_get_str(firstImg);
+                if (Base64ToBinary(s, strlen(s), outImgBytes)) return true;
+            } else if (yyjson_is_obj(firstImg)) {
+                yyjson_val* vUrl = yyjson_obj_get(firstImg, "url");
+                if (vUrl && yyjson_is_str(vUrl)) {
+                    std::wstring imgUrl = Utf8ToWide(yyjson_get_str(vUrl));
+                    if (DownloadImageFromUrl(imgUrl, outImgBytes)) return true;
+                }
+            }
+        }
+    }
+
+    // 4. Try OpenAI / SiliconFlow structure: data[0].b64_json or url
+    yyjson_val* dataArr = yyjson_obj_get(root, "data");
+    if (dataArr && yyjson_is_arr(dataArr) && yyjson_arr_size(dataArr) > 0) {
+        yyjson_val* firstObj = yyjson_arr_get(dataArr, 0);
+        if (firstObj && yyjson_is_obj(firstObj)) {
+            yyjson_val* b64Val = yyjson_obj_get(firstObj, "b64_json");
+            if (b64Val && yyjson_is_str(b64Val)) {
+                const char* s = yyjson_get_str(b64Val);
+                if (Base64ToBinary(s, strlen(s), outImgBytes)) return true;
+            } else {
+                yyjson_val* vUrl = yyjson_obj_get(firstObj, "url");
+                if (vUrl && yyjson_is_str(vUrl)) {
+                    std::wstring imgUrl = Utf8ToWide(yyjson_get_str(vUrl));
+                    if (DownloadImageFromUrl(imgUrl, outImgBytes)) return true;
+                }
+            }
+        }
+    }
+
+    return false;
 }
 
 static bool LoadAndEncodeActiveImage(const std::wstring& filePath, MaxResolution maxRes, std::string& outBase64, std::string& outMimeType, uint32_t& outWidth, uint32_t& outHeight) {
@@ -461,6 +691,41 @@ AiActionManager::~AiActionManager() {
     CancelCurrentTask();
 }
 
+bool AiActionManager::OpenAiHttpRequest(
+    const wchar_t* userAgent,
+    const wchar_t* hostName,
+    INTERNET_PORT port,
+    bool isHttps,
+    bool isLocal,
+    const std::wstring& fullPath,
+    int timeoutSeconds,
+    std::wstring& outError)
+{
+    std::lock_guard<std::mutex> lock(m_taskMutex);
+    m_activeSession = WinHttpOpen(userAgent, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!m_activeSession) {
+        outError = AppStrings::AiError_InitWinHttpFailed;
+        return false;
+    }
+
+    DWORD recvTimeout = (timeoutSeconds > 0) ? (static_cast<DWORD>(timeoutSeconds) * 1000) : (isLocal ? 0 : 600000);
+    WinHttpSetTimeouts(m_activeSession, 5000, 10000, 30000, recvTimeout);
+
+    m_activeConnect = WinHttpConnect(m_activeSession, hostName, port, 0);
+    if (!m_activeConnect) {
+        outError = AppStrings::AiError_ConnectFailed;
+        return false;
+    }
+
+    DWORD flags = isHttps ? WINHTTP_FLAG_SECURE : 0;
+    m_activeRequest = WinHttpOpenRequest(m_activeConnect, L"POST", fullPath.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!m_activeRequest) {
+        outError = AppStrings::AiError_CreateReqFailed;
+        return false;
+    }
+    return true;
+}
+
 bool AiActionManager::Init() {
     if (m_initialized) return true;
     m_initialized = true;
@@ -639,19 +904,14 @@ std::string AiActionManager::EncryptApiKey(std::string_view plainText) {
 std::string AiActionManager::DecryptApiKey(std::string_view cipherBase64) {
     if (cipherBase64.empty()) return "";
 
-    DWORD binaryLen = 0;
-    if (!CryptStringToBinaryA(cipherBase64.data(), static_cast<DWORD>(cipherBase64.size()), CRYPT_STRING_BASE64, nullptr, &binaryLen, nullptr, nullptr)) {
-        return "";
-    }
-
-    std::vector<BYTE> cipherBinary(binaryLen);
-    if (!CryptStringToBinaryA(cipherBase64.data(), static_cast<DWORD>(cipherBase64.size()), CRYPT_STRING_BASE64, cipherBinary.data(), &binaryLen, nullptr, nullptr)) {
+    std::vector<uint8_t> cipherBinary;
+    if (!Base64ToBinary(cipherBase64.data(), cipherBase64.size(), cipherBinary)) {
         return "";
     }
 
     DATA_BLOB dataIn;
     dataIn.pbData = cipherBinary.data();
-    dataIn.cbData = binaryLen;
+    dataIn.cbData = static_cast<DWORD>(cipherBinary.size());
 
     DATA_BLOB dataOut{};
     if (!CryptUnprotectData(&dataIn, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &dataOut)) {
@@ -1181,15 +1441,15 @@ uint64_t AiActionManager::ExecuteAction(
 
     if (shouldInpaint && hasSelection) {
         std::wstring promptCopy = actCopy.promptTemplate;
-        std::thread([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete]() {
+        QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete]() {
             InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete);
-        }).detach();
+        });
         return taskId;
     }
 
-    std::thread([this, taskId, actCopy, profCopy, hwnd, onComplete]() {
+    QuickView::RunDetached([this, taskId, actCopy, profCopy, hwnd, onComplete]() {
         WorkerThread(taskId, actCopy, profCopy, hwnd, onComplete);
-    }).detach();
+    });
 
     return taskId;
 }
@@ -1264,6 +1524,7 @@ static void ComputeTargetDimensions(
     }
 }
 
+[[clang::noinline]]
 void AiActionManager::WorkerThread(
     uint64_t taskId, ActionDesc action, ModelProfile profile,
     HWND /*hwnd*/, std::function<void(const ExecutionResult&)> callback) {
@@ -1305,134 +1566,40 @@ void AiActionManager::WorkerThread(
     uint32_t imgW = 0, imgH = 0;
     bool hasImage = LoadAndEncodeActiveImage(GetCurrentActiveImagePath(), profile.maxResolution, imageBase64, imageMimeType, imgW, imgH);
 
-    // Parse URL
-    std::wstring wUrl;
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, profile.baseUrl.c_str(), -1, nullptr, 0);
-    if (wlen > 0) {
-        wUrl.resize(wlen - 1);
-        MultiByteToWideChar(CP_UTF8, 0, profile.baseUrl.c_str(), -1, wUrl.data(), wlen);
-    }
-
-    URL_COMPONENTS urlComp{};
-    urlComp.dwStructSize = sizeof(urlComp);
+    // Parse URL & Endpoint
     wchar_t hostName[256] = { 0 };
-    wchar_t urlPath[1024] = { 0 };
-    urlComp.lpszHostName = hostName;
-    urlComp.dwHostNameLength = 256;
-    urlComp.lpszUrlPath = urlPath;
-    urlComp.dwUrlPathLength = 1024;
-
-    if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.size()), 0, &urlComp)) {
-        result.errorMessage = AppStrings::AiError_InvalidUrl;
+    INTERNET_PORT port = 0;
+    bool isHttps = false;
+    std::wstring fullPath;
+    if (!CrackEndpointUrl(profile.baseUrl, hostName, port, isHttps, fullPath, result.errorMessage)) {
         m_isRunning.store(false);
         if (callback) callback(result);
         return;
     }
 
-    // Append standard endpoint path if necessary
-    std::wstring fullPath = urlPath;
-    if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
-
-    bool isAnthropic = (wUrl.find(L"api.anthropic.com") != std::wstring::npos);
-
+    bool isAnthropic = (profile.baseUrl.find("api.anthropic.com") != std::string::npos);
     ApiProtocol effectiveProtocol = profile.protocol;
 
     if (effectiveProtocol == ApiProtocol::StabilityInpaint) {
-        size_t pos = fullPath.find(L"sdapi");
-        if (pos != std::wstring::npos) {
-            fullPath = fullPath.substr(0, pos);
-        }
-        if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
-        if (hasImage) {
-            fullPath += L"sdapi/v1/img2img";
-        } else {
-            fullPath += L"sdapi/v1/txt2img";
-        }
+        ResolveSdPath(fullPath, hasImage);
     } else if (effectiveProtocol == ApiProtocol::GeminiNative) {
-        size_t openaiPos = fullPath.find(L"openai");
-        if (openaiPos != std::wstring::npos) {
-            fullPath = fullPath.substr(0, openaiPos);
-        }
-        size_t pos = fullPath.find(L"models");
-        if (pos != std::wstring::npos) {
-            fullPath = fullPath.substr(0, pos);
-        }
-        if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
-        if (fullPath == L"/") {
-            fullPath = L"/v1beta/";
-        }
-        fullPath += L"models/" + Utf8ToWide(targetModel);
-        if (targetModel.rfind("imagen-", 0) == 0) {
-            fullPath += L":predict";
-        } else {
-            fullPath += L":generateContent";
-        }
+        ResolveGeminiPath(fullPath, targetModel);
     } else if (effectiveProtocol == ApiProtocol::OpenAiChat) {
         if (isAnthropic) {
-            if (fullPath.find(L"messages") == std::wstring::npos) {
-                fullPath += L"messages";
-            }
+            if (fullPath.find(L"messages") == std::wstring::npos) fullPath += L"messages";
         } else {
-            if (fullPath.find(L"chat/completions") == std::wstring::npos) {
-                fullPath += L"chat/completions";
-            }
+            if (fullPath.find(L"chat/completions") == std::wstring::npos) fullPath += L"chat/completions";
         }
     } else if (effectiveProtocol == ApiProtocol::OpenAiImagesGenerate) {
-        if (fullPath.find(L"images/generations") == std::wstring::npos) {
-            fullPath += L"images/generations";
-        }
+        if (fullPath.find(L"images/generations") == std::wstring::npos) fullPath += L"images/generations";
     } else if (profile.protocol == ApiProtocol::OpenAiImagesEdit) {
-        if (fullPath.find(L"images/edits") == std::wstring::npos) {
-            fullPath += L"images/edits";
-        }
+        if (fullPath.find(L"images/edits") == std::wstring::npos) fullPath += L"images/edits";
     }
 
-    // Initialize WinHTTP Session
-    {
-        std::lock_guard<std::mutex> lock(m_taskMutex);
-        m_activeSession = WinHttpOpen(L"QuickView-AI/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-        if (!m_activeSession) {
-            result.errorMessage = AppStrings::AiError_InitWinHttpFailed;
-            m_isRunning.store(false);
-            if (callback) callback(result);
-            return;
-        }
-
-        // Tiered & Adaptive Timeout Strategy:
-        // 1. DNS Resolve: 5s (fail fast on bad domain)
-        // 2. TCP/TLS Connect: 10s (fail fast on network block)
-        // 3. Send Request: 30s (upload high-res image data)
-        // 4. Receive Response:
-        //    - Local (SD WebUI / Forge / ComfyUI): 0 (INFINITE timeout).
-        //      Since local models have real-time progress bars and user can press Esc to cancel at any time,
-        //      we never prematurely abort a slow local generation (e.g. low VRAM, hi-res fix, 50+ steps).
-        //    - Cloud (Gemini, Claude, Grok, SiliconFlow): at least 600s (10 minutes)
-        //      to prevent aborting queued/slow cloud generations and wasting user tokens/quota.
-        DWORD resolveTimeoutMs = 5000;
-        DWORD connectTimeoutMs = 10000;
-        DWORD sendTimeoutMs = 30000;
-        DWORD receiveTimeoutMs = 0; // 0 = INFINITE in WinHTTP
-        if (profile.timeoutSeconds > 0) {
-            receiveTimeoutMs = static_cast<DWORD>(profile.timeoutSeconds) * 1000;
-        }
-        WinHttpSetTimeouts(m_activeSession, resolveTimeoutMs, connectTimeoutMs, sendTimeoutMs, receiveTimeoutMs);
-
-        m_activeConnect = WinHttpConnect(m_activeSession, hostName, urlComp.nPort, 0);
-        if (!m_activeConnect) {
-            result.errorMessage = AppStrings::AiError_ConnectFailed;
-            m_isRunning.store(false);
-            if (callback) callback(result);
-            return;
-        }
-
-        DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
-        m_activeRequest = WinHttpOpenRequest(m_activeConnect, L"POST", fullPath.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-        if (!m_activeRequest) {
-            result.errorMessage = AppStrings::AiError_CreateReqFailed;
-            m_isRunning.store(false);
-            if (callback) callback(result);
-            return;
-        }
+    if (!OpenAiHttpRequest(L"QuickView-AI/2.0", hostName, port, isHttps, isLocal, fullPath, profile.timeoutSeconds, result.errorMessage)) {
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
     }
 
     // Build JSON Payload via yyjson
@@ -1712,199 +1879,65 @@ void AiActionManager::WorkerThread(
         headers += L"Authorization: Bearer " + wKey + L"\r\n";
     }
 
-    // Send Request
-    BOOL bSend = WinHttpSendRequest(m_activeRequest, headers.c_str(), static_cast<DWORD>(headers.size()),
-                                    payloadStr, static_cast<DWORD>(payloadLen), static_cast<DWORD>(payloadLen), 0);
+    // Send Request & Read Response via unified helper
+    auto httpRes = SendRequestAndReadResponse(
+        m_activeRequest, headers, payloadStr, static_cast<DWORD>(payloadLen),
+        hostName, port, isLocal, taskId, m_currentTaskId);
     free(payloadStr);
 
-    if (!bSend || !WinHttpReceiveResponse(m_activeRequest, nullptr)) {
-        DWORD dwErr = GetLastError();
-        if (dwErr == ERROR_WINHTTP_TIMEOUT) {
-            result.mainTitle = L"Network Request Timeout (12002)";
-            result.detailMessage = L"The remote server did not respond within the configured timeout period.";
-            result.actionAdvice = L"Hint: Increase timeout in Model Profiles settings, or lower sampling steps/resolution.";
-        } else if (dwErr == ERROR_WINHTTP_CANNOT_CONNECT) {
-            result.mainTitle = L"Connection Failed (12029)";
-            result.detailMessage = L"Failed to connect to the target endpoint server.";
-            result.actionAdvice = L"Hint: Ensure local service (e.g. SD WebUI / Forge / ComfyUI) is running, or check proxy settings.";
-        } else if (dwErr == ERROR_WINHTTP_NAME_NOT_RESOLVED) {
-            result.mainTitle = L"DNS Resolution Failed (12007)";
-            result.detailMessage = L"The hostname in Base URL could not be resolved by DNS.";
-            result.actionAdvice = L"Hint: Verify endpoint address, network connection, or system proxy.";
-        } else {
-            wchar_t buf[128] = { 0 };
-            swprintf_s(buf, L"Network Transport Error (%lu)", dwErr);
-            result.mainTitle = buf;
-            result.detailMessage = L"A low-level WinHTTP transport error occurred.";
-            result.actionAdvice = L"Hint: Check network connectivity, VPN, or endpoint availability.";
-        }
-        result.errorMessage = result.mainTitle + L"\n" + result.detailMessage + L"\n" + result.actionAdvice;
+    if (httpRes.interrupted) {
+        m_isRunning.store(false);
+        return;
+    }
+
+    result.httpStatusCode = httpRes.statusCode;
+    result.rawResponseBody = httpRes.body;
+
+    if (!httpRes.ok) {
+        result.mainTitle = std::move(httpRes.mainTitle);
+        result.detailMessage = std::move(httpRes.detailMessage);
+        result.actionAdvice = std::move(httpRes.actionAdvice);
+        result.errorMessage = std::move(httpRes.errorMessage);
         m_isRunning.store(false);
         if (callback) callback(result);
         return;
     }
 
-    // Query Status Code
-    DWORD statusCode = 0;
-    DWORD scSize = sizeof(statusCode);
-    WinHttpQueryHeaders(m_activeRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                        WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &scSize, WINHTTP_NO_HEADER_INDEX);
-    result.httpStatusCode = statusCode;
-
-    // Read Response Body
-    std::string responseBody;
-    DWORD bytesAvailable = 0;
-    while (WinHttpQueryDataAvailable(m_activeRequest, &bytesAvailable) && bytesAvailable > 0) {
-        if (taskId != m_currentTaskId.load()) {
-            m_isRunning.store(false);
-            return; // Interrupted
-        }
-        std::vector<char> tempBuf(bytesAvailable);
-        DWORD bytesRead = 0;
-        if (WinHttpReadData(m_activeRequest, tempBuf.data(), bytesAvailable, &bytesRead) && bytesRead > 0) {
-            responseBody.append(tempBuf.data(), bytesRead);
-        }
-    }
-    result.rawResponseBody = responseBody;
-
-    // Handle Error Status Code
-    if (statusCode != 200) {
-        ExtractSemanticError(statusCode, responseBody, result.mainTitle, result.detailMessage, result.actionAdvice);
-        result.errorMessage = FormatAiErrorMessage(statusCode, responseBody);
-        m_isRunning.store(false);
-        if (callback) callback(result);
-        return;
-    }
+    std::string responseBody = std::move(httpRes.body);
 
     // Success (HTTP 200): Parse Image Data (Base64 or URL) or Text Content
     yyjson_doc* respDoc = yyjson_read(responseBody.data(), responseBody.size(), 0);
     if (respDoc) {
         yyjson_val* rRoot = yyjson_doc_get_root(respDoc);
         if (rRoot) {
-            // 0. Try Google Gemini generateContent structure: candidates[0].content.parts[].inlineData
-            yyjson_val* vCandidates = yyjson_obj_get(rRoot, "candidates");
-            if (vCandidates && yyjson_is_arr(vCandidates) && yyjson_arr_size(vCandidates) > 0) {
-                yyjson_val* firstCand = yyjson_arr_get(vCandidates, 0);
-                yyjson_val* cContent = yyjson_obj_get(firstCand, "content");
-                if (cContent) {
-                    yyjson_val* cParts = yyjson_obj_get(cContent, "parts");
-                    if (cParts && yyjson_is_arr(cParts)) {
-                        size_t pIdx, pMax;
-                        yyjson_val* part;
-                        yyjson_arr_foreach(cParts, pIdx, pMax, part) {
-                            yyjson_val* inData = yyjson_obj_get(part, "inlineData");
-                            if (!inData) inData = yyjson_obj_get(part, "inline_data");
-                            if (inData) {
-                                yyjson_val* b64Val = yyjson_obj_get(inData, "data");
-                                if (b64Val && yyjson_is_str(b64Val)) {
-                                    const char* actualB64 = yyjson_get_str(b64Val);
-                                    DWORD binLen = 0;
-                                    if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
-                                        result.resultImageData.resize(binLen);
-                                        CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
-                                        result.success = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (result.textContent.empty()) {
+            // 0. Try extracting image from JSON structures (Gemini, Imagen, SD, OpenAI, SiliconFlow)
+            if (ExtractImageFromYyjson(rRoot, result.resultImageData)) {
+                result.success = true;
+            } else {
+                // Check for Gemini text in candidates
+                yyjson_val* vCandidates = yyjson_obj_get(rRoot, "candidates");
+                if (vCandidates && yyjson_is_arr(vCandidates) && yyjson_arr_size(vCandidates) > 0) {
+                    yyjson_val* firstCand = yyjson_arr_get(vCandidates, 0);
+                    yyjson_val* cContent = yyjson_obj_get(firstCand, "content");
+                    if (cContent) {
+                        yyjson_val* cParts = yyjson_obj_get(cContent, "parts");
+                        if (cParts && yyjson_is_arr(cParts)) {
+                            size_t pIdx, pMax;
+                            yyjson_val* part;
+                            yyjson_arr_foreach(cParts, pIdx, pMax, part) {
                                 yyjson_val* tVal = yyjson_obj_get(part, "text");
                                 if (tVal && yyjson_is_str(tVal)) {
                                     result.textContent = Utf8ToWide(yyjson_get_str(tVal));
+                                    result.success = true;
+                                    break;
                                 }
                             }
                         }
-                        if (result.success) {
-                            // Successfully extracted image from Gemini
-                        } else if (!result.textContent.empty()) {
-                            result.success = true;
-                        }
                     }
                 }
             }
 
-            // 0.5. Try Google Imagen 3 predict structure: predictions[0].bytesBase64Encoded
-            if (!result.success) {
-                yyjson_val* vPreds = yyjson_obj_get(rRoot, "predictions");
-                if (vPreds && yyjson_is_arr(vPreds) && yyjson_arr_size(vPreds) > 0) {
-                    yyjson_val* firstPred = yyjson_arr_get(vPreds, 0);
-                    yyjson_val* b64Val = yyjson_obj_get(firstPred, "bytesBase64Encoded");
-                    if (b64Val && yyjson_is_str(b64Val)) {
-                        const char* actualB64 = yyjson_get_str(b64Val);
-                        DWORD binLen = 0;
-                        if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
-                            result.resultImageData.resize(binLen);
-                            CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
-                            result.success = true;
-                        }
-                    }
-                }
-            }
-
-            // 1. Try SD WebUI structure: images[0] (Base64 PNG string)
-            if (!result.success) {
-                yyjson_val* vImages = yyjson_obj_get(rRoot, "images");
-                if (vImages && yyjson_is_arr(vImages) && yyjson_arr_size(vImages) > 0) {
-                    yyjson_val* firstImg = yyjson_arr_get(vImages, 0);
-                    if (firstImg && yyjson_is_str(firstImg)) {
-                        const char* b64Str = yyjson_get_str(firstImg);
-                        const char* actualB64 = strstr(b64Str, ";base64,");
-                        if (actualB64) actualB64 += 8;
-                        else actualB64 = b64Str;
-                        DWORD binLen = 0;
-                        if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
-                            result.resultImageData.resize(binLen);
-                            CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
-                            result.success = true;
-                        }
-                    }
-                }
-            }
-
-            // 2. Try standard OpenAI / SiliconFlow image generation structure: data[0].b64_json or data[0].url
-            if (!result.success) {
-                yyjson_val* vData = yyjson_obj_get(rRoot, "data");
-                if (vData && yyjson_is_arr(vData) && yyjson_arr_size(vData) > 0) {
-                    yyjson_val* first = yyjson_arr_get(vData, 0);
-                    yyjson_val* b64 = yyjson_obj_get(first, "b64_json");
-                    if (b64 && yyjson_is_str(b64)) {
-                        const char* b64Str = yyjson_get_str(b64);
-                        DWORD binLen = 0;
-                        if (CryptStringToBinaryA(b64Str, static_cast<DWORD>(strlen(b64Str)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
-                            result.resultImageData.resize(binLen);
-                            CryptStringToBinaryA(b64Str, static_cast<DWORD>(strlen(b64Str)), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
-                            result.success = true;
-                        }
-                    } else {
-                        yyjson_val* vUrl = yyjson_obj_get(first, "url");
-                        if (vUrl && yyjson_is_str(vUrl)) {
-                            std::wstring imgUrl = Utf8ToWide(yyjson_get_str(vUrl));
-                            if (DownloadImageFromUrl(imgUrl, result.resultImageData)) {
-                                result.success = true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 3. Try SiliconFlow images array with url: images[0].url
-            if (!result.success) {
-                yyjson_val* vImages = yyjson_obj_get(rRoot, "images");
-                if (vImages && yyjson_is_arr(vImages) && yyjson_arr_size(vImages) > 0) {
-                    yyjson_val* firstImg = yyjson_arr_get(vImages, 0);
-                    if (firstImg && yyjson_is_obj(firstImg)) {
-                        yyjson_val* vUrl = yyjson_obj_get(firstImg, "url");
-                        if (vUrl && yyjson_is_str(vUrl)) {
-                            std::wstring imgUrl = Utf8ToWide(yyjson_get_str(vUrl));
-                            if (DownloadImageFromUrl(imgUrl, result.resultImageData)) {
-                                result.success = true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 4. Try Anthropic response structure: content[0].text
+            // 1. Try Anthropic response structure: content[0].text
             if (!result.success && isAnthropic) {
                 yyjson_val* vContent = yyjson_obj_get(rRoot, "content");
                 if (vContent && yyjson_is_arr(vContent) && yyjson_arr_size(vContent) > 0) {
@@ -1917,7 +1950,7 @@ void AiActionManager::WorkerThread(
                 }
             }
 
-            // 5. Try Chat Completions structure: choices[0].message.content
+            // 2. Try Chat Completions structure: choices[0].message.content
             if (!result.success) {
                 yyjson_val* vChoices = yyjson_obj_get(rRoot, "choices");
                 if (vChoices && yyjson_is_arr(vChoices) && yyjson_arr_size(vChoices) > 0) {
@@ -1936,10 +1969,7 @@ void AiActionManager::WorkerThread(
                                 size_t endPos = contentStr.find_first_of(")\"'\r\n \t", startPos);
                                 std::string subB64 = (endPos == std::string::npos) ? contentStr.substr(startPos) : contentStr.substr(startPos, endPos - startPos);
 
-                                DWORD binLen = 0;
-                                if (CryptStringToBinaryA(subB64.c_str(), static_cast<DWORD>(subB64.size()), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
-                                    result.resultImageData.resize(binLen);
-                                    CryptStringToBinaryA(subB64.c_str(), static_cast<DWORD>(subB64.size()), CRYPT_STRING_BASE64, result.resultImageData.data(), &binLen, nullptr, nullptr);
+                                if (Base64ToBinary(subB64.c_str(), subB64.size(), result.resultImageData)) {
                                     result.success = true;
                                 }
                             }
@@ -1973,7 +2003,7 @@ void AiActionManager::FetchModelsAsync(
     ApiProtocol protocol,
     std::function<void(bool success, const std::vector<std::string>& models, const std::wstring& errorMsg)> onComplete)
 {
-    std::thread([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() {
+    QuickView::RunDetached([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() {
         std::vector<std::string> models;
 
         if (baseUrl.empty()) {
@@ -2197,7 +2227,7 @@ void AiActionManager::FetchModelsAsync(
         } else {
             if (onComplete) onComplete(true, models, L"");
         }
-    }).detach();
+    });
 }
 
 void AiActionManager::TestConnectionAsync(
@@ -2206,7 +2236,7 @@ void AiActionManager::TestConnectionAsync(
     ApiProtocol protocol,
     std::function<void(bool success, int statusCode, int latencyMs, const std::wstring& message)> onComplete)
 {
-    std::thread([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() {
+    QuickView::RunDetached([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() {
         if (baseUrl.empty()) {
             if (onComplete) onComplete(false, 0, 0, AppStrings::AiError_InvalidUrl);
             return;
@@ -2339,7 +2369,7 @@ void AiActionManager::TestConnectionAsync(
         } else {
             if (onComplete) onComplete(false, static_cast<int>(statusCode), latencyMs, std::wstring(AppStrings::AiTest_HttpErrorPrefix) + std::to_wstring(statusCode));
         }
-    }).detach();
+    });
 }
 
 bool AiActionManager::PollSdProgress(std::string_view baseUrl, SdProgressInfo& outInfo) {
@@ -2606,13 +2636,14 @@ uint64_t AiActionManager::ExecuteInpaint(
     ModelProfile profCopy = *profile;
     std::wstring promptCopy(customPrompt);
 
-    std::thread([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete]() {
+    QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete]() {
         InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete);
-    }).detach();
+    });
 
     return taskId;
 }
 
+[[clang::noinline]]
 void AiActionManager::InpaintWorkerThread(
     uint64_t taskId, int cropL, int cropT, int cropR, int cropB,
     std::wstring prompt, ModelProfile profile, HWND /*hwnd*/,
@@ -2737,25 +2768,15 @@ void AiActionManager::InpaintWorkerThread(
         return;
     }
 
-    std::wstring wUrl = Utf8ToWide(profile.baseUrl);
-    URL_COMPONENTS urlComp{};
-    urlComp.dwStructSize = sizeof(urlComp);
     wchar_t hostName[256] = { 0 };
-    wchar_t urlPath[1024] = { 0 };
-    urlComp.lpszHostName = hostName;
-    urlComp.dwHostNameLength = 256;
-    urlComp.lpszUrlPath = urlPath;
-    urlComp.dwUrlPathLength = 1024;
-
-    if (!WinHttpCrackUrl(wUrl.c_str(), static_cast<DWORD>(wUrl.size()), 0, &urlComp)) {
-        result.errorMessage = AppStrings::AiError_InvalidUrl;
+    INTERNET_PORT port = 0;
+    bool isHttps = false;
+    std::wstring fullPath;
+    if (!CrackEndpointUrl(profile.baseUrl, hostName, port, isHttps, fullPath, result.errorMessage)) {
         m_isRunning.store(false);
         if (callback) callback(result);
         return;
     }
-
-    std::wstring fullPath = urlPath;
-    if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
 
     bool isGemini = (profile.protocol == ApiProtocol::GeminiNative);
     bool isSd = (profile.protocol == ApiProtocol::StabilityInpaint);
@@ -2768,60 +2789,19 @@ void AiActionManager::InpaintWorkerThread(
     }
 
     if (isGemini) {
-        size_t openaiPos = fullPath.find(L"openai");
-        if (openaiPos != std::wstring::npos) fullPath = fullPath.substr(0, openaiPos);
-        size_t pos = fullPath.find(L"models");
-        if (pos != std::wstring::npos) fullPath = fullPath.substr(0, pos);
-        if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
-        if (fullPath == L"/") fullPath = L"/v1beta/";
-
-        fullPath += L"models/" + Utf8ToWide(targetModel);
-        if (targetModel.rfind("imagen-", 0) == 0) {
-            fullPath += L":predict";
-        } else {
-            fullPath += L":generateContent";
-        }
+        ResolveGeminiPath(fullPath, targetModel);
     } else if (isSd) {
-        size_t pos = fullPath.find(L"sdapi");
-        if (pos != std::wstring::npos) fullPath = fullPath.substr(0, pos);
-        if (fullPath.empty() || fullPath.back() != L'/') fullPath += L'/';
-        fullPath += L"sdapi/v1/img2img";
+        ResolveSdPath(fullPath, true);
     } else {
         if (fullPath.find(L"images/edits") == std::wstring::npos) {
             fullPath += L"images/edits";
         }
     }
 
-    // Initialize WinHTTP Session
-    {
-        std::lock_guard<std::mutex> lock(m_taskMutex);
-        m_activeSession = WinHttpOpen(L"QuickView-AI-Inpaint/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-        if (!m_activeSession) {
-            result.errorMessage = AppStrings::AiError_InitWinHttpFailed;
-            m_isRunning.store(false);
-            if (callback) callback(result);
-            return;
-        }
-
-        DWORD recvTimeout = (profile.timeoutSeconds > 0) ? (profile.timeoutSeconds * 1000) : (isLocal ? 0 : 600000);
-        WinHttpSetTimeouts(m_activeSession, 5000, 10000, 30000, recvTimeout);
-
-        m_activeConnect = WinHttpConnect(m_activeSession, hostName, urlComp.nPort, 0);
-        if (!m_activeConnect) {
-            result.errorMessage = AppStrings::AiError_ConnectFailed;
-            m_isRunning.store(false);
-            if (callback) callback(result);
-            return;
-        }
-
-        DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
-        m_activeRequest = WinHttpOpenRequest(m_activeConnect, L"POST", fullPath.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-        if (!m_activeRequest) {
-            result.errorMessage = AppStrings::AiError_CreateReqFailed;
-            m_isRunning.store(false);
-            if (callback) callback(result);
-            return;
-        }
+    if (!OpenAiHttpRequest(L"QuickView-AI-Inpaint/2.0", hostName, port, isHttps, isLocal, fullPath, profile.timeoutSeconds, result.errorMessage)) {
+        m_isRunning.store(false);
+        if (callback) callback(result);
+        return;
     }
 
     std::wstring headers;
@@ -2939,163 +2919,35 @@ void AiActionManager::InpaintWorkerThread(
         postPayload = std::move(body);
     }
 
-    BOOL bSend = WinHttpSendRequest(m_activeRequest, headers.c_str(), static_cast<DWORD>(headers.size()),
-                                    postPayload.data(), static_cast<DWORD>(postPayload.size()), static_cast<DWORD>(postPayload.size()), 0);
+    auto httpRes = SendRequestAndReadResponse(
+        m_activeRequest, headers, postPayload.data(), static_cast<DWORD>(postPayload.size()),
+        hostName, port, isLocal, taskId, m_currentTaskId);
 
-    if (!bSend || !WinHttpReceiveResponse(m_activeRequest, nullptr)) {
-        DWORD dwErr = GetLastError();
-        if (dwErr == ERROR_WINHTTP_CANNOT_CONNECT) {
-            result.mainTitle = L"连接失败 (12029)";
-            wchar_t buf[256];
-            swprintf_s(buf, L"无法连接到目标服务 [%s:%d]，连接被拒绝。", hostName, urlComp.nPort);
-            result.detailMessage = buf;
-            if (isLocal) {
-                result.actionAdvice = L"提示：检测到当前使用的是本地模型服务 (127.0.0.1)，请确认本地 SD WebUI / Forge / ComfyUI 是否已启动并开启 API；或者在设置中切换为在线云端模型 (如 Google Gemini)。";
-            } else {
-                result.actionAdvice = L"提示：请检查服务器地址、网络连接或代理设置。";
-            }
-        } else if (dwErr == ERROR_WINHTTP_TIMEOUT) {
-            result.mainTitle = L"请求超时 (12002)";
-            result.detailMessage = L"服务器未在配置的超时时间内响应。";
-            result.actionAdvice = L"提示：可尝试在模型配置中增加超时时间，或框选稍小的区域重试。";
-        } else if (dwErr == ERROR_WINHTTP_NAME_NOT_RESOLVED) {
-            result.mainTitle = L"DNS 解析失败 (12007)";
-            result.detailMessage = L"无法解析 Base URL 中的主机名。";
-            result.actionAdvice = L"提示：请检查网络连接、DNS 或系统代理配置。";
-        } else {
-            wchar_t buf[128];
-            swprintf_s(buf, L"网络传输错误 (%lu)", dwErr);
-            result.mainTitle = buf;
-            wchar_t detail[256];
-            swprintf_s(detail, L"与目标服务器 [%s:%d] 通信时发生底层 WinHTTP 传输错误。", hostName, urlComp.nPort);
-            result.detailMessage = detail;
-            result.actionAdvice = L"提示：请检查网络连接、VPN 或防火墙状态。";
-        }
-        result.errorMessage = result.mainTitle + L"\n" + result.detailMessage + L"\n" + result.actionAdvice;
+    if (httpRes.interrupted) {
+        m_isRunning.store(false);
+        return;
+    }
+
+    result.httpStatusCode = httpRes.statusCode;
+    result.rawResponseBody = httpRes.body;
+
+    if (!httpRes.ok) {
+        result.mainTitle = std::move(httpRes.mainTitle);
+        result.detailMessage = std::move(httpRes.detailMessage);
+        result.actionAdvice = std::move(httpRes.actionAdvice);
+        result.errorMessage = std::move(httpRes.errorMessage);
         m_isRunning.store(false);
         if (callback) callback(result);
         return;
     }
 
-    DWORD statusCode = 0;
-    DWORD dwSize = sizeof(statusCode);
-    WinHttpQueryHeaders(m_activeRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &dwSize, WINHTTP_NO_HEADER_INDEX);
-
-    std::string respBody;
-    DWORD bytesAvailable = 0;
-    while (WinHttpQueryDataAvailable(m_activeRequest, &bytesAvailable) && bytesAvailable > 0) {
-        std::vector<char> buf(bytesAvailable);
-        DWORD bytesRead = 0;
-        if (WinHttpReadData(m_activeRequest, buf.data(), bytesAvailable, &bytesRead) && bytesRead > 0) {
-            respBody.append(buf.data(), bytesRead);
-        }
-    }
-
-    if (statusCode != 200) {
-        result.httpStatusCode = statusCode;
-        result.rawResponseBody = respBody;
-        ExtractSemanticError(statusCode, respBody, result.mainTitle, result.detailMessage, result.actionAdvice);
-        result.errorMessage = FormatAiErrorMessage(statusCode, respBody);
-        m_isRunning.store(false);
-        if (callback) callback(result);
-        return;
-    }
+    std::string respBody = std::move(httpRes.body);
 
     std::vector<uint8_t> aiImgBytes;
     yyjson_doc* doc = yyjson_read(respBody.c_str(), respBody.size(), 0);
     if (doc) {
         yyjson_val* root = yyjson_doc_get_root(doc);
-        if (root) {
-            // 1. Try Gemini Native candidates structure
-            yyjson_val* candidates = yyjson_obj_get(root, "candidates");
-            if (candidates && yyjson_is_arr(candidates) && yyjson_arr_size(candidates) > 0) {
-                yyjson_val* firstCand = yyjson_arr_get(candidates, 0);
-                yyjson_val* candContent = yyjson_obj_get(firstCand, "content");
-                if (candContent) {
-                    yyjson_val* parts = yyjson_obj_get(candContent, "parts");
-                    if (parts && yyjson_is_arr(parts)) {
-                        size_t partCount = yyjson_arr_size(parts);
-                        for (size_t pIdx = 0; pIdx < partCount; ++pIdx) {
-                            yyjson_val* part = yyjson_arr_get(parts, pIdx);
-                            yyjson_val* inData = yyjson_obj_get(part, "inlineData");
-                            if (!inData) inData = yyjson_obj_get(part, "inline_data");
-                            if (inData) {
-                                yyjson_val* b64Val = yyjson_obj_get(inData, "data");
-                                if (b64Val && yyjson_is_str(b64Val)) {
-                                    const char* actualB64 = yyjson_get_str(b64Val);
-                                    DWORD binLen = 0;
-                                    if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
-                                        aiImgBytes.resize(binLen);
-                                        CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, aiImgBytes.data(), &binLen, nullptr, nullptr);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 2. Try Google Imagen 3 predict structure
-            if (aiImgBytes.empty()) {
-                yyjson_val* vPreds = yyjson_obj_get(root, "predictions");
-                if (vPreds && yyjson_is_arr(vPreds) && yyjson_arr_size(vPreds) > 0) {
-                    yyjson_val* firstPred = yyjson_arr_get(vPreds, 0);
-                    yyjson_val* b64Val = yyjson_obj_get(firstPred, "bytesBase64Encoded");
-                    if (b64Val && yyjson_is_str(b64Val)) {
-                        const char* actualB64 = yyjson_get_str(b64Val);
-                        DWORD binLen = 0;
-                        if (CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, nullptr, &binLen, nullptr, nullptr)) {
-                            aiImgBytes.resize(binLen);
-                            CryptStringToBinaryA(actualB64, static_cast<DWORD>(strlen(actualB64)), CRYPT_STRING_BASE64, aiImgBytes.data(), &binLen, nullptr, nullptr);
-                        }
-                    }
-                }
-            }
-
-            // 3. Try SD WebUI / Forge structure
-            if (aiImgBytes.empty()) {
-                yyjson_val* imagesArr = yyjson_obj_get(root, "images");
-                if (imagesArr && yyjson_is_arr(imagesArr) && yyjson_arr_size(imagesArr) > 0) {
-                    yyjson_val* firstImg = yyjson_arr_get(imagesArr, 0);
-                    if (firstImg && yyjson_is_str(firstImg)) {
-                        std::string b64 = yyjson_get_str(firstImg);
-                        size_t comma = b64.find(',');
-                        if (comma != std::string::npos) b64 = b64.substr(comma + 1);
-                        DWORD dwOut = 0;
-                        if (CryptStringToBinaryA(b64.c_str(), static_cast<DWORD>(b64.size()), CRYPT_STRING_BASE64, nullptr, &dwOut, nullptr, nullptr)) {
-                            aiImgBytes.resize(dwOut);
-                            CryptStringToBinaryA(b64.c_str(), static_cast<DWORD>(b64.size()), CRYPT_STRING_BASE64, aiImgBytes.data(), &dwOut, nullptr, nullptr);
-                        }
-                    }
-                }
-            }
-
-            // 4. Try OpenAI / SiliconFlow structure (data[0].b64_json or url)
-            if (aiImgBytes.empty()) {
-                yyjson_val* dataArr = yyjson_obj_get(root, "data");
-                if (dataArr && yyjson_is_arr(dataArr) && yyjson_arr_size(dataArr) > 0) {
-                    yyjson_val* firstObj = yyjson_arr_get(dataArr, 0);
-                    if (firstObj && yyjson_is_obj(firstObj)) {
-                        yyjson_val* b64Val = yyjson_obj_get(firstObj, "b64_json");
-                        if (b64Val && yyjson_is_str(b64Val)) {
-                            std::string b64 = yyjson_get_str(b64Val);
-                            DWORD dwOut = 0;
-                            if (CryptStringToBinaryA(b64.c_str(), static_cast<DWORD>(b64.size()), CRYPT_STRING_BASE64, nullptr, &dwOut, nullptr, nullptr)) {
-                                aiImgBytes.resize(dwOut);
-                                CryptStringToBinaryA(b64.c_str(), static_cast<DWORD>(b64.size()), CRYPT_STRING_BASE64, aiImgBytes.data(), &dwOut, nullptr, nullptr);
-                            }
-                        } else {
-                            yyjson_val* vUrl = yyjson_obj_get(firstObj, "url");
-                            if (vUrl && yyjson_is_str(vUrl)) {
-                                std::wstring imgUrl = Utf8ToWide(yyjson_get_str(vUrl));
-                                DownloadImageFromUrl(imgUrl, aiImgBytes);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        ExtractImageFromYyjson(root, aiImgBytes);
         yyjson_doc_free(doc);
     }
 
@@ -3151,3 +3003,8 @@ void AiActionManager::InpaintWorkerThread(
 }
 
 } // namespace QuickView::AI
+ 
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

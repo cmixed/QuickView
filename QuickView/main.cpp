@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "QuickViewETW.h"
+#include "AsyncJob.h"
 static constexpr const char* CURRENT_MODULE = "Main";
 #include "CoroutineTypes.h"
 #include "CompositionEngine.h"
@@ -224,7 +225,7 @@ static std::mutex g_asyncSeekResMutex;
 static void EnsureAsyncSeekThread() {
     if (g_asyncSeekThreadStarted) return;
     g_asyncSeekThreadStarted = true;
-    std::thread([]() {
+    QuickView::RunDetached([]() {
         while (true) {
             AsyncSeekRequest req;
             {
@@ -253,7 +254,7 @@ static void EnsureAsyncSeekThread() {
                 }
             }
         }
-    }).detach();
+    });
 }
 
 namespace {
@@ -1139,7 +1140,7 @@ static void ScheduleGamutWarningAnalysisImpl(HWND hwnd) {
     }
 
     const uint32_t jobId = ++g_gamutWarningJobId;
-    std::thread([hwnd, jobId, request = std::move(requestCopy)]() mutable {
+    QuickView::PostThreadPool([hwnd, jobId, request = std::move(requestCopy)]() mutable {
         GamutWarningOverlayState analyzed;
         HRESULT hr = E_FAIL;
         if (g_renderEngine && request.frame) {
@@ -1190,7 +1191,7 @@ static void ScheduleGamutWarningAnalysisImpl(HWND hwnd) {
             g_gamutWarningOverlay = std::move(analyzed);
         }
         PostMessageW(hwnd, WM_GAMUT_WARNING_READY, 0, 0);
-    }).detach();
+    });
 }
 
 
@@ -4411,6 +4412,7 @@ static void EnsureWindowSizeForDialog(HWND hwnd) {
 
 // --- Logic Functions ---
 
+[[clang::minsize, clang::noinline]]
 bool SaveCurrentImage(bool saveAs) {
     if (!GetPaneContext(PaneSlot::Primary).editState.IsDirty && !saveAs) return true;
     
@@ -4810,6 +4812,10 @@ void ParseFixedZoomLevels() {
     );
 }
 
+#if defined(__clang__)
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
+#endif
+
 static void WriteConfigInt(const wchar_t* section, const wchar_t* key, int value, const wchar_t* iniPath) {
     wchar_t buf[32];
     _itow_s(value, buf, 10);
@@ -4837,6 +4843,7 @@ static void WriteConfigBool(const wchar_t* section, const wchar_t* key, bool val
     WritePrivateProfileStringW(section, key, value ? L"1" : L"0", iniPath);
 }
 
+[[clang::minsize, clang::noinline]]
 void SaveConfig() {
     std::wstring iniPath;
     
@@ -5074,6 +5081,7 @@ void SaveConfig() {
     QuickView::PluginHost::Instance().SaveConfig(iniPath.c_str());
 }
 
+[[clang::minsize, clang::noinline]]
 void LoadConfig() {
     std::wstring iniPath = GetConfigPath();
     
@@ -5519,6 +5527,9 @@ void LoadConfig() {
     QuickView::PluginHost::Instance().LoadConfig(iniPath.c_str());
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#endif
 
 void DiscardChanges() {
     // Save original path BEFORE reset (Reset clears it)
@@ -6498,7 +6509,7 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
         RequestRepaint(PaintLayer::Dynamic);
 
         std::wstring curPath = primaryPane.path;
-        std::thread([hwnd, curReqId, curPath, activeModelId, targetScale, animDecoder, totalFrames]() {
+        QuickView::RunDetached([hwnd, curReqId, curPath, activeModelId, targetScale, animDecoder, totalFrames]() {
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
 
             LARGE_INTEGER freq, t0, t1;
@@ -6579,7 +6590,7 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
             }
 
             PostMessageW(hwnd, WM_SR_ANIMATION_COMPLETED, 0, reinterpret_cast<LPARAM>(animRes));
-        }).detach();
+        });
 
         return;
     }
@@ -6681,7 +6692,7 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
 
         std::wstring curPath = primaryPane.path;
         bool hasAlpha = (frame->format != QuickView::PixelFormat::BGRX8888);
-        std::thread([hwnd, curReqId, curPath, activeModelId, targetScale, frame, hasAlpha, forceManual]() {
+        QuickView::RunDetached([hwnd, curReqId, curPath, activeModelId, targetScale, frame, hasAlpha, forceManual]() {
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
 
             QuickView::SimplePredicate cancelPred;
@@ -6713,7 +6724,7 @@ static void TriggerDebouncedSuperResolution(HWND hwnd, bool forceManual = false)
             res->hr = hr;
 
             PostMessageW(hwnd, WM_SR_COMPLETED, 0, reinterpret_cast<LPARAM>(res));
-        }).detach();
+        });
 
     } else {
         // --- CASE 2: Zoom <= 100% -> Exact fallback to 1.0x native frame ---
@@ -7902,6 +7913,7 @@ static void EnsureBootHydrated(HWND hwnd) {
     }
 }
 
+[[clang::minsize, clang::noinline]]
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, [[maybe_unused]] LPWSTR lpCmdLine, int nCmdShow) {
     // Early capture of foreground window state before any QuickView initialization/window creation
     HWND hCmdFg = QuickView::ProcessRouter::ParseFgCaller();
@@ -8613,6 +8625,7 @@ void SetLockWindowSize(HWND hwnd, bool locked) {
 }
 
 // [AI Inpaint] Trigger Selection Inpainting
+[[clang::minsize, clang::noinline]]
 static void TriggerInpaintCurrentSelection(HWND hwnd) {
     if (!g_cropState.IsActive || g_cropState.Mode != RegionInteractionMode::AiInpaint) return;
 
@@ -8687,7 +8700,7 @@ static void TriggerInpaintCurrentSelection(HWND hwnd) {
             cropL, cropT, cropR, cropB, customPrompt, hwnd, onCompleteCallback);
     }
 
-    std::thread([hwnd, actName, currentTaskId, taskFinished]() {
+    QuickView::RunDetached([hwnd, actName, currentTaskId, taskFinished]() {
         auto startTime = std::chrono::steady_clock::now();
         while (!taskFinished->load() && QuickView::AI::AiActionManager::Instance().IsRunning() && QuickView::AI::AiActionManager::Instance().GetCurrentTaskId() == currentTaskId) {
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -8702,7 +8715,1238 @@ static void TriggerInpaintCurrentSelection(HWND hwnd) {
             fakeProgress = (std::max)(0.05f, (std::min)(fakeProgress, 0.95f));
             g_osd.UpdatePersistentTask(hwnd, msg, fakeProgress);
         }
-    }).detach();
+    });
+}
+
+
+[[clang::minsize, clang::noinline]]
+static LRESULT HandleWmCommand(HWND hwnd, WPARAM wParam, [[maybe_unused]] LPARAM lParam) {
+        EnsureBootHydrated(hwnd);
+        UINT cmdId = LOWORD(wParam);
+        UINT wmId = cmdId;
+
+        const bool contextLeft = IsCompareContextLeft();
+        const std::wstring& contextPath = contextLeft ? GetPaneContext(PaneSlot::Left).path : GetPaneContext(PaneSlot::Primary).path;
+        const CImageLoader::ImageMetadata& contextMeta = contextLeft ? GetPaneContext(PaneSlot::Left).metadata : GetPaneContext(PaneSlot::Primary).metadata;
+
+        if (wmId == IDM_ENTER_CROP_MODE) {
+            HandleHotkeyAction(hwnd, HotkeyAction::EnterCropMode);
+            return 0;
+        }
+
+        if (wmId == IDM_SUPER_RESOLUTION) {
+            HandleHotkeyAction(hwnd, HotkeyAction::SuperResolution);
+            return 0;
+        }
+
+        if (wmId == IDM_AI_ACTION) {
+            HandleHotkeyAction(hwnd, HotkeyAction::AiAction);
+            return 0;
+        }
+
+        // Soft Proofing Profile Dynamic Dispatch
+        if (cmdId >= IDM_SOFT_PROOF_BASE && cmdId <= IDM_SOFT_PROOF_BASE + 99) {
+            extern std::vector<std::wstring>& GetSystemIccProfiles();
+            std::vector<std::wstring>& profiles = GetSystemIccProfiles();
+            int idx = cmdId - IDM_SOFT_PROOF_BASE;
+            if (idx >= 0 && static_cast<size_t>(idx) < profiles.size()) {
+                if (contextLeft) {
+                    GetPaneContext(PaneSlot::Left).SoftProofProfilePath = profiles[idx];
+                    GetPaneContext(PaneSlot::Left).EnableSoftProofing = true;
+                } else {
+                    g_runtime.SoftProofProfilePath = profiles[idx];
+                    g_runtime.EnableSoftProofing = true;
+                }
+                
+                std::wstring fileName = profiles[idx];
+                size_t pos = fileName.find_last_of(L"\\/");
+                if (pos != std::wstring::npos) fileName = fileName.substr(pos + 1);
+                
+                g_osd.Show(hwnd, L"Proofing: " + fileName, false, false, D2D1::ColorF(D2D1::ColorF::Cyan));
+                
+                RefreshImageDisplay(hwnd);
+                if (!contextLeft) ScheduleGamutWarningAnalysis(hwnd);
+            }
+            return 0;
+        }
+
+        switch (cmdId) {
+        case IDM_GALLERY_OPEN_COMPARE: {
+            if (g_galleryContextMenuIndex >= 0 && g_galleryContextMenuIndex < (int)GetPaneContext(PaneSlot::Primary).navigator.Count()) {
+                std::wstring path = GetPaneContext(PaneSlot::Primary).navigator.GetFile(g_galleryContextMenuIndex);
+                g_gallery.Close();
+                NotifyGallerySessionEnded();
+                RestoreOverlayWindowState(hwnd);
+                if (!IsCompareModeActive()) {
+                    AppContext::GetInstance().CompareCtrl->EnterMode(hwnd);
+                }
+                if (IsCompareModeActive()) {
+                    AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, path, [](bool success){
+                        if (success) {
+                            AppContext::GetInstance().Compare.activePane = ComparePane::Left;
+                            MarkCompareDirty();
+                        }
+                    });
+                }
+                RequestRepaint(PaintLayer::All);
+            }
+            break;
+        }
+
+        case IDM_GALLERY_OPEN_NEW_WINDOW: {
+            if (g_galleryContextMenuIndex >= 0 && g_galleryContextMenuIndex < (int)GetPaneContext(PaneSlot::Primary).navigator.Count()) {
+                std::wstring path = GetPaneContext(PaneSlot::Primary).navigator.GetFile(g_galleryContextMenuIndex);
+                wchar_t exePath[MAX_PATH];
+                if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+                    // Enclose path in quotes
+                    std::wstring args = L"\"" + path + L"\"";
+                    ShellExecuteW(nullptr, L"open", exePath, args.c_str(), nullptr, SW_SHOWNORMAL);
+                }
+            }
+            break;
+        }
+        case IDM_GALLERY_DELETE: {
+            if (g_galleryContextMenuIndex >= 0 && g_galleryContextMenuIndex < (int)GetPaneContext(PaneSlot::Primary).navigator.Count()) {
+                std::wstring recycleTarget = GetPaneContext(PaneSlot::Primary).navigator.GetFile(g_galleryContextMenuIndex);
+                if (!recycleTarget.empty()) {
+                    // Check RAW+JPEG Pairing for the target gallery item using direct ImageID
+                    std::wstring renderedPath, rawPath;
+                    auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
+                    ImageID targetId = nav.GetImageID(g_galleryContextMenuIndex);
+                    if (const auto* pr = nav.GetPairedRaw(targetId)) {
+                        renderedPath = recycleTarget;
+                        rawPath = pr->path;
+                    }
+
+                    bool isViewingTarget = (g_galleryContextMenuIndex == nav.Index());
+
+                    if (!rawPath.empty()) {
+                        // --- CASE 1: Paired File (Let HandlePairedDelete show its own 4-button dialog directly) ---
+                        if (isViewingTarget) {
+                            SendMessage(hwnd, WM_COMMAND, IDM_DELETE, 0);
+                        } else {
+                            HandlePairedDelete(hwnd, recycleTarget, rawPath, false);
+                        }
+                    } else {
+                        // --- CASE 2: Single File (Show the standard 2-button confirmation if enabled) ---
+                        bool confirmed = true;
+                        size_t lastSlash = recycleTarget.find_last_of(L"\\/");
+                        std::wstring filename = (lastSlash != std::wstring::npos) ? recycleTarget.substr(lastSlash + 1) : recycleTarget;
+
+                        if (g_config.ConfirmDelete) {
+                            std::wstring dlgMessage = L"Move to Recycle Bin?";
+                            std::vector<DialogButton> dlgButtons;
+                            dlgButtons.emplace_back(DialogResult::Yes, L"Delete");
+                            dlgButtons.emplace_back(DialogResult::Cancel, L"Cancel");
+                            
+                            DialogResult dlgResult = AppContext::GetInstance().DialogCtrl->ShowDialog(hwnd, filename.c_str(), dlgMessage.c_str(),
+                                                                         D2D1::ColorF(0.85f, 0.25f, 0.25f), dlgButtons, true, AppStrings::Checkbox_NeverConfirmDelete, L"");
+                            confirmed = (dlgResult == DialogResult::Yes);
+                            if (confirmed && AppContext::GetInstance().Dialog.IsChecked) {
+                                g_config.ConfirmDelete = false;
+                                SaveConfig();
+                            }
+                        }
+
+                        if (confirmed) {
+                            if (isViewingTarget) {
+                                SendMessage(hwnd, WM_COMMAND, IDM_DELETE, 0);
+                            } else {
+                                std::vector<std::wstring> victims = { recycleTarget };
+                                if (RecycleFiles(victims)) {
+                                    g_osd.Show(hwnd, AppStrings::OSD_MovedToRecycleBin, false);
+                                    g_undoManager.PushDelete(recycleTarget, false);
+                                    
+                                    // Refresh current navigator
+                                    std::wstring currentPath = GetPaneContext(PaneSlot::Primary).path;
+                                    GetPaneContext(PaneSlot::Primary).navigator.Initialize(currentPath, hwnd);
+                                    
+                                    // Force gallery to refresh cache and repaint
+                                    g_gallery.Initialize(&g_thumbMgr, &GetPaneContext(PaneSlot::Primary).navigator);
+                                    RequestRepaint(PaintLayer::All);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case IDM_UNDO: {
+            HandleHotkeyAction(hwnd, HotkeyAction::Undo);
+            break;
+        }
+        case IDM_OPEN: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            OPENFILENAMEW ofn = {};
+            wchar_t szFile[MAX_PATH] = {};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = hwnd;
+            ofn.lpstrFile = szFile;
+            ofn.nMaxFile = MAX_PATH;
+            std::wstring filterStr = QuickView::GetSupportedExtensionsFilter();
+            ofn.lpstrFilter = filterStr.c_str();
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+                if (GetOpenFileNameW(&ofn)) {
+                    if (IsCompareModeActive() && AppContext::GetInstance().Compare.contextPane == ComparePane::Left) {
+                        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, szFile, [](bool success){
+                            if (success) {
+                                AppContext::GetInstance().Compare.activePane = ComparePane::Left;
+                                MarkCompareDirty();
+                                RequestRepaint(PaintLayer::Image | PaintLayer::Static);
+                            }
+                        });
+                    } else {
+                        if (IsCompareModeActive()) {
+                            AppContext::GetInstance().Compare.activePane = ComparePane::Right;
+                            AppContext::GetInstance().Compare.selectedPane = ComparePane::Right;
+                        }
+                        GetPaneContext(PaneSlot::Primary).editState.Reset();
+                        GetPaneContext(PaneSlot::Primary).view.Reset();
+                        OpenPathOrDirectory(hwnd, szFile);
+                }
+            }
+            break;
+        }
+        case IDM_OPENWITH_DEFAULT: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            // Use rundll32 to show proper "Open With" dialog
+            if (!contextPath.empty()) {
+                std::wstring args = L"shell32.dll,OpenAs_RunDLL " + contextPath;
+                ShellExecuteW(hwnd, nullptr, L"rundll32.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+            }
+            break;
+        }
+        case IDM_EDIT: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            // Open with default editor (use "edit" verb, fallback to mspaint)
+            if (!contextPath.empty()) {
+                bool customEditorFailed = false;
+                if (!g_config.CustomEditorPath.empty()) {
+                    // Try to launch the custom editor
+                    std::wstring args = L"\"" + contextPath + L"\"";
+                    HINSTANCE result = ShellExecuteW(hwnd, L"open", g_config.CustomEditorPath.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL);
+                    if ((intptr_t)result <= 32) {
+                        customEditorFailed = true;
+                        g_config.CustomEditorPath = L"";
+                        SaveConfig();
+                        extern SettingsOverlay g_settingsOverlay;
+                        g_settingsOverlay.RebuildMenu();
+                        g_osd.Show(hwnd, AppStrings::OSD_EditorLaunchFailed);
+                    }
+                }
+
+                if (g_config.CustomEditorPath.empty() && !customEditorFailed) {
+                    HINSTANCE result = ShellExecuteW(hwnd, L"edit", contextPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    if ((intptr_t)result <= 32) {
+                        // No editor registered, try mspaint
+                        std::wstring quotedPath = L"\"" + contextPath + L"\"";
+                        ShellExecuteW(hwnd, L"open", L"mspaint.exe", quotedPath.c_str(), nullptr, SW_SHOWNORMAL);
+                    }
+                }
+            }
+            break;
+        }
+        case IDM_SHOW_IN_EXPLORER: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            if (!contextPath.empty()) {
+                std::wstring cmd = L"/select,\"" + contextPath + L"\"";
+                ShellExecuteW(nullptr, nullptr, L"explorer.exe", cmd.c_str(), nullptr, SW_SHOWNORMAL);
+            }
+            break;
+        }
+        case IDM_OPEN_FOLDER: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            const std::wstring selectedFolder = PickFolder(hwnd, contextPath);
+            if (!selectedFolder.empty()) {
+                OpenPathOrDirectory(hwnd, selectedFolder);
+            }
+            break;
+        }
+        case IDM_COPY_PATH: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            std::wstring pathToCopy = contextPath;
+            
+            if (!pathToCopy.empty() && OpenClipboard(hwnd)) {
+                EmptyClipboard();
+                size_t len = (pathToCopy.length() + 1) * sizeof(wchar_t);
+                HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+                if (hMem) {
+                    memcpy(GlobalLock(hMem), pathToCopy.c_str(), len);
+                    GlobalUnlock(hMem);
+                    SetClipboardData(CF_UNICODETEXT, hMem);
+                }
+                CloseClipboard();
+                g_osd.Show(hwnd, AppStrings::OSD_FilePathCopied, false);
+                // Ensure UI updates to show OSD
+                RequestRepaint(PaintLayer::Dynamic);
+            }
+            break;
+        }
+        case IDM_COPY_PIXELS: {
+            std::wstring targetPath = !contextPath.empty() ? contextPath : (!GetPaneContext(PaneSlot::Primary).path.empty() ? GetPaneContext(PaneSlot::Primary).path : g_imagePath);
+            const auto& pane = GetPaneContext(PaneSlot::Primary);
+
+            QuickView::ExportOptions opts;
+            opts.InputPath = targetPath;
+            int baseExif = pane.view.ExifOrientation;
+            int effExif = GetEffectiveExifOrientation(baseExif, pane.editState);
+            Transform2D t = Transform2D::FromExif(effExif);
+
+            opts.Rotation = t.Rotation;
+            opts.FlipH = t.FlipH;
+            opts.FlipV = false;
+            opts.RawForceFullDecode = g_runtime.ForceRawDecode;
+
+            std::shared_ptr<QuickView::RawImageFrame> capturedSrFrame;
+            float srScale = 1.0f;
+            if (pane.resource.promotedSrTexture || pane.resource.promotedSrBitmap) {
+                capturedSrFrame = std::make_shared<QuickView::RawImageFrame>();
+                HRESULT hrExtract = E_FAIL;
+                if (g_pRenderEngine) {
+                    if (pane.resource.promotedSrTexture) {
+                        hrExtract = g_pRenderEngine->ExtractTexturePixels(pane.resource.promotedSrTexture.Get(), capturedSrFrame.get());
+                    } else if (pane.resource.promotedSrBitmap) {
+                        hrExtract = g_pRenderEngine->ExtractBitmapPixels(pane.resource.promotedSrBitmap.Get(), capturedSrFrame.get());
+                    }
+                }
+                if (SUCCEEDED(hrExtract) && capturedSrFrame->pixels && capturedSrFrame->width > 0) {
+                    srScale = (pane.resource.srScale > 1.0f) ? pane.resource.srScale : ((pane.resource.promotedSrScale > 1.0f) ? pane.resource.promotedSrScale : 2.0f);
+                    opts.SourceFrame = capturedSrFrame;
+                } else {
+                    capturedSrFrame.reset();
+                }
+            }
+
+            if (g_cropState.IsActive) {
+                opts.CropX = (int)std::round(g_cropState.CropLeft * srScale);
+                opts.CropY = (int)std::round(g_cropState.CropTop * srScale);
+                opts.CropWidth = (int)std::round((g_cropState.CropRight - g_cropState.CropLeft) * srScale);
+                opts.CropHeight = (int)std::round((g_cropState.CropBottom - g_cropState.CropTop) * srScale);
+            } else if (pane.editState.HasCrop) {
+                opts.CropX = (int)std::round(pane.editState.CropLeft * srScale);
+                opts.CropY = (int)std::round(pane.editState.CropTop * srScale);
+                opts.CropWidth = (int)std::round((pane.editState.CropRight - pane.editState.CropLeft) * srScale);
+                opts.CropHeight = (int)std::round((pane.editState.CropBottom - pane.editState.CropTop) * srScale);
+            } else {
+                opts.CropX = 0;
+                opts.CropY = 0;
+                opts.CropWidth = 0;
+                opts.CropHeight = 0;
+            }
+
+            opts.DisplayZoom = (std::max)(1.0f, pane.view.Zoom);
+
+            if (!opts.SourceFrame && pane.resource.animator) {
+                extern std::mutex g_animatorMutex;
+                std::lock_guard<std::mutex> lock(g_animatorMutex);
+                opts.SourceFrame = pane.resource.animator->SeekToFrame(pane.resource.frameMeta.index);
+            }
+
+            g_pendingClipboard.filePath = targetPath;
+            g_pendingClipboard.options = opts;
+            g_pendingClipboard.memoryFrame = opts.SourceFrame;
+            g_pendingClipboard.isValid = (!targetPath.empty() || opts.SourceFrame != nullptr);
+
+            if (g_pendingClipboard.isValid) {
+                auto res = QuickView::ImageExporter::SetupDelayedClipboard(hwnd, g_pendingClipboard);
+                if (res.has_value()) {
+                    bool isHeavy = (QuickView::IsRawPath(targetPath) && opts.RawForceFullDecode) ||
+                                   pane.metadata.Width >= 8192 ||
+                                   pane.metadata.Height >= 8192 ||
+                                   pane.resource.isWebView;
+                    if (isHeavy) {
+                        g_osd.Show(hwnd, AppStrings::OSD_PixelsExtracting, false, false, D2D1::ColorF(0.4f, 0.8f, 1.0f), OSDPosition::Bottom, 60000);
+                    } else {
+                        g_osd.Show(hwnd, g_cropState.IsActive ? AppStrings::OSD_CropCopied : AppStrings::OSD_PixelsCopied, false);
+                    }
+                    RequestRepaint(PaintLayer::Dynamic);
+                }
+            }
+            break;
+        }
+        case IDM_COPY_FILE: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            std::wstring targetPath = !contextPath.empty() ? contextPath : (!GetPaneContext(PaneSlot::Primary).path.empty() ? GetPaneContext(PaneSlot::Primary).path : g_imagePath);
+            if (!targetPath.empty() && OpenClipboard(hwnd)) {
+                EmptyClipboard();
+                
+                // CF_HDROP format for file copy
+                size_t pathLen = (targetPath.length() + 1) * sizeof(wchar_t);
+                size_t totalSize = sizeof(DROPFILES) + pathLen + sizeof(wchar_t); // Extra null for double-null terminator
+                HGLOBAL hDrop = GlobalAlloc(GHND, totalSize);
+                if (hDrop) {
+                    DROPFILES* df = (DROPFILES*)GlobalLock(hDrop);
+                    df->pFiles = sizeof(DROPFILES);
+                    df->fWide = TRUE;
+                    memcpy((char*)df + sizeof(DROPFILES), targetPath.c_str(), pathLen);
+                    GlobalUnlock(hDrop);
+                    SetClipboardData(CF_HDROP, hDrop);
+                }
+                
+                CloseClipboard();
+                g_osd.Show(hwnd, AppStrings::OSD_FileCopied, false);
+                RequestRepaint(PaintLayer::Dynamic);
+            }
+            break;
+        }
+        case IDM_SAVE_AS: {
+            PaneSlot activeSlot = (IsCompareModeActive() && AppContext::GetInstance().Compare.activePane == ComparePane::Left) ? PaneSlot::Left : PaneSlot::Primary;
+            const auto& pane = GetPaneContext(activeSlot);
+            std::wstring targetPath = !contextPath.empty() ? contextPath : (!pane.path.empty() ? pane.path : g_imagePath);
+            if (!targetPath.empty()) {
+                int targetW = 0;
+                int targetH = 0;
+                GetExportBaseVisualDimensions(pane, targetW, targetH);
+                QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, QuickView::PendingAction::None, activeSlot, pane.currentFrame);
+                RequestRepaint(PaintLayer::All);
+            }
+            break;
+        }
+        case IDM_PRINT: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            if (!contextPath.empty()) {
+                SaveOverlayWindowState(hwnd);
+                
+                int targetW = 900 * g_uiScale;
+                int targetH = 650 * g_uiScale;
+                
+                RECT rcWin, bounds;
+                GetWindowRect(hwnd, &rcWin);
+                HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                MONITORINFO mi = {};
+                mi.cbSize = sizeof(mi);
+                GetMonitorInfo(hMon, &mi);
+                bounds = mi.rcWork;
+                
+                if ((rcWin.right - rcWin.left < targetW) || (rcWin.bottom - rcWin.top < targetH)) {
+                    RECT newRect = ExpandWindowRectToTargetWithinBounds(rcWin, targetW, targetH, bounds);
+                    SetWindowPos(hwnd, nullptr, newRect.left, newRect.top, 
+                                 newRect.right - newRect.left, newRect.bottom - newRect.top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+
+                std::wstring proofIcc = L"";
+                const auto& pane = GetPaneContext(PaneSlot::Primary);
+                if (pane.EnableSoftProofing && !pane.SoftProofProfilePath.empty()) {
+                    proofIcc = pane.SoftProofProfilePath;
+                }
+                
+                float pw = (float)pane.metadata.Width;
+                float ph = (float)pane.metadata.Height;
+                if (pw == 0 || ph == 0) {
+                    auto rsize = pane.resource.GetSize();
+                    pw = rsize.width;
+                    ph = rsize.height;
+                }
+                QuickView::PrintPreviewUI::GetInstance().Show(hwnd, contextPath, pw, ph);
+                RequestRepaint(PaintLayer::All);
+            }
+            break;
+        }
+        case IDM_SLIDESHOW: {
+            HandleHotkeyAction(hwnd, HotkeyAction::ToggleSlideshow);
+            break;
+        }
+        case IDM_FULLSCREEN: {
+            // [Fix] True Fullscreen Implementation
+            DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
+            
+                if (g_isFullScreen) {
+                    // Restore to Windowed
+                    // [Fix] Set flag BEFORE SetWindowPos so WM_SIZE sees correct state
+                    g_isFullScreen = false;
+                    ApplyWindowCornerPreference(hwnd, g_config.RoundedCorners); // Restore user preference
+
+                    SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+                    SetWindowPlacement(hwnd, &g_savedWindowPlacement);
+                    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, 
+                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+                } else {
+                // Enter Fullscreen
+                RECT targetRect{};
+                
+                // [Phase 2] Cross-Monitor Spanning (Video Wall Mode)
+                if (g_runtime.CrossMonitorMode) {
+                    targetRect = GetVirtualScreenRect();
+                } else {
+                    MONITORINFO mi{}; mi.cbSize = sizeof(mi);
+                    if (GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
+                        targetRect = mi.rcMonitor;
+                    }
+                }
+
+                if (!IsRectEmpty(&targetRect)) {
+                    GetWindowPlacement(hwnd, &g_savedWindowPlacement);
+                    
+                    // [Fix] Set flag BEFORE SetWindowPos so WM_SIZE sees correct state
+                    g_isFullScreen = true;
+                    
+                    SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+                    SetWindowPos(hwnd, HWND_TOP, 
+                                 targetRect.left, targetRect.top,
+                                 targetRect.right - targetRect.left,
+                                 targetRect.bottom - targetRect.top,
+                                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+                    
+                    // [Fix] Apply AFTER SetWindowPos to ensure DWM attribute persists
+                    ApplyWindowCornerPreference(hwnd, false); // Force square corners in fullscreen
+                }
+            }
+            // Trigger repaint to center/resize image
+            RequestRepaint(PaintLayer::All);
+            ScheduleDebouncedSuperResolution(hwnd);
+            break;
+        }
+        case IDM_RENAME: {
+            if (!CheckUnsavedChanges(hwnd)) break;
+            if (IsCompareModeActive() && AppContext::GetInstance().Compare.contextPane == ComparePane::Left && !GetPaneContext(PaneSlot::Left).path.empty()) {
+                std::wstring currentFolder = L"";
+                std::wstring currentName = L"";
+                size_t lastSlash = GetPaneContext(PaneSlot::Left).path.find_last_of(L"\\/");
+                if (lastSlash != std::wstring::npos) {
+                    currentFolder = GetPaneContext(PaneSlot::Left).path.substr(0, lastSlash + 1);
+                    currentName = GetPaneContext(PaneSlot::Left).path.substr(lastSlash + 1);
+                } else {
+                    currentName = GetPaneContext(PaneSlot::Left).path;
+                }
+
+                AppContext::GetInstance().CompareCtrl->CenterDialogOnPaneIfNeeded(hwnd, ComparePane::Left);
+                std::wstring newName = AppContext::GetInstance().DialogCtrl->ShowInputDialog(hwnd, AppStrings::Context_Rename, L"Enter new filename:", currentName);
+                ClearDialogCenter();
+                if (!newName.empty()) {
+                    bool newHasExt = (newName.find_last_of(L'.') != std::wstring::npos);
+                    if (!newHasExt) {
+                        size_t dotPos = currentName.find_last_of(L'.');
+                        if (dotPos != std::wstring::npos) {
+                            newName += currentName.substr(dotPos);
+                        }
+                    }
+                }
+
+                if (!newName.empty() && newName != currentName) {
+                    std::wstring newPath = currentFolder + newName;
+                    std::wstring oldPath = GetPaneContext(PaneSlot::Left).path;
+                    if (MoveFileW(oldPath.c_str(), newPath.c_str())) {
+                        g_undoManager.PushRename(oldPath, newPath, true);
+                        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, newPath, [hwnd](bool success){
+                            if (success) {
+                                g_osd.Show(hwnd, L"Renamed (Left)", false);
+                                MarkCompareDirty();
+                                RequestRepaint(PaintLayer::Image | PaintLayer::Static);
+                            }
+                        });
+                    } else {
+                        g_osd.Show(hwnd, L"Rename Failed", true);
+                    }
+                }
+                break;
+            }
+
+            if (!GetPaneContext(PaneSlot::Primary).path.empty()) {
+                // [RAW+JPEG Pairing] Route folded pairs to HandlePairedRename
+                if (!IsCompareModeActive()) {
+                    auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
+                    const std::wstring cur = GetPaneContext(PaneSlot::Primary).path;
+                    std::wstring renderedPath, rawPath;
+                    if (const auto* pr = nav.GetPairedRaw(FileNavigator::PathToImageID(cur))) {
+                        renderedPath = cur;                       // viewing the rendered face
+                        rawPath = pr->path;
+                    } else if (!g_pairViewRawPath.empty() && cur == g_pairViewRawPath &&
+                               !g_pairViewRenderedPath.empty()) {
+                        rawPath = cur;                            // viewing the RAW face
+                        renderedPath = g_pairViewRenderedPath;
+                    }
+                    if (!renderedPath.empty() && !rawPath.empty()) {
+                        HandlePairedRename(hwnd, renderedPath, rawPath);
+                        break;
+                    }
+                }
+
+                std::wstring currentFolder = L"";
+                std::wstring currentName = L"";
+                size_t lastSlash = GetPaneContext(PaneSlot::Primary).path.find_last_of(L"\\/");
+                if (lastSlash != std::wstring::npos) {
+                    currentFolder = GetPaneContext(PaneSlot::Primary).path.substr(0, lastSlash + 1);
+                    currentName = GetPaneContext(PaneSlot::Primary).path.substr(lastSlash + 1);
+                } else {
+                    currentName = GetPaneContext(PaneSlot::Primary).path;
+                }
+                
+                // Show Input Dialog
+                AppContext::GetInstance().CompareCtrl->CenterDialogOnPaneIfNeeded(hwnd, ComparePane::Right);
+                std::wstring newName = AppContext::GetInstance().DialogCtrl->ShowInputDialog(hwnd, AppStrings::Context_Rename, L"Enter new filename:", currentName);
+                ClearDialogCenter();
+                
+                // [Feature] Auto-append extension if missing
+                if (!newName.empty()) {
+                    bool newHasExt = (newName.find_last_of(L'.') != std::wstring::npos);
+                    if (!newHasExt) {
+                         size_t dotPos = currentName.find_last_of(L'.');
+                         if (dotPos != std::wstring::npos) {
+                             newName += currentName.substr(dotPos);
+                         }
+                    }
+                }
+                
+                if (!newName.empty() && newName != currentName) {
+                    std::wstring newPath = currentFolder + newName;
+                    
+                    // Release resources before rename (Critical)
+                    ReleaseImageResources();
+                    
+                    std::wstring oldPath = GetPaneContext(PaneSlot::Primary).path;
+                    if (MoveFileW(oldPath.c_str(), newPath.c_str())) {
+                        g_undoManager.PushRename(oldPath, newPath, false);
+                        GetPaneContext(PaneSlot::Primary).path = newPath;
+                        GetPaneContext(PaneSlot::Primary).navigator.Initialize(newPath, hwnd); // Update navigator list explicitly
+                        
+                        // Reload image from new path
+                        g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
+                        g_preserveViewStateOnNextLoad = true;
+                        LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).navigator.GetResolvedPath(newPath).c_str()); 
+                        
+                        g_osd.Show(hwnd, L"Renamed", false);
+                    } else {
+                        // Failed, reload original
+                        g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
+                        g_preserveViewStateOnNextLoad = true;
+                        LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).path); 
+                        g_osd.Show(hwnd, L"Rename Failed", true);
+                    }
+                }
+                RequestRepaint(PaintLayer::All);
+            }
+            break;
+        }
+        case IDM_DELETE: {
+            if (IsCompareModeActive() && AppContext::GetInstance().Compare.contextPane == ComparePane::Left && !GetPaneContext(PaneSlot::Left).path.empty()) {
+                std::wstring recycleTarget = GetPaneContext(PaneSlot::Left).path;
+                size_t lastSlash = recycleTarget.find_last_of(L"\\/");
+                std::wstring filename = (lastSlash != std::wstring::npos) ? recycleTarget.substr(lastSlash + 1) : recycleTarget;
+                auto& leftNavigator = GetPaneContext(PaneSlot::Left).navigator;
+                if (leftNavigator.Count() <= 0 || leftNavigator.GetFile(leftNavigator.Index()) != recycleTarget) {
+                    leftNavigator.Initialize(recycleTarget);
+                }
+
+                bool confirmed = true;
+                if (g_config.ConfirmDelete) {
+                    std::wstring dlgMessage = L"Move to Recycle Bin?";
+                    std::vector<DialogButton> dlgButtons;
+                    dlgButtons.emplace_back(DialogResult::Yes, L"Delete");
+                    dlgButtons.emplace_back(DialogResult::Cancel, L"Cancel");
+                    if (IsCompareModeActive()) {
+                        const D2D1_RECT_F vp = AppContext::GetInstance().CompareCtrl->GetViewport(hwnd, AppContext::GetInstance().Compare.contextPane);
+                        SetDialogCenter((vp.left + vp.right) * 0.5f, (vp.top + vp.bottom) * 0.5f);
+                    }
+                    DialogResult dlgResult = AppContext::GetInstance().DialogCtrl->ShowDialog(hwnd, filename.c_str(), dlgMessage.c_str(),
+                                                                  D2D1::ColorF(0.85f, 0.25f, 0.25f), dlgButtons, true, AppStrings::Checkbox_NeverConfirmDelete, L"");
+                    ClearDialogCenter();
+                    confirmed = (dlgResult == DialogResult::Yes);
+                    if (confirmed && AppContext::GetInstance().Dialog.IsChecked) {
+                        g_config.ConfirmDelete = false;
+                        SaveConfig();
+                    }
+                }
+
+                if (confirmed) {
+                    std::wstring pathCopy = recycleTarget;
+                    pathCopy.push_back(L'\0');
+                    SHFILEOPSTRUCTW op = {};
+                    op.wFunc = FO_DELETE;
+                    op.pFrom = pathCopy.c_str();
+                    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT;
+                    if (SHFileOperationW(&op) == 0) {
+                        g_osd.Show(hwnd, AppStrings::OSD_MovedToRecycleBin, false);
+                        g_undoManager.PushDelete(recycleTarget, true);
+
+                        std::wstring nextPath = leftNavigator.PeekNext();
+                        if (nextPath == recycleTarget) nextPath = leftNavigator.PeekPrevious();
+
+                        if (!nextPath.empty()) {
+                            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, nextPath, [hwnd](bool success) {
+                                if (success) {
+                                    AppContext::GetInstance().Compare.activePane = ComparePane::Left;
+                                    AppContext::GetInstance().Compare.contextPane = ComparePane::Left;
+                                    AppContext::GetInstance().Compare.selectedPane = ComparePane::Left;
+                                    MarkCompareDirty();
+                                    RequestRepaint(PaintLayer::Image | PaintLayer::Static | PaintLayer::Dynamic);
+                                } else {
+                                    GetPaneContext(PaneSlot::Left).Reset();
+                                    AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
+                                    RequestRepaint(PaintLayer::All);
+                                }
+                            });
+                        } else {
+                            GetPaneContext(PaneSlot::Left).Reset();
+                            AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
+                            RequestRepaint(PaintLayer::All);
+                        }
+                    }
+                }
+                break;
+            }
+
+            // [RAW+JPEG Pairing] Deleting a folded pair is a three-way choice
+            // (whole pair / RAW only / rendered only) -- it must never silently
+            // recycle both, per the #201 discussion. Shown for a folded pair in
+            // single view whether the rendered face or the RAW face (via D) is
+            // on screen; the choice IS the confirmation, so it appears even when
+            // Confirm-on-Delete is off (the target is otherwise ambiguous).
+            // An in-progress edit (IsDirty -- OriginalFilePath is set on every
+            // clean load, so it is not the edit-mode signal) falls through to
+            // the edit-aware path below.
+            if (!IsCompareModeActive() &&
+                !GetPaneContext(PaneSlot::Primary).editState.IsDirty) {
+                auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
+                const std::wstring cur = GetPaneContext(PaneSlot::Primary).path;
+                std::wstring renderedPath, rawPath;
+                if (const auto* pr = nav.GetPairedRaw(nav.GetImageID(nav.Index()))) {
+                    renderedPath = cur;                       // viewing the rendered face
+                    rawPath = pr->path;
+                } else if (!g_pairViewRawPath.empty() && cur == g_pairViewRawPath &&
+                           !g_pairViewRenderedPath.empty()) {
+                    rawPath = cur;                            // viewing the RAW face
+                    renderedPath = g_pairViewRenderedPath;
+                }
+                if (!renderedPath.empty() && !rawPath.empty()) {
+                    HandlePairedDelete(hwnd, renderedPath, rawPath, true);
+                    break;
+                }
+            }
+
+            // [v9.9 Fix] Handle Deletion during Edit/Transform
+            // Determine actual target to recycle and temp file to map
+            std::wstring recycleTarget = GetPaneContext(PaneSlot::Primary).path;
+            std::wstring tempToDelete = L"";
+            
+            if (!GetPaneContext(PaneSlot::Primary).editState.OriginalFilePath.empty()) {
+                // We are in edit mode (Rotate/Flip), so target is the ORIGINAL file
+                recycleTarget = GetPaneContext(PaneSlot::Primary).editState.OriginalFilePath;
+                // And we must cleanup the temp file too
+                tempToDelete = GetPaneContext(PaneSlot::Primary).editState.TempFilePath;
+            }
+
+            if (!recycleTarget.empty()) {
+                // Get filename for display
+                size_t lastSlash = recycleTarget.find_last_of(L"\\/");
+                std::wstring filename = (lastSlash != std::wstring::npos) ? recycleTarget.substr(lastSlash + 1) : recycleTarget;
+                
+                bool confirmed = true; // Default to confirmed if ConfirmDelete is off
+                
+                // Show confirmation dialog only if ConfirmDelete is enabled
+                if (g_config.ConfirmDelete) {
+                    std::wstring dlgMessage = L"Move to Recycle Bin?";
+                    std::vector<DialogButton> dlgButtons;
+                    dlgButtons.emplace_back(DialogResult::Yes, L"Delete");
+                    dlgButtons.emplace_back(DialogResult::Cancel, L"Cancel");
+                    if (IsCompareModeActive() && AppContext::GetInstance().Compare.contextPane == ComparePane::Right) {
+                        const D2D1_RECT_F vp = AppContext::GetInstance().CompareCtrl->GetViewport(hwnd, ComparePane::Right);
+                        SetDialogCenter((vp.left + vp.right) * 0.5f, (vp.top + vp.bottom) * 0.5f);
+                    }
+
+                    DialogResult dlgResult = AppContext::GetInstance().DialogCtrl->ShowDialog(hwnd, filename.c_str(), dlgMessage.c_str(),
+                                                                 D2D1::ColorF(0.85f, 0.25f, 0.25f), dlgButtons, true, AppStrings::Checkbox_NeverConfirmDelete, L"");
+                    ClearDialogCenter();
+                    confirmed = (dlgResult == DialogResult::Yes);
+                    if (confirmed && AppContext::GetInstance().Dialog.IsChecked) {
+                        g_config.ConfirmDelete = false;
+                        SaveConfig();
+                    }
+                }
+
+                
+                if (confirmed) {
+                    // Peek next using Navigator (which should still track the collection)
+                    std::wstring nextPath = GetPaneContext(PaneSlot::Primary).navigator.PeekNext();
+                    if (nextPath == recycleTarget) nextPath = GetPaneContext(PaneSlot::Primary).navigator.PeekPrevious();
+                    
+                    // Release image before delete (Critical for file lock)
+                    ReleaseImageResources();
+                    
+                    // Use SHFileOperation for recycle bin
+                    std::wstring pathCopy = recycleTarget;
+                    pathCopy.push_back(L'\0'); // Double null terminator
+                    SHFILEOPSTRUCTW op = {};
+                    op.wFunc = FO_DELETE;
+                    op.pFrom = pathCopy.c_str();
+                    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT;
+                    
+                    if (SHFileOperationW(&op) == 0) {
+                        g_osd.Show(hwnd, AppStrings::OSD_MovedToRecycleBin, false);
+                        g_undoManager.PushDelete(recycleTarget, false);
+                        
+                        // [Fix] Verify and delete the temp file if it exists
+                        if (!tempToDelete.empty() && FileExists(tempToDelete.c_str())) {
+                             DeleteFileW(tempToDelete.c_str());
+                        }
+
+                        RequestRepaint(PaintLayer::All);
+                        GetPaneContext(PaneSlot::Primary).editState.Reset();
+                        GetPaneContext(PaneSlot::Primary).view.Reset();
+                        GetPaneContext(PaneSlot::Primary).resource.Reset();
+                        
+                        // Re-init navigator if needed (though usually list is handled by next/prev logic, 
+                        // strictly we might want to refresh list, but let's stick to PeekNext flow)
+                        // Ideally we should remove the file from navigator list too, but Initialize handles that.
+                        // For QuickView, re-init is safer to sync with FS changes.
+                        if (!nextPath.empty()) {
+                             // Initialize will scan directory again
+                             // But wait, if we scan, we might lose 'nextPath' context if folder content changed vastly?
+                             // Optimization: Just load nextPath. Initialize inside Navigate will handle it?
+                             // NavigateTo doesn't init navigator. 
+                             // Let's call Initialize(nextPath) to refresh list and set index.
+                             GetPaneContext(PaneSlot::Primary).navigator.Initialize(nextPath, hwnd);
+                             LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).navigator.GetResolvedPath(nextPath).c_str());
+                             if (IsCompareModeActive()) {
+                                 MarkCompareDirty();
+                             }
+                        } else {
+                             // Empty folder?
+                             GetPaneContext(PaneSlot::Primary).navigator.Initialize(L"", hwnd);
+                             if (IsCompareModeActive()) {
+                                 AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
+                             }
+                             RequestRepaint(PaintLayer::All);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case IDM_LOCK_WINDOW_SIZE: {
+            SetLockWindowSize(hwnd, !g_runtime.LockWindowSize);
+            break;
+        }
+        case IDM_SHOW_INFO_PANEL: {
+            g_runtime.ShowInfoPanel = !g_runtime.ShowInfoPanel;
+            
+            // When turning on, set expanded state based on ToolbarInfoDefault config
+            if (g_runtime.ShowInfoPanel) {
+                if (g_gallery.IsVisible() && !g_gallery.IsPinned()) {
+                    g_gallery.Close();
+                    NotifyGallerySessionEnded();
+                    RestoreOverlayWindowState(hwnd);
+                }
+                g_runtime.InfoPanelExpanded = (g_config.ToolbarInfoDefault == 1); // 0=Lite, 1=Full
+                if (IsTelemetryNeeded() && GetPaneContext(PaneSlot::Primary).metadata.HistR.empty() && !GetPaneContext(PaneSlot::Primary).path.empty()) {
+                    UpdateHistogramAsync(hwnd, GetPaneContext(PaneSlot::Primary).path);
+                }
+            }
+ 
+            g_toolbar.SetExifState(g_runtime.ShowInfoPanel);
+            if (g_runtime.ShowInfoPanel) {
+                AdjustWindowForOverlay(hwnd, false);
+            } else {
+                AdjustWindowForOverlay(hwnd, true);
+            }
+            RequestRepaint(PaintLayer::Static);
+            break;
+        }
+        case IDM_ALWAYS_ON_TOP: {
+            g_config.AlwaysOnTop = !g_config.AlwaysOnTop;
+            SetWindowPos(hwnd, g_config.AlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+                         0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            g_osd.Show(hwnd, g_config.AlwaysOnTop ? AppStrings::OSD_AlwaysOnTopOn : AppStrings::OSD_AlwaysOnTopOff, false);
+            RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
+            break;
+        }
+
+        case IDM_COMPARE_MODE: {
+            if (IsCompareModeActive()) {
+                AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
+                ReturnToPairFaceAfterCompareExit(hwnd);
+            } else {
+                AppContext::GetInstance().CompareCtrl->EnterMode(hwnd);
+            }
+            RequestRepaint(PaintLayer::All);
+            break;
+        }
+
+        case IDM_OVERLAY_MODE: {
+            if (IsOverlayModeActive()) ExitOverlayMode(hwnd);
+            else EnterOverlayMode(hwnd);
+            RequestRepaint(PaintLayer::All);
+            break;
+        }
+
+        case IDM_TOGGLE_SPAN: {
+             // [Persistence] Update Config & Runtime
+             g_config.EnableCrossMonitor = !g_config.EnableCrossMonitor;
+             g_runtime.CrossMonitorMode = g_config.EnableCrossMonitor;
+             SaveConfig();
+
+             // If fullscreen, re-apply fullscreen to switch mode
+             if (g_isFullScreen) {
+                 // Toggle OFF then ON to apply new rect
+                 SendMessage(hwnd, WM_COMMAND, IDM_FULLSCREEN, 0); // OFF
+                 SendMessage(hwnd, WM_COMMAND, IDM_FULLSCREEN, 0); // ON (with new mode)
+             }
+             std::wstring msg = g_runtime.CrossMonitorMode ? AppStrings::OSD_SpanOn : AppStrings::OSD_SpanOff;
+             g_osd.Show(hwnd, msg, false);
+             break;
+        }
+        
+        case IDM_HUD_GALLERY: SendMessage(hwnd, WM_KEYDOWN, 'T', 0); break;
+
+        case IDM_LITE_INFO:
+             g_runtime.ShowInfoPanel = true;
+             g_runtime.InfoPanelExpanded = false; // Lite = not expanded
+             g_toolbar.SetExifState(true);
+             if (g_runtime.ShowInfoPanel) {
+                AdjustWindowForOverlay(hwnd, false);
+            } else {
+                AdjustWindowForOverlay(hwnd, true);
+            }
+             RequestRepaint(PaintLayer::Static);
+             break;
+
+        case IDM_FULL_INFO:
+             g_runtime.ShowInfoPanel = true;
+             g_runtime.InfoPanelExpanded = true; // Full = expanded
+             if (IsTelemetryNeeded() && GetPaneContext(PaneSlot::Primary).metadata.HistR.empty() && !GetPaneContext(PaneSlot::Primary).path.empty()) {
+                 UpdateHistogramAsync(hwnd, GetPaneContext(PaneSlot::Primary).path);
+             }
+             g_toolbar.SetExifState(true);
+             if (g_runtime.ShowInfoPanel) {
+                AdjustWindowForOverlay(hwnd, false);
+            } else {
+                AdjustWindowForOverlay(hwnd, true);
+            }
+             RequestRepaint(PaintLayer::Static);
+             break;
+
+        // Invoke the actions directly: these used to be routed by faking a
+        // keypress, which only worked through the hardcoded 0/1 fallback.
+        case IDM_ZOOM_100: HandleHotkeyAction(hwnd, HotkeyAction::Zoom100); break;
+        case IDM_ZOOM_FIT: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFit); break;
+        case IDM_ZOOM_FIT_WINDOW: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFitWindow); break;
+        case IDM_ZOOM_FILL: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFill); break;
+        case IDM_ZOOM_IN:  SendMessage(hwnd, WM_KEYDOWN, VK_ADD, 0); break;
+        case IDM_ZOOM_OUT: SendMessage(hwnd, WM_KEYDOWN, VK_SUBTRACT, 0); break;
+
+        case IDM_ROTATE_CW:  PerformTransform(hwnd, TransformType::Rotate90CW); break;
+        case IDM_ROTATE_CCW: PerformTransform(hwnd, TransformType::Rotate90CCW); break;
+        case IDM_FLIP_H:     PerformTransform(hwnd, TransformType::FlipHorizontal); break;
+        case IDM_FLIP_V:     PerformTransform(hwnd, TransformType::FlipVertical); break;
+
+        case IDM_RENDER_RAW: {
+             // [RAW+JPEG Pairing] For a paired item in single view this action
+             // switches the DISPLAYED FILE: rendered JPG <-> hidden RAW (full
+             // decode -- the RAW's embedded preview is essentially the JPG).
+             if (!contextLeft && !IsCompareModeActive() && !contextPath.empty()) {
+                 const auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
+                 const FileNavigator::PairedRaw* pairedRaw = nav.GetPairedRaw(FileNavigator::PathToImageID(contextPath));
+                 std::wstring renderedBack;
+                 if (!pairedRaw) {
+                     if (!g_pairViewRawPath.empty() && contextPath == g_pairViewRawPath) {
+                         // Currently viewing the RAW side (tracked state: robust
+                         // even if a rescan unfolded the pair meanwhile)
+                         renderedBack = g_pairViewRenderedPath;
+                     } else {
+                         std::wstring r = nav.GetResolvedPath(contextPath);
+                         if (r != contextPath) renderedBack = std::move(r);
+                     }
+                 }
+                 if (pairedRaw || !renderedBack.empty()) {
+                     const bool toRaw = (pairedRaw != nullptr);
+                     // Remember the pair BEFORE loading: the load pipeline uses
+                     // this to treat the switch as "same photo" (preserves
+                     // ForceRawDecode and other temporary state)
+                     g_pairViewRawPath = toRaw ? pairedRaw->path : contextPath;
+                     g_pairViewRenderedPath = toRaw ? contextPath : renderedBack;
+
+                     g_runtime.ForceRawDecode = toRaw;
+                     g_toolbar.SetRawState(true, toRaw, true);
+                     if (g_imageEngine) {
+                         g_imageEngine->UpdateConfig(g_runtime);
+                         // No SetForceRefresh: the two sides are different
+                         // files, and the engine's RAW quality check decides
+                         // between a cached frame and a re-decode.
+                     }
+                     g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
+                     g_preserveViewStateOnNextLoad = true;
+                     ReleaseImageResources();
+                     LoadImageAsync(hwnd, toRaw ? g_pairViewRawPath.c_str() : g_pairViewRenderedPath.c_str());
+                     g_osd.Show(hwnd, toRaw ? L"Paired RAW (Full Decode)" : L"Paired Rendered Image", false);
+                     RequestRepaint(PaintLayer::All);
+                     break;
+                 }
+             }
+
+             // [Fix] Toggle Force RAW Decode based on the selected pane's ACTUAL decode state.
+             // This prevents "double click required" bugs when switching panes with mismatched states.
+             bool isFullDecode = contextLeft ? GetPaneContext(PaneSlot::Left).metadata.IsRawFullDecode : GetPaneContext(PaneSlot::Primary).metadata.IsRawFullDecode;
+             g_runtime.ForceRawDecode = !isFullDecode;
+             g_toolbar.SetRawState(true, g_runtime.ForceRawDecode); // Update toolbar icon
+             
+             if (!contextPath.empty()) {
+                 if (contextLeft) {
+                     AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, contextPath, [](bool success){
+                         if (success) {
+                             AppContext::GetInstance().Compare.activePane = ComparePane::Left;
+                             MarkCompareDirty();
+                             RequestRepaint(PaintLayer::Image | PaintLayer::Static);
+                         }
+                     });
+                 } else {
+                     if (g_imageEngine) {
+                         g_imageEngine->UpdateConfig(g_runtime); // [Fix] Push config to engine
+                         g_imageEngine->SetForceRefresh(true);
+                     }
+                     g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
+                     g_preserveViewStateOnNextLoad = true;
+                     ReleaseImageResources();
+                     LoadImageAsync(hwnd, contextPath.c_str()); 
+                 }
+             }
+             
+             std::wstring msg = g_runtime.ForceRawDecode ? L"RAW: Full Decode (Temporary)" : L"RAW: Embedded Preview (Temporary)";
+             g_osd.Show(hwnd, msg, false);
+             RequestRepaint(PaintLayer::All);
+             break;
+        }
+
+        case IDM_SORT_AUTO:
+        case IDM_SORT_NAME:
+        case IDM_SORT_MODIFIED:
+        case IDM_SORT_DATE_TAKEN:
+        case IDM_SORT_SIZE:
+        case IDM_SORT_TYPE: {
+            g_runtime.SortOrder = wmId - IDM_SORT_AUTO;
+            if (!GetPaneContext(PaneSlot::Primary).path.empty()) {
+                // Auto follows the live Explorer view; other modes need a full list.
+                const bool defer = (g_runtime.SortOrder == 0);
+                GetPaneContext(PaneSlot::Primary).navigator.Initialize(
+                    GetPaneContext(PaneSlot::Primary).path, hwnd, defer);
+            }
+            break;
+        }
+
+        case IDM_SORT_ASCENDING:
+        case IDM_SORT_DESCENDING: {
+            g_runtime.SortDescending = (wmId == IDM_SORT_DESCENDING);
+            if (!GetPaneContext(PaneSlot::Primary).path.empty()) {
+                GetPaneContext(PaneSlot::Primary).navigator.Initialize(GetPaneContext(PaneSlot::Primary).path, hwnd); // Re-initialize to re-sort
+            }
+            break;
+        }
+
+        case IDM_NAV_LOOP: {
+            g_runtime.NavLoop = !g_runtime.NavLoop;
+            g_osd.Show(hwnd, g_runtime.NavLoop ? L"Navigation Loop: ON" : L"Navigation Loop: OFF", false);
+            break;
+        }
+        case IDM_NAV_THROUGH: {
+            g_runtime.NavTraverse = !g_runtime.NavTraverse;
+            g_osd.Show(hwnd, g_runtime.NavTraverse ? L"Traverse Subfolders: ON" : L"Traverse Subfolders: OFF", false);
+            break;
+        }
+
+        case IDM_CMS_UNMANAGED:
+        case IDM_CMS_AUTO:
+        case IDM_CMS_SRGB:
+        case IDM_CMS_P3:
+        case IDM_CMS_ADOBERGB:
+        case IDM_CMS_GRAY:
+        case IDM_CMS_PROPHOTO: {
+             int newMode = (int)cmdId - (int)IDM_CMS_UNMANAGED;
+             if (contextLeft) {
+                 GetPaneContext(PaneSlot::Left).CmsModeOverride = newMode;
+             } else {
+                 g_runtime.CmsModeOverride = newMode;
+             }
+             
+             UpdateTargetColorSpaceForEngine(hwnd);
+
+             // If currently displaying a RAW file in Full Decode mode, re-trigger decode with the new color space
+             const auto& pane = GetPaneContext(contextLeft ? PaneSlot::Left : PaneSlot::Primary);
+             if (QuickView::IsRawPath(pane.path) && pane.metadata.IsRawFullDecode) {
+                 ReloadCurrentImage(hwnd);
+             } else {
+                 RefreshImageDisplay(hwnd);
+             }
+             if (!contextLeft) ScheduleGamutWarningAnalysis(hwnd);
+
+             std::wstring msg = L"Color Space: ";
+             switch (newMode) {
+                 case 0: msg += AppStrings::Settings_Option_CmsUnmanaged; break;
+                 case 1: msg += AppStrings::Settings_Option_Auto; break;
+                 case 2: msg += AppStrings::Settings_Option_CmssRGB; break;
+                 case 3: msg += AppStrings::Settings_Option_CmsP3; break;
+                 case 4: msg += AppStrings::Settings_Option_CmsAdobeRGB; break;
+                 case 5: msg += AppStrings::Settings_Option_CmsGray; break;
+                 case 6: msg += AppStrings::Settings_Option_CmsProPhoto; break;
+             }
+             g_osd.Show(hwnd, msg, false);
+             RequestRepaint(PaintLayer::All);
+             break;
+        }
+
+        case IDM_SOFT_PROOF_TOGGLE: {
+             std::wstring& currentProfile = contextLeft ? GetPaneContext(PaneSlot::Left).SoftProofProfilePath : g_runtime.SoftProofProfilePath;
+             bool& currentEnable = contextLeft ? GetPaneContext(PaneSlot::Left).EnableSoftProofing : g_runtime.EnableSoftProofing;
+
+             if (currentProfile.empty() && !g_config.CustomSoftProofProfile.empty()) {
+                 currentProfile = g_config.CustomSoftProofProfile;
+             }
+             if (currentProfile.empty()) {
+                 g_osd.Show(hwnd, L"Please select a Soft Proof Profile first.", false);
+                 break;
+             }
+             currentEnable = !currentEnable;
+             RefreshImageDisplay(hwnd);
+             if (!contextLeft) ScheduleGamutWarningAnalysis(hwnd);
+             g_osd.Show(hwnd, currentEnable ? L"Soft Proofing: ON" : L"Soft Proofing: OFF", false);
+             break;
+        }
+        case IDM_SOFT_PROOF_CUSTOM: {
+             if (contextLeft) {
+                 GetPaneContext(PaneSlot::Left).SoftProofProfilePath = g_config.CustomSoftProofProfile;
+                 GetPaneContext(PaneSlot::Left).EnableSoftProofing = true;
+             } else {
+                 g_runtime.SoftProofProfilePath = g_config.CustomSoftProofProfile;
+                 g_runtime.EnableSoftProofing = true;
+             }
+             RefreshImageDisplay(hwnd);
+             if (!contextLeft) ScheduleGamutWarningAnalysis(hwnd);
+             g_osd.Show(hwnd, L"Soft Proofing Target Updated", false);
+             break;
+        }
+
+        case IDM_PIXEL_ART_MODE: {
+             // Toggle Pixel Art Mode (Nearest Neighbor) - Temporary runtime override
+             bool isCurrentlyPixelArt = GetCurrentPixelArtState(hwnd);
+
+             if (isCurrentlyPixelArt) {
+                 g_runtime.PixelArtModeOverride = 2; // Force OFF
+                 g_osd.Show(hwnd, L"Pixel Art Mode: OFF", false);
+             } else {
+                 g_runtime.PixelArtModeOverride = 1; // Force ON
+                 g_osd.Show(hwnd, L"Pixel Art Mode: ON", false);
+             }
+
+             // Update interpolation immediately by redrawing the surface
+             if (GetPaneContext(PaneSlot::Primary).resource) {
+                 RenderImageToDComp(hwnd, GetPaneContext(PaneSlot::Primary).resource, true);
+                 if (g_compEngine && g_compEngine->IsInitialized()) {
+                     RECT rc; GetClientRect(hwnd, &rc);
+                     SyncDCompState(hwnd, (float)rc.right, (float)rc.bottom);
+                 }
+             }
+             RequestRepaint(PaintLayer::All);
+             break;
+        }
+
+        case IDM_WALLPAPER_FILL:
+        case IDM_WALLPAPER_FIT:
+        case IDM_WALLPAPER_TILE: {
+            if (!contextPath.empty()) {
+                // Use IDesktopWallpaper COM interface
+                CoInitialize(nullptr);
+                IDesktopWallpaper* pWallpaper = nullptr;
+                HRESULT hr = CoCreateInstance(__uuidof(DesktopWallpaper), nullptr, CLSCTX_ALL, 
+                                              IID_PPV_ARGS(&pWallpaper));
+                if (SUCCEEDED(hr) && pWallpaper) {
+                    DESKTOP_WALLPAPER_POSITION pos = DWPOS_FILL;
+                    if (cmdId == IDM_WALLPAPER_FIT) pos = DWPOS_FIT;
+                    else if (cmdId == IDM_WALLPAPER_TILE) pos = DWPOS_TILE;
+                    
+                    pWallpaper->SetPosition(pos);
+                    hr = pWallpaper->SetWallpaper(nullptr, contextPath.c_str());
+                    pWallpaper->Release();
+                    
+                    if (SUCCEEDED(hr)) {
+                        g_osd.Show(hwnd, AppStrings::OSD_WallpaperSet, false);
+                    } else {
+                        g_osd.Show(hwnd, AppStrings::OSD_WallpaperFailed, true);
+                    }
+                    RequestRepaint(PaintLayer::Dynamic);
+                }
+                CoUninitialize();
+            }
+            break;
+        }
+
+        case IDM_FIX_EXTENSION: {
+            if (!contextPath.empty() && !contextMeta.Format.empty()) {
+                std::wstring fmt = contextMeta.Format;
+                std::transform(fmt.begin(), fmt.end(), fmt.begin(), ::towlower);
+                
+                std::wstring_view newExt = GetPrimaryExtensionForFormat(fmt);
+                
+                if (!newExt.empty()) {
+                    size_t lastDot = contextPath.find_last_of(L'.');
+                    std::wstring basePath = (lastDot != std::wstring_view::npos) ? std::wstring(contextPath.substr(0, lastDot)) : std::wstring(contextPath);
+                    std::wstring newPath = basePath + std::wstring(newExt);
+                    
+                    std::wstring msg = L"Format detected: " + contextMeta.Format + L"\nChange extension to " + std::wstring(newExt) + L"?";
+                    
+                    std::vector<DialogButton> buttons = {
+                        { DialogResult::Yes, L"Rename", true },
+                        { DialogResult::Cancel, L"Cancel" }
+                    };
+                    
+                    DialogResult result = AppContext::GetInstance().DialogCtrl->ShowDialog(hwnd, L"Fix Extension", msg, D2D1::ColorF(D2D1::ColorF::Orange), buttons);
+                    if (result == DialogResult::Yes) {
+                        if (contextLeft) {
+                            if (MoveFileW(contextPath.c_str(), newPath.c_str())) {
+                                AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, newPath, [hwnd](bool success){
+                                    if (success) {
+                                        g_osd.Show(hwnd, L"Extension Fixed (Left)", false);
+                                        MarkCompareDirty();
+                                        RequestRepaint(PaintLayer::Image | PaintLayer::Static);
+                                    }
+                                });
+                            } else {
+                                g_osd.Show(hwnd, std::wstring(L"Rename Failed"), true);
+                            }
+                        } else {
+                            ReleaseImageResources();
+                            if (MoveFileW(contextPath.c_str(), newPath.c_str())) {
+                                GetPaneContext(PaneSlot::Primary).path = newPath;
+                                g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
+                                g_preserveViewStateOnNextLoad = true;
+                                LoadImageAsync(hwnd, newPath);
+                                g_osd.Show(hwnd, L"Extension Fixed", false);
+                            } else {
+                                g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
+                                g_preserveViewStateOnNextLoad = true;
+                                LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).path); // Reload old
+                                g_osd.Show(hwnd, std::wstring(L"Rename Failed"), true);
+                            }
+                        }
+                    }
+                    RequestRepaint(PaintLayer::All);
+                }
+            }
+            break;
+        }
+        case IDM_SETTINGS: {
+            if (g_settingsOverlay.IsVisible()) {
+                g_settingsOverlay.OpenTab(6);
+            } else {
+                if (g_gallery.IsVisible()) {
+                    g_gallery.Close();
+                    NotifyGallerySessionEnded();
+                    RestoreOverlayWindowState(hwnd);
+                }
+                SaveOverlayWindowState(hwnd);
+                g_settingsOverlay.Toggle(); // Open
+            }
+            RequestRepaint(PaintLayer::Static);
+            break;
+        }
+
+        case IDM_EXIT: {
+            PostMessage(hwnd, WM_CLOSE, 0, 0);
+            break;
+        }
+        // TODO: Implement other menu commands
+        default:
+            break;
+        }
+        return 0;
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -13547,1234 +14791,8 @@ SKIP_EDGE_NAV:;
         break; // Pass to DefWindowProc
     }
 
-    case WM_COMMAND: {
-        EnsureBootHydrated(hwnd);
-        UINT cmdId = LOWORD(wParam);
-        UINT wmId = cmdId;
-
-        const bool contextLeft = IsCompareContextLeft();
-        const std::wstring& contextPath = contextLeft ? GetPaneContext(PaneSlot::Left).path : GetPaneContext(PaneSlot::Primary).path;
-        const CImageLoader::ImageMetadata& contextMeta = contextLeft ? GetPaneContext(PaneSlot::Left).metadata : GetPaneContext(PaneSlot::Primary).metadata;
-
-        if (wmId == IDM_ENTER_CROP_MODE) {
-            HandleHotkeyAction(hwnd, HotkeyAction::EnterCropMode);
-            return 0;
-        }
-
-        if (wmId == IDM_SUPER_RESOLUTION) {
-            HandleHotkeyAction(hwnd, HotkeyAction::SuperResolution);
-            return 0;
-        }
-
-        if (wmId == IDM_AI_ACTION) {
-            HandleHotkeyAction(hwnd, HotkeyAction::AiAction);
-            return 0;
-        }
-
-        // Soft Proofing Profile Dynamic Dispatch
-        if (cmdId >= IDM_SOFT_PROOF_BASE && cmdId <= IDM_SOFT_PROOF_BASE + 99) {
-            extern std::vector<std::wstring>& GetSystemIccProfiles();
-            std::vector<std::wstring>& profiles = GetSystemIccProfiles();
-            int idx = cmdId - IDM_SOFT_PROOF_BASE;
-            if (idx >= 0 && static_cast<size_t>(idx) < profiles.size()) {
-                if (contextLeft) {
-                    GetPaneContext(PaneSlot::Left).SoftProofProfilePath = profiles[idx];
-                    GetPaneContext(PaneSlot::Left).EnableSoftProofing = true;
-                } else {
-                    g_runtime.SoftProofProfilePath = profiles[idx];
-                    g_runtime.EnableSoftProofing = true;
-                }
-                
-                std::wstring fileName = profiles[idx];
-                size_t pos = fileName.find_last_of(L"\\/");
-                if (pos != std::wstring::npos) fileName = fileName.substr(pos + 1);
-                
-                g_osd.Show(hwnd, L"Proofing: " + fileName, false, false, D2D1::ColorF(D2D1::ColorF::Cyan));
-                
-                RefreshImageDisplay(hwnd);
-                if (!contextLeft) ScheduleGamutWarningAnalysis(hwnd);
-            }
-            return 0;
-        }
-
-        switch (cmdId) {
-        case IDM_GALLERY_OPEN_COMPARE: {
-            if (g_galleryContextMenuIndex >= 0 && g_galleryContextMenuIndex < (int)GetPaneContext(PaneSlot::Primary).navigator.Count()) {
-                std::wstring path = GetPaneContext(PaneSlot::Primary).navigator.GetFile(g_galleryContextMenuIndex);
-                g_gallery.Close();
-                NotifyGallerySessionEnded();
-                RestoreOverlayWindowState(hwnd);
-                if (!IsCompareModeActive()) {
-                    AppContext::GetInstance().CompareCtrl->EnterMode(hwnd);
-                }
-                if (IsCompareModeActive()) {
-                    AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, path, [](bool success){
-                        if (success) {
-                            AppContext::GetInstance().Compare.activePane = ComparePane::Left;
-                            MarkCompareDirty();
-                        }
-                    });
-                }
-                RequestRepaint(PaintLayer::All);
-            }
-            break;
-        }
-
-        case IDM_GALLERY_OPEN_NEW_WINDOW: {
-            if (g_galleryContextMenuIndex >= 0 && g_galleryContextMenuIndex < (int)GetPaneContext(PaneSlot::Primary).navigator.Count()) {
-                std::wstring path = GetPaneContext(PaneSlot::Primary).navigator.GetFile(g_galleryContextMenuIndex);
-                wchar_t exePath[MAX_PATH];
-                if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-                    // Enclose path in quotes
-                    std::wstring args = L"\"" + path + L"\"";
-                    ShellExecuteW(nullptr, L"open", exePath, args.c_str(), nullptr, SW_SHOWNORMAL);
-                }
-            }
-            break;
-        }
-        case IDM_GALLERY_DELETE: {
-            if (g_galleryContextMenuIndex >= 0 && g_galleryContextMenuIndex < (int)GetPaneContext(PaneSlot::Primary).navigator.Count()) {
-                std::wstring recycleTarget = GetPaneContext(PaneSlot::Primary).navigator.GetFile(g_galleryContextMenuIndex);
-                if (!recycleTarget.empty()) {
-                    // Check RAW+JPEG Pairing for the target gallery item using direct ImageID
-                    std::wstring renderedPath, rawPath;
-                    auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
-                    ImageID targetId = nav.GetImageID(g_galleryContextMenuIndex);
-                    if (const auto* pr = nav.GetPairedRaw(targetId)) {
-                        renderedPath = recycleTarget;
-                        rawPath = pr->path;
-                    }
-
-                    bool isViewingTarget = (g_galleryContextMenuIndex == nav.Index());
-
-                    if (!rawPath.empty()) {
-                        // --- CASE 1: Paired File (Let HandlePairedDelete show its own 4-button dialog directly) ---
-                        if (isViewingTarget) {
-                            SendMessage(hwnd, WM_COMMAND, IDM_DELETE, 0);
-                        } else {
-                            HandlePairedDelete(hwnd, recycleTarget, rawPath, false);
-                        }
-                    } else {
-                        // --- CASE 2: Single File (Show the standard 2-button confirmation if enabled) ---
-                        bool confirmed = true;
-                        size_t lastSlash = recycleTarget.find_last_of(L"\\/");
-                        std::wstring filename = (lastSlash != std::wstring::npos) ? recycleTarget.substr(lastSlash + 1) : recycleTarget;
-
-                        if (g_config.ConfirmDelete) {
-                            std::wstring dlgMessage = L"Move to Recycle Bin?";
-                            std::vector<DialogButton> dlgButtons;
-                            dlgButtons.emplace_back(DialogResult::Yes, L"Delete");
-                            dlgButtons.emplace_back(DialogResult::Cancel, L"Cancel");
-                            
-                            DialogResult dlgResult = AppContext::GetInstance().DialogCtrl->ShowDialog(hwnd, filename.c_str(), dlgMessage.c_str(),
-                                                                         D2D1::ColorF(0.85f, 0.25f, 0.25f), dlgButtons, true, AppStrings::Checkbox_NeverConfirmDelete, L"");
-                            confirmed = (dlgResult == DialogResult::Yes);
-                            if (confirmed && AppContext::GetInstance().Dialog.IsChecked) {
-                                g_config.ConfirmDelete = false;
-                                SaveConfig();
-                            }
-                        }
-
-                        if (confirmed) {
-                            if (isViewingTarget) {
-                                SendMessage(hwnd, WM_COMMAND, IDM_DELETE, 0);
-                            } else {
-                                std::vector<std::wstring> victims = { recycleTarget };
-                                if (RecycleFiles(victims)) {
-                                    g_osd.Show(hwnd, AppStrings::OSD_MovedToRecycleBin, false);
-                                    g_undoManager.PushDelete(recycleTarget, false);
-                                    
-                                    // Refresh current navigator
-                                    std::wstring currentPath = GetPaneContext(PaneSlot::Primary).path;
-                                    GetPaneContext(PaneSlot::Primary).navigator.Initialize(currentPath, hwnd);
-                                    
-                                    // Force gallery to refresh cache and repaint
-                                    g_gallery.Initialize(&g_thumbMgr, &GetPaneContext(PaneSlot::Primary).navigator);
-                                    RequestRepaint(PaintLayer::All);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            break;
-        }
-        case IDM_UNDO: {
-            HandleHotkeyAction(hwnd, HotkeyAction::Undo);
-            break;
-        }
-        case IDM_OPEN: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            OPENFILENAMEW ofn = {};
-            wchar_t szFile[MAX_PATH] = {};
-            ofn.lStructSize = sizeof(ofn);
-            ofn.hwndOwner = hwnd;
-            ofn.lpstrFile = szFile;
-            ofn.nMaxFile = MAX_PATH;
-            std::wstring filterStr = QuickView::GetSupportedExtensionsFilter();
-            ofn.lpstrFilter = filterStr.c_str();
-            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-                if (GetOpenFileNameW(&ofn)) {
-                    if (IsCompareModeActive() && AppContext::GetInstance().Compare.contextPane == ComparePane::Left) {
-                        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, szFile, [](bool success){
-                            if (success) {
-                                AppContext::GetInstance().Compare.activePane = ComparePane::Left;
-                                MarkCompareDirty();
-                                RequestRepaint(PaintLayer::Image | PaintLayer::Static);
-                            }
-                        });
-                    } else {
-                        if (IsCompareModeActive()) {
-                            AppContext::GetInstance().Compare.activePane = ComparePane::Right;
-                            AppContext::GetInstance().Compare.selectedPane = ComparePane::Right;
-                        }
-                        GetPaneContext(PaneSlot::Primary).editState.Reset();
-                        GetPaneContext(PaneSlot::Primary).view.Reset();
-                        OpenPathOrDirectory(hwnd, szFile);
-                }
-            }
-            break;
-        }
-        case IDM_OPENWITH_DEFAULT: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            // Use rundll32 to show proper "Open With" dialog
-            if (!contextPath.empty()) {
-                std::wstring args = L"shell32.dll,OpenAs_RunDLL " + contextPath;
-                ShellExecuteW(hwnd, nullptr, L"rundll32.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
-            }
-            break;
-        }
-        case IDM_EDIT: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            // Open with default editor (use "edit" verb, fallback to mspaint)
-            if (!contextPath.empty()) {
-                bool customEditorFailed = false;
-                if (!g_config.CustomEditorPath.empty()) {
-                    // Try to launch the custom editor
-                    std::wstring args = L"\"" + contextPath + L"\"";
-                    HINSTANCE result = ShellExecuteW(hwnd, L"open", g_config.CustomEditorPath.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL);
-                    if ((intptr_t)result <= 32) {
-                        customEditorFailed = true;
-                        g_config.CustomEditorPath = L"";
-                        SaveConfig();
-                        extern SettingsOverlay g_settingsOverlay;
-                        g_settingsOverlay.RebuildMenu();
-                        g_osd.Show(hwnd, AppStrings::OSD_EditorLaunchFailed);
-                    }
-                }
-
-                if (g_config.CustomEditorPath.empty() && !customEditorFailed) {
-                    HINSTANCE result = ShellExecuteW(hwnd, L"edit", contextPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-                    if ((intptr_t)result <= 32) {
-                        // No editor registered, try mspaint
-                        std::wstring quotedPath = L"\"" + contextPath + L"\"";
-                        ShellExecuteW(hwnd, L"open", L"mspaint.exe", quotedPath.c_str(), nullptr, SW_SHOWNORMAL);
-                    }
-                }
-            }
-            break;
-        }
-        case IDM_SHOW_IN_EXPLORER: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            if (!contextPath.empty()) {
-                std::wstring cmd = L"/select,\"" + contextPath + L"\"";
-                ShellExecuteW(nullptr, nullptr, L"explorer.exe", cmd.c_str(), nullptr, SW_SHOWNORMAL);
-            }
-            break;
-        }
-        case IDM_OPEN_FOLDER: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            const std::wstring selectedFolder = PickFolder(hwnd, contextPath);
-            if (!selectedFolder.empty()) {
-                OpenPathOrDirectory(hwnd, selectedFolder);
-            }
-            break;
-        }
-        case IDM_COPY_PATH: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            std::wstring pathToCopy = contextPath;
-            
-            if (!pathToCopy.empty() && OpenClipboard(hwnd)) {
-                EmptyClipboard();
-                size_t len = (pathToCopy.length() + 1) * sizeof(wchar_t);
-                HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-                if (hMem) {
-                    memcpy(GlobalLock(hMem), pathToCopy.c_str(), len);
-                    GlobalUnlock(hMem);
-                    SetClipboardData(CF_UNICODETEXT, hMem);
-                }
-                CloseClipboard();
-                g_osd.Show(hwnd, AppStrings::OSD_FilePathCopied, false);
-                // Ensure UI updates to show OSD
-                RequestRepaint(PaintLayer::Dynamic);
-            }
-            break;
-        }
-        case IDM_COPY_PIXELS: {
-            std::wstring targetPath = !contextPath.empty() ? contextPath : (!GetPaneContext(PaneSlot::Primary).path.empty() ? GetPaneContext(PaneSlot::Primary).path : g_imagePath);
-            const auto& pane = GetPaneContext(PaneSlot::Primary);
-
-            QuickView::ExportOptions opts;
-            opts.InputPath = targetPath;
-            int baseExif = pane.view.ExifOrientation;
-            int effExif = GetEffectiveExifOrientation(baseExif, pane.editState);
-            Transform2D t = Transform2D::FromExif(effExif);
-
-            opts.Rotation = t.Rotation;
-            opts.FlipH = t.FlipH;
-            opts.FlipV = false;
-            opts.RawForceFullDecode = g_runtime.ForceRawDecode;
-
-            std::shared_ptr<QuickView::RawImageFrame> capturedSrFrame;
-            float srScale = 1.0f;
-            if (pane.resource.promotedSrTexture || pane.resource.promotedSrBitmap) {
-                capturedSrFrame = std::make_shared<QuickView::RawImageFrame>();
-                HRESULT hrExtract = E_FAIL;
-                if (g_pRenderEngine) {
-                    if (pane.resource.promotedSrTexture) {
-                        hrExtract = g_pRenderEngine->ExtractTexturePixels(pane.resource.promotedSrTexture.Get(), capturedSrFrame.get());
-                    } else if (pane.resource.promotedSrBitmap) {
-                        hrExtract = g_pRenderEngine->ExtractBitmapPixels(pane.resource.promotedSrBitmap.Get(), capturedSrFrame.get());
-                    }
-                }
-                if (SUCCEEDED(hrExtract) && capturedSrFrame->pixels && capturedSrFrame->width > 0) {
-                    srScale = (pane.resource.srScale > 1.0f) ? pane.resource.srScale : ((pane.resource.promotedSrScale > 1.0f) ? pane.resource.promotedSrScale : 2.0f);
-                    opts.SourceFrame = capturedSrFrame;
-                } else {
-                    capturedSrFrame.reset();
-                }
-            }
-
-            if (g_cropState.IsActive) {
-                opts.CropX = (int)std::round(g_cropState.CropLeft * srScale);
-                opts.CropY = (int)std::round(g_cropState.CropTop * srScale);
-                opts.CropWidth = (int)std::round((g_cropState.CropRight - g_cropState.CropLeft) * srScale);
-                opts.CropHeight = (int)std::round((g_cropState.CropBottom - g_cropState.CropTop) * srScale);
-            } else if (pane.editState.HasCrop) {
-                opts.CropX = (int)std::round(pane.editState.CropLeft * srScale);
-                opts.CropY = (int)std::round(pane.editState.CropTop * srScale);
-                opts.CropWidth = (int)std::round((pane.editState.CropRight - pane.editState.CropLeft) * srScale);
-                opts.CropHeight = (int)std::round((pane.editState.CropBottom - pane.editState.CropTop) * srScale);
-            } else {
-                opts.CropX = 0;
-                opts.CropY = 0;
-                opts.CropWidth = 0;
-                opts.CropHeight = 0;
-            }
-
-            opts.DisplayZoom = (std::max)(1.0f, pane.view.Zoom);
-
-            if (!opts.SourceFrame && pane.resource.animator) {
-                extern std::mutex g_animatorMutex;
-                std::lock_guard<std::mutex> lock(g_animatorMutex);
-                opts.SourceFrame = pane.resource.animator->SeekToFrame(pane.resource.frameMeta.index);
-            }
-
-            g_pendingClipboard.filePath = targetPath;
-            g_pendingClipboard.options = opts;
-            g_pendingClipboard.memoryFrame = opts.SourceFrame;
-            g_pendingClipboard.isValid = (!targetPath.empty() || opts.SourceFrame != nullptr);
-
-            if (g_pendingClipboard.isValid) {
-                auto res = QuickView::ImageExporter::SetupDelayedClipboard(hwnd, g_pendingClipboard);
-                if (res.has_value()) {
-                    bool isHeavy = (QuickView::IsRawPath(targetPath) && opts.RawForceFullDecode) ||
-                                   pane.metadata.Width >= 8192 ||
-                                   pane.metadata.Height >= 8192 ||
-                                   pane.resource.isWebView;
-                    if (isHeavy) {
-                        g_osd.Show(hwnd, AppStrings::OSD_PixelsExtracting, false, false, D2D1::ColorF(0.4f, 0.8f, 1.0f), OSDPosition::Bottom, 60000);
-                    } else {
-                        g_osd.Show(hwnd, g_cropState.IsActive ? AppStrings::OSD_CropCopied : AppStrings::OSD_PixelsCopied, false);
-                    }
-                    RequestRepaint(PaintLayer::Dynamic);
-                }
-            }
-            break;
-        }
-        case IDM_COPY_FILE: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            std::wstring targetPath = !contextPath.empty() ? contextPath : (!GetPaneContext(PaneSlot::Primary).path.empty() ? GetPaneContext(PaneSlot::Primary).path : g_imagePath);
-            if (!targetPath.empty() && OpenClipboard(hwnd)) {
-                EmptyClipboard();
-                
-                // CF_HDROP format for file copy
-                size_t pathLen = (targetPath.length() + 1) * sizeof(wchar_t);
-                size_t totalSize = sizeof(DROPFILES) + pathLen + sizeof(wchar_t); // Extra null for double-null terminator
-                HGLOBAL hDrop = GlobalAlloc(GHND, totalSize);
-                if (hDrop) {
-                    DROPFILES* df = (DROPFILES*)GlobalLock(hDrop);
-                    df->pFiles = sizeof(DROPFILES);
-                    df->fWide = TRUE;
-                    memcpy((char*)df + sizeof(DROPFILES), targetPath.c_str(), pathLen);
-                    GlobalUnlock(hDrop);
-                    SetClipboardData(CF_HDROP, hDrop);
-                }
-                
-                CloseClipboard();
-                g_osd.Show(hwnd, AppStrings::OSD_FileCopied, false);
-                RequestRepaint(PaintLayer::Dynamic);
-            }
-            break;
-        }
-        case IDM_SAVE_AS: {
-            PaneSlot activeSlot = (IsCompareModeActive() && AppContext::GetInstance().Compare.activePane == ComparePane::Left) ? PaneSlot::Left : PaneSlot::Primary;
-            const auto& pane = GetPaneContext(activeSlot);
-            std::wstring targetPath = !contextPath.empty() ? contextPath : (!pane.path.empty() ? pane.path : g_imagePath);
-            if (!targetPath.empty()) {
-                int targetW = 0;
-                int targetH = 0;
-                GetExportBaseVisualDimensions(pane, targetW, targetH);
-                QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, QuickView::PendingAction::None, activeSlot, pane.currentFrame);
-                RequestRepaint(PaintLayer::All);
-            }
-            break;
-        }
-        case IDM_PRINT: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            if (!contextPath.empty()) {
-                SaveOverlayWindowState(hwnd);
-                
-                int targetW = 900 * g_uiScale;
-                int targetH = 650 * g_uiScale;
-                
-                RECT rcWin, bounds;
-                GetWindowRect(hwnd, &rcWin);
-                HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-                MONITORINFO mi = {};
-                mi.cbSize = sizeof(mi);
-                GetMonitorInfo(hMon, &mi);
-                bounds = mi.rcWork;
-                
-                if ((rcWin.right - rcWin.left < targetW) || (rcWin.bottom - rcWin.top < targetH)) {
-                    RECT newRect = ExpandWindowRectToTargetWithinBounds(rcWin, targetW, targetH, bounds);
-                    SetWindowPos(hwnd, nullptr, newRect.left, newRect.top, 
-                                 newRect.right - newRect.left, newRect.bottom - newRect.top,
-                                 SWP_NOZORDER | SWP_NOACTIVATE);
-                }
-
-                std::wstring proofIcc = L"";
-                const auto& pane = GetPaneContext(PaneSlot::Primary);
-                if (pane.EnableSoftProofing && !pane.SoftProofProfilePath.empty()) {
-                    proofIcc = pane.SoftProofProfilePath;
-                }
-                
-                float pw = (float)pane.metadata.Width;
-                float ph = (float)pane.metadata.Height;
-                if (pw == 0 || ph == 0) {
-                    auto rsize = pane.resource.GetSize();
-                    pw = rsize.width;
-                    ph = rsize.height;
-                }
-                QuickView::PrintPreviewUI::GetInstance().Show(hwnd, contextPath, pw, ph);
-                RequestRepaint(PaintLayer::All);
-            }
-            break;
-        }
-        case IDM_SLIDESHOW: {
-            HandleHotkeyAction(hwnd, HotkeyAction::ToggleSlideshow);
-            break;
-        }
-        case IDM_FULLSCREEN: {
-            // [Fix] True Fullscreen Implementation
-            DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
-            
-                if (g_isFullScreen) {
-                    // Restore to Windowed
-                    // [Fix] Set flag BEFORE SetWindowPos so WM_SIZE sees correct state
-                    g_isFullScreen = false;
-                    ApplyWindowCornerPreference(hwnd, g_config.RoundedCorners); // Restore user preference
-
-                    SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
-                    SetWindowPlacement(hwnd, &g_savedWindowPlacement);
-                    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, 
-                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-                } else {
-                // Enter Fullscreen
-                RECT targetRect{};
-                
-                // [Phase 2] Cross-Monitor Spanning (Video Wall Mode)
-                if (g_runtime.CrossMonitorMode) {
-                    targetRect = GetVirtualScreenRect();
-                } else {
-                    MONITORINFO mi{}; mi.cbSize = sizeof(mi);
-                    if (GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
-                        targetRect = mi.rcMonitor;
-                    }
-                }
-
-                if (!IsRectEmpty(&targetRect)) {
-                    GetWindowPlacement(hwnd, &g_savedWindowPlacement);
-                    
-                    // [Fix] Set flag BEFORE SetWindowPos so WM_SIZE sees correct state
-                    g_isFullScreen = true;
-                    
-                    SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
-                    SetWindowPos(hwnd, HWND_TOP, 
-                                 targetRect.left, targetRect.top,
-                                 targetRect.right - targetRect.left,
-                                 targetRect.bottom - targetRect.top,
-                                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-                    
-                    // [Fix] Apply AFTER SetWindowPos to ensure DWM attribute persists
-                    ApplyWindowCornerPreference(hwnd, false); // Force square corners in fullscreen
-                }
-            }
-            // Trigger repaint to center/resize image
-            RequestRepaint(PaintLayer::All);
-            ScheduleDebouncedSuperResolution(hwnd);
-            break;
-        }
-        case IDM_RENAME: {
-            if (!CheckUnsavedChanges(hwnd)) break;
-            if (IsCompareModeActive() && AppContext::GetInstance().Compare.contextPane == ComparePane::Left && !GetPaneContext(PaneSlot::Left).path.empty()) {
-                std::wstring currentFolder = L"";
-                std::wstring currentName = L"";
-                size_t lastSlash = GetPaneContext(PaneSlot::Left).path.find_last_of(L"\\/");
-                if (lastSlash != std::wstring::npos) {
-                    currentFolder = GetPaneContext(PaneSlot::Left).path.substr(0, lastSlash + 1);
-                    currentName = GetPaneContext(PaneSlot::Left).path.substr(lastSlash + 1);
-                } else {
-                    currentName = GetPaneContext(PaneSlot::Left).path;
-                }
-
-                AppContext::GetInstance().CompareCtrl->CenterDialogOnPaneIfNeeded(hwnd, ComparePane::Left);
-                std::wstring newName = AppContext::GetInstance().DialogCtrl->ShowInputDialog(hwnd, AppStrings::Context_Rename, L"Enter new filename:", currentName);
-                ClearDialogCenter();
-                if (!newName.empty()) {
-                    bool newHasExt = (newName.find_last_of(L'.') != std::wstring::npos);
-                    if (!newHasExt) {
-                        size_t dotPos = currentName.find_last_of(L'.');
-                        if (dotPos != std::wstring::npos) {
-                            newName += currentName.substr(dotPos);
-                        }
-                    }
-                }
-
-                if (!newName.empty() && newName != currentName) {
-                    std::wstring newPath = currentFolder + newName;
-                    std::wstring oldPath = GetPaneContext(PaneSlot::Left).path;
-                    if (MoveFileW(oldPath.c_str(), newPath.c_str())) {
-                        g_undoManager.PushRename(oldPath, newPath, true);
-                        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, newPath, [hwnd](bool success){
-                            if (success) {
-                                g_osd.Show(hwnd, L"Renamed (Left)", false);
-                                MarkCompareDirty();
-                                RequestRepaint(PaintLayer::Image | PaintLayer::Static);
-                            }
-                        });
-                    } else {
-                        g_osd.Show(hwnd, L"Rename Failed", true);
-                    }
-                }
-                break;
-            }
-
-            if (!GetPaneContext(PaneSlot::Primary).path.empty()) {
-                // [RAW+JPEG Pairing] Route folded pairs to HandlePairedRename
-                if (!IsCompareModeActive()) {
-                    auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
-                    const std::wstring cur = GetPaneContext(PaneSlot::Primary).path;
-                    std::wstring renderedPath, rawPath;
-                    if (const auto* pr = nav.GetPairedRaw(FileNavigator::PathToImageID(cur))) {
-                        renderedPath = cur;                       // viewing the rendered face
-                        rawPath = pr->path;
-                    } else if (!g_pairViewRawPath.empty() && cur == g_pairViewRawPath &&
-                               !g_pairViewRenderedPath.empty()) {
-                        rawPath = cur;                            // viewing the RAW face
-                        renderedPath = g_pairViewRenderedPath;
-                    }
-                    if (!renderedPath.empty() && !rawPath.empty()) {
-                        HandlePairedRename(hwnd, renderedPath, rawPath);
-                        break;
-                    }
-                }
-
-                std::wstring currentFolder = L"";
-                std::wstring currentName = L"";
-                size_t lastSlash = GetPaneContext(PaneSlot::Primary).path.find_last_of(L"\\/");
-                if (lastSlash != std::wstring::npos) {
-                    currentFolder = GetPaneContext(PaneSlot::Primary).path.substr(0, lastSlash + 1);
-                    currentName = GetPaneContext(PaneSlot::Primary).path.substr(lastSlash + 1);
-                } else {
-                    currentName = GetPaneContext(PaneSlot::Primary).path;
-                }
-                
-                // Show Input Dialog
-                AppContext::GetInstance().CompareCtrl->CenterDialogOnPaneIfNeeded(hwnd, ComparePane::Right);
-                std::wstring newName = AppContext::GetInstance().DialogCtrl->ShowInputDialog(hwnd, AppStrings::Context_Rename, L"Enter new filename:", currentName);
-                ClearDialogCenter();
-                
-                // [Feature] Auto-append extension if missing
-                if (!newName.empty()) {
-                    bool newHasExt = (newName.find_last_of(L'.') != std::wstring::npos);
-                    if (!newHasExt) {
-                         size_t dotPos = currentName.find_last_of(L'.');
-                         if (dotPos != std::wstring::npos) {
-                             newName += currentName.substr(dotPos);
-                         }
-                    }
-                }
-                
-                if (!newName.empty() && newName != currentName) {
-                    std::wstring newPath = currentFolder + newName;
-                    
-                    // Release resources before rename (Critical)
-                    ReleaseImageResources();
-                    
-                    std::wstring oldPath = GetPaneContext(PaneSlot::Primary).path;
-                    if (MoveFileW(oldPath.c_str(), newPath.c_str())) {
-                        g_undoManager.PushRename(oldPath, newPath, false);
-                        GetPaneContext(PaneSlot::Primary).path = newPath;
-                        GetPaneContext(PaneSlot::Primary).navigator.Initialize(newPath, hwnd); // Update navigator list explicitly
-                        
-                        // Reload image from new path
-                        g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
-                        g_preserveViewStateOnNextLoad = true;
-                        LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).navigator.GetResolvedPath(newPath).c_str()); 
-                        
-                        g_osd.Show(hwnd, L"Renamed", false);
-                    } else {
-                        // Failed, reload original
-                        g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
-                        g_preserveViewStateOnNextLoad = true;
-                        LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).path); 
-                        g_osd.Show(hwnd, L"Rename Failed", true);
-                    }
-                }
-                RequestRepaint(PaintLayer::All);
-            }
-            break;
-        }
-        case IDM_DELETE: {
-            if (IsCompareModeActive() && AppContext::GetInstance().Compare.contextPane == ComparePane::Left && !GetPaneContext(PaneSlot::Left).path.empty()) {
-                std::wstring recycleTarget = GetPaneContext(PaneSlot::Left).path;
-                size_t lastSlash = recycleTarget.find_last_of(L"\\/");
-                std::wstring filename = (lastSlash != std::wstring::npos) ? recycleTarget.substr(lastSlash + 1) : recycleTarget;
-                auto& leftNavigator = GetPaneContext(PaneSlot::Left).navigator;
-                if (leftNavigator.Count() <= 0 || leftNavigator.GetFile(leftNavigator.Index()) != recycleTarget) {
-                    leftNavigator.Initialize(recycleTarget);
-                }
-
-                bool confirmed = true;
-                if (g_config.ConfirmDelete) {
-                    std::wstring dlgMessage = L"Move to Recycle Bin?";
-                    std::vector<DialogButton> dlgButtons;
-                    dlgButtons.emplace_back(DialogResult::Yes, L"Delete");
-                    dlgButtons.emplace_back(DialogResult::Cancel, L"Cancel");
-                    if (IsCompareModeActive()) {
-                        const D2D1_RECT_F vp = AppContext::GetInstance().CompareCtrl->GetViewport(hwnd, AppContext::GetInstance().Compare.contextPane);
-                        SetDialogCenter((vp.left + vp.right) * 0.5f, (vp.top + vp.bottom) * 0.5f);
-                    }
-                    DialogResult dlgResult = AppContext::GetInstance().DialogCtrl->ShowDialog(hwnd, filename.c_str(), dlgMessage.c_str(),
-                                                                  D2D1::ColorF(0.85f, 0.25f, 0.25f), dlgButtons, true, AppStrings::Checkbox_NeverConfirmDelete, L"");
-                    ClearDialogCenter();
-                    confirmed = (dlgResult == DialogResult::Yes);
-                    if (confirmed && AppContext::GetInstance().Dialog.IsChecked) {
-                        g_config.ConfirmDelete = false;
-                        SaveConfig();
-                    }
-                }
-
-                if (confirmed) {
-                    std::wstring pathCopy = recycleTarget;
-                    pathCopy.push_back(L'\0');
-                    SHFILEOPSTRUCTW op = {};
-                    op.wFunc = FO_DELETE;
-                    op.pFrom = pathCopy.c_str();
-                    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT;
-                    if (SHFileOperationW(&op) == 0) {
-                        g_osd.Show(hwnd, AppStrings::OSD_MovedToRecycleBin, false);
-                        g_undoManager.PushDelete(recycleTarget, true);
-
-                        std::wstring nextPath = leftNavigator.PeekNext();
-                        if (nextPath == recycleTarget) nextPath = leftNavigator.PeekPrevious();
-
-                        if (!nextPath.empty()) {
-                            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, nextPath, [hwnd](bool success) {
-                                if (success) {
-                                    AppContext::GetInstance().Compare.activePane = ComparePane::Left;
-                                    AppContext::GetInstance().Compare.contextPane = ComparePane::Left;
-                                    AppContext::GetInstance().Compare.selectedPane = ComparePane::Left;
-                                    MarkCompareDirty();
-                                    RequestRepaint(PaintLayer::Image | PaintLayer::Static | PaintLayer::Dynamic);
-                                } else {
-                                    GetPaneContext(PaneSlot::Left).Reset();
-                                    AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
-                                    RequestRepaint(PaintLayer::All);
-                                }
-                            });
-                        } else {
-                            GetPaneContext(PaneSlot::Left).Reset();
-                            AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
-                            RequestRepaint(PaintLayer::All);
-                        }
-                    }
-                }
-                break;
-            }
-
-            // [RAW+JPEG Pairing] Deleting a folded pair is a three-way choice
-            // (whole pair / RAW only / rendered only) -- it must never silently
-            // recycle both, per the #201 discussion. Shown for a folded pair in
-            // single view whether the rendered face or the RAW face (via D) is
-            // on screen; the choice IS the confirmation, so it appears even when
-            // Confirm-on-Delete is off (the target is otherwise ambiguous).
-            // An in-progress edit (IsDirty -- OriginalFilePath is set on every
-            // clean load, so it is not the edit-mode signal) falls through to
-            // the edit-aware path below.
-            if (!IsCompareModeActive() &&
-                !GetPaneContext(PaneSlot::Primary).editState.IsDirty) {
-                auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
-                const std::wstring cur = GetPaneContext(PaneSlot::Primary).path;
-                std::wstring renderedPath, rawPath;
-                if (const auto* pr = nav.GetPairedRaw(nav.GetImageID(nav.Index()))) {
-                    renderedPath = cur;                       // viewing the rendered face
-                    rawPath = pr->path;
-                } else if (!g_pairViewRawPath.empty() && cur == g_pairViewRawPath &&
-                           !g_pairViewRenderedPath.empty()) {
-                    rawPath = cur;                            // viewing the RAW face
-                    renderedPath = g_pairViewRenderedPath;
-                }
-                if (!renderedPath.empty() && !rawPath.empty()) {
-                    HandlePairedDelete(hwnd, renderedPath, rawPath, true);
-                    break;
-                }
-            }
-
-            // [v9.9 Fix] Handle Deletion during Edit/Transform
-            // Determine actual target to recycle and temp file to map
-            std::wstring recycleTarget = GetPaneContext(PaneSlot::Primary).path;
-            std::wstring tempToDelete = L"";
-            
-            if (!GetPaneContext(PaneSlot::Primary).editState.OriginalFilePath.empty()) {
-                // We are in edit mode (Rotate/Flip), so target is the ORIGINAL file
-                recycleTarget = GetPaneContext(PaneSlot::Primary).editState.OriginalFilePath;
-                // And we must cleanup the temp file too
-                tempToDelete = GetPaneContext(PaneSlot::Primary).editState.TempFilePath;
-            }
-
-            if (!recycleTarget.empty()) {
-                // Get filename for display
-                size_t lastSlash = recycleTarget.find_last_of(L"\\/");
-                std::wstring filename = (lastSlash != std::wstring::npos) ? recycleTarget.substr(lastSlash + 1) : recycleTarget;
-                
-                bool confirmed = true; // Default to confirmed if ConfirmDelete is off
-                
-                // Show confirmation dialog only if ConfirmDelete is enabled
-                if (g_config.ConfirmDelete) {
-                    std::wstring dlgMessage = L"Move to Recycle Bin?";
-                    std::vector<DialogButton> dlgButtons;
-                    dlgButtons.emplace_back(DialogResult::Yes, L"Delete");
-                    dlgButtons.emplace_back(DialogResult::Cancel, L"Cancel");
-                    if (IsCompareModeActive() && AppContext::GetInstance().Compare.contextPane == ComparePane::Right) {
-                        const D2D1_RECT_F vp = AppContext::GetInstance().CompareCtrl->GetViewport(hwnd, ComparePane::Right);
-                        SetDialogCenter((vp.left + vp.right) * 0.5f, (vp.top + vp.bottom) * 0.5f);
-                    }
-
-                    DialogResult dlgResult = AppContext::GetInstance().DialogCtrl->ShowDialog(hwnd, filename.c_str(), dlgMessage.c_str(),
-                                                                 D2D1::ColorF(0.85f, 0.25f, 0.25f), dlgButtons, true, AppStrings::Checkbox_NeverConfirmDelete, L"");
-                    ClearDialogCenter();
-                    confirmed = (dlgResult == DialogResult::Yes);
-                    if (confirmed && AppContext::GetInstance().Dialog.IsChecked) {
-                        g_config.ConfirmDelete = false;
-                        SaveConfig();
-                    }
-                }
-
-                
-                if (confirmed) {
-                    // Peek next using Navigator (which should still track the collection)
-                    std::wstring nextPath = GetPaneContext(PaneSlot::Primary).navigator.PeekNext();
-                    if (nextPath == recycleTarget) nextPath = GetPaneContext(PaneSlot::Primary).navigator.PeekPrevious();
-                    
-                    // Release image before delete (Critical for file lock)
-                    ReleaseImageResources();
-                    
-                    // Use SHFileOperation for recycle bin
-                    std::wstring pathCopy = recycleTarget;
-                    pathCopy.push_back(L'\0'); // Double null terminator
-                    SHFILEOPSTRUCTW op = {};
-                    op.wFunc = FO_DELETE;
-                    op.pFrom = pathCopy.c_str();
-                    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT;
-                    
-                    if (SHFileOperationW(&op) == 0) {
-                        g_osd.Show(hwnd, AppStrings::OSD_MovedToRecycleBin, false);
-                        g_undoManager.PushDelete(recycleTarget, false);
-                        
-                        // [Fix] Verify and delete the temp file if it exists
-                        if (!tempToDelete.empty() && FileExists(tempToDelete.c_str())) {
-                             DeleteFileW(tempToDelete.c_str());
-                        }
-
-                        RequestRepaint(PaintLayer::All);
-                        GetPaneContext(PaneSlot::Primary).editState.Reset();
-                        GetPaneContext(PaneSlot::Primary).view.Reset();
-                        GetPaneContext(PaneSlot::Primary).resource.Reset();
-                        
-                        // Re-init navigator if needed (though usually list is handled by next/prev logic, 
-                        // strictly we might want to refresh list, but let's stick to PeekNext flow)
-                        // Ideally we should remove the file from navigator list too, but Initialize handles that.
-                        // For QuickView, re-init is safer to sync with FS changes.
-                        if (!nextPath.empty()) {
-                             // Initialize will scan directory again
-                             // But wait, if we scan, we might lose 'nextPath' context if folder content changed vastly?
-                             // Optimization: Just load nextPath. Initialize inside Navigate will handle it?
-                             // NavigateTo doesn't init navigator. 
-                             // Let's call Initialize(nextPath) to refresh list and set index.
-                             GetPaneContext(PaneSlot::Primary).navigator.Initialize(nextPath, hwnd);
-                             LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).navigator.GetResolvedPath(nextPath).c_str());
-                             if (IsCompareModeActive()) {
-                                 MarkCompareDirty();
-                             }
-                        } else {
-                             // Empty folder?
-                             GetPaneContext(PaneSlot::Primary).navigator.Initialize(L"", hwnd);
-                             if (IsCompareModeActive()) {
-                                 AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
-                             }
-                             RequestRepaint(PaintLayer::All);
-                        }
-                    }
-                }
-            }
-            break;
-        }
-        case IDM_LOCK_WINDOW_SIZE: {
-            SetLockWindowSize(hwnd, !g_runtime.LockWindowSize);
-            break;
-        }
-        case IDM_SHOW_INFO_PANEL: {
-            g_runtime.ShowInfoPanel = !g_runtime.ShowInfoPanel;
-            
-            // When turning on, set expanded state based on ToolbarInfoDefault config
-            if (g_runtime.ShowInfoPanel) {
-                if (g_gallery.IsVisible() && !g_gallery.IsPinned()) {
-                    g_gallery.Close();
-                    NotifyGallerySessionEnded();
-                    RestoreOverlayWindowState(hwnd);
-                }
-                g_runtime.InfoPanelExpanded = (g_config.ToolbarInfoDefault == 1); // 0=Lite, 1=Full
-                if (IsTelemetryNeeded() && GetPaneContext(PaneSlot::Primary).metadata.HistR.empty() && !GetPaneContext(PaneSlot::Primary).path.empty()) {
-                    UpdateHistogramAsync(hwnd, GetPaneContext(PaneSlot::Primary).path);
-                }
-            }
- 
-            g_toolbar.SetExifState(g_runtime.ShowInfoPanel);
-            if (g_runtime.ShowInfoPanel) {
-                AdjustWindowForOverlay(hwnd, false);
-            } else {
-                AdjustWindowForOverlay(hwnd, true);
-            }
-            RequestRepaint(PaintLayer::Static);
-            break;
-        }
-        case IDM_ALWAYS_ON_TOP: {
-            g_config.AlwaysOnTop = !g_config.AlwaysOnTop;
-            SetWindowPos(hwnd, g_config.AlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
-                         0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-            g_osd.Show(hwnd, g_config.AlwaysOnTop ? AppStrings::OSD_AlwaysOnTopOn : AppStrings::OSD_AlwaysOnTopOff, false);
-            RequestRepaint(PaintLayer::Static | PaintLayer::Dynamic);
-            break;
-        }
-
-        case IDM_COMPARE_MODE: {
-            if (IsCompareModeActive()) {
-                AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
-                ReturnToPairFaceAfterCompareExit(hwnd);
-            } else {
-                AppContext::GetInstance().CompareCtrl->EnterMode(hwnd);
-            }
-            RequestRepaint(PaintLayer::All);
-            break;
-        }
-
-        case IDM_OVERLAY_MODE: {
-            if (IsOverlayModeActive()) ExitOverlayMode(hwnd);
-            else EnterOverlayMode(hwnd);
-            RequestRepaint(PaintLayer::All);
-            break;
-        }
-
-        case IDM_TOGGLE_SPAN: {
-             // [Persistence] Update Config & Runtime
-             g_config.EnableCrossMonitor = !g_config.EnableCrossMonitor;
-             g_runtime.CrossMonitorMode = g_config.EnableCrossMonitor;
-             SaveConfig();
-
-             // If fullscreen, re-apply fullscreen to switch mode
-             if (g_isFullScreen) {
-                 // Toggle OFF then ON to apply new rect
-                 SendMessage(hwnd, WM_COMMAND, IDM_FULLSCREEN, 0); // OFF
-                 SendMessage(hwnd, WM_COMMAND, IDM_FULLSCREEN, 0); // ON (with new mode)
-             }
-             std::wstring msg = g_runtime.CrossMonitorMode ? AppStrings::OSD_SpanOn : AppStrings::OSD_SpanOff;
-             g_osd.Show(hwnd, msg, false);
-             break;
-        }
-        
-        case IDM_HUD_GALLERY: SendMessage(hwnd, WM_KEYDOWN, 'T', 0); break;
-
-        case IDM_LITE_INFO:
-             g_runtime.ShowInfoPanel = true;
-             g_runtime.InfoPanelExpanded = false; // Lite = not expanded
-             g_toolbar.SetExifState(true);
-             if (g_runtime.ShowInfoPanel) {
-                AdjustWindowForOverlay(hwnd, false);
-            } else {
-                AdjustWindowForOverlay(hwnd, true);
-            }
-             RequestRepaint(PaintLayer::Static);
-             break;
-
-        case IDM_FULL_INFO:
-             g_runtime.ShowInfoPanel = true;
-             g_runtime.InfoPanelExpanded = true; // Full = expanded
-             if (IsTelemetryNeeded() && GetPaneContext(PaneSlot::Primary).metadata.HistR.empty() && !GetPaneContext(PaneSlot::Primary).path.empty()) {
-                 UpdateHistogramAsync(hwnd, GetPaneContext(PaneSlot::Primary).path);
-             }
-             g_toolbar.SetExifState(true);
-             if (g_runtime.ShowInfoPanel) {
-                AdjustWindowForOverlay(hwnd, false);
-            } else {
-                AdjustWindowForOverlay(hwnd, true);
-            }
-             RequestRepaint(PaintLayer::Static);
-             break;
-
-        // Invoke the actions directly: these used to be routed by faking a
-        // keypress, which only worked through the hardcoded 0/1 fallback.
-        case IDM_ZOOM_100: HandleHotkeyAction(hwnd, HotkeyAction::Zoom100); break;
-        case IDM_ZOOM_FIT: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFit); break;
-        case IDM_ZOOM_FIT_WINDOW: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFitWindow); break;
-        case IDM_ZOOM_FILL: HandleHotkeyAction(hwnd, HotkeyAction::ZoomFill); break;
-        case IDM_ZOOM_IN:  SendMessage(hwnd, WM_KEYDOWN, VK_ADD, 0); break;
-        case IDM_ZOOM_OUT: SendMessage(hwnd, WM_KEYDOWN, VK_SUBTRACT, 0); break;
-
-        case IDM_ROTATE_CW:  PerformTransform(hwnd, TransformType::Rotate90CW); break;
-        case IDM_ROTATE_CCW: PerformTransform(hwnd, TransformType::Rotate90CCW); break;
-        case IDM_FLIP_H:     PerformTransform(hwnd, TransformType::FlipHorizontal); break;
-        case IDM_FLIP_V:     PerformTransform(hwnd, TransformType::FlipVertical); break;
-
-        case IDM_RENDER_RAW: {
-             // [RAW+JPEG Pairing] For a paired item in single view this action
-             // switches the DISPLAYED FILE: rendered JPG <-> hidden RAW (full
-             // decode -- the RAW's embedded preview is essentially the JPG).
-             if (!contextLeft && !IsCompareModeActive() && !contextPath.empty()) {
-                 const auto& nav = GetPaneContext(PaneSlot::Primary).navigator;
-                 const FileNavigator::PairedRaw* pairedRaw = nav.GetPairedRaw(FileNavigator::PathToImageID(contextPath));
-                 std::wstring renderedBack;
-                 if (!pairedRaw) {
-                     if (!g_pairViewRawPath.empty() && contextPath == g_pairViewRawPath) {
-                         // Currently viewing the RAW side (tracked state: robust
-                         // even if a rescan unfolded the pair meanwhile)
-                         renderedBack = g_pairViewRenderedPath;
-                     } else {
-                         std::wstring r = nav.GetResolvedPath(contextPath);
-                         if (r != contextPath) renderedBack = std::move(r);
-                     }
-                 }
-                 if (pairedRaw || !renderedBack.empty()) {
-                     const bool toRaw = (pairedRaw != nullptr);
-                     // Remember the pair BEFORE loading: the load pipeline uses
-                     // this to treat the switch as "same photo" (preserves
-                     // ForceRawDecode and other temporary state)
-                     g_pairViewRawPath = toRaw ? pairedRaw->path : contextPath;
-                     g_pairViewRenderedPath = toRaw ? contextPath : renderedBack;
-
-                     g_runtime.ForceRawDecode = toRaw;
-                     g_toolbar.SetRawState(true, toRaw, true);
-                     if (g_imageEngine) {
-                         g_imageEngine->UpdateConfig(g_runtime);
-                         // No SetForceRefresh: the two sides are different
-                         // files, and the engine's RAW quality check decides
-                         // between a cached frame and a re-decode.
-                     }
-                     g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
-                     g_preserveViewStateOnNextLoad = true;
-                     ReleaseImageResources();
-                     LoadImageAsync(hwnd, toRaw ? g_pairViewRawPath.c_str() : g_pairViewRenderedPath.c_str());
-                     g_osd.Show(hwnd, toRaw ? L"Paired RAW (Full Decode)" : L"Paired Rendered Image", false);
-                     RequestRepaint(PaintLayer::All);
-                     break;
-                 }
-             }
-
-             // [Fix] Toggle Force RAW Decode based on the selected pane's ACTUAL decode state.
-             // This prevents "double click required" bugs when switching panes with mismatched states.
-             bool isFullDecode = contextLeft ? GetPaneContext(PaneSlot::Left).metadata.IsRawFullDecode : GetPaneContext(PaneSlot::Primary).metadata.IsRawFullDecode;
-             g_runtime.ForceRawDecode = !isFullDecode;
-             g_toolbar.SetRawState(true, g_runtime.ForceRawDecode); // Update toolbar icon
-             
-             if (!contextPath.empty()) {
-                 if (contextLeft) {
-                     AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, contextPath, [](bool success){
-                         if (success) {
-                             AppContext::GetInstance().Compare.activePane = ComparePane::Left;
-                             MarkCompareDirty();
-                             RequestRepaint(PaintLayer::Image | PaintLayer::Static);
-                         }
-                     });
-                 } else {
-                     if (g_imageEngine) {
-                         g_imageEngine->UpdateConfig(g_runtime); // [Fix] Push config to engine
-                         g_imageEngine->SetForceRefresh(true);
-                     }
-                     g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
-                     g_preserveViewStateOnNextLoad = true;
-                     ReleaseImageResources();
-                     LoadImageAsync(hwnd, contextPath.c_str()); 
-                 }
-             }
-             
-             std::wstring msg = g_runtime.ForceRawDecode ? L"RAW: Full Decode (Temporary)" : L"RAW: Embedded Preview (Temporary)";
-             g_osd.Show(hwnd, msg, false);
-             RequestRepaint(PaintLayer::All);
-             break;
-        }
-
-        case IDM_SORT_AUTO:
-        case IDM_SORT_NAME:
-        case IDM_SORT_MODIFIED:
-        case IDM_SORT_DATE_TAKEN:
-        case IDM_SORT_SIZE:
-        case IDM_SORT_TYPE: {
-            g_runtime.SortOrder = wmId - IDM_SORT_AUTO;
-            if (!GetPaneContext(PaneSlot::Primary).path.empty()) {
-                // Auto follows the live Explorer view; other modes need a full list.
-                const bool defer = (g_runtime.SortOrder == 0);
-                GetPaneContext(PaneSlot::Primary).navigator.Initialize(
-                    GetPaneContext(PaneSlot::Primary).path, hwnd, defer);
-            }
-            break;
-        }
-
-        case IDM_SORT_ASCENDING:
-        case IDM_SORT_DESCENDING: {
-            g_runtime.SortDescending = (wmId == IDM_SORT_DESCENDING);
-            if (!GetPaneContext(PaneSlot::Primary).path.empty()) {
-                GetPaneContext(PaneSlot::Primary).navigator.Initialize(GetPaneContext(PaneSlot::Primary).path, hwnd); // Re-initialize to re-sort
-            }
-            break;
-        }
-
-        case IDM_NAV_LOOP: {
-            g_runtime.NavLoop = !g_runtime.NavLoop;
-            g_osd.Show(hwnd, g_runtime.NavLoop ? L"Navigation Loop: ON" : L"Navigation Loop: OFF", false);
-            break;
-        }
-        case IDM_NAV_THROUGH: {
-            g_runtime.NavTraverse = !g_runtime.NavTraverse;
-            g_osd.Show(hwnd, g_runtime.NavTraverse ? L"Traverse Subfolders: ON" : L"Traverse Subfolders: OFF", false);
-            break;
-        }
-
-        case IDM_CMS_UNMANAGED:
-        case IDM_CMS_AUTO:
-        case IDM_CMS_SRGB:
-        case IDM_CMS_P3:
-        case IDM_CMS_ADOBERGB:
-        case IDM_CMS_GRAY:
-        case IDM_CMS_PROPHOTO: {
-             int newMode = (int)cmdId - (int)IDM_CMS_UNMANAGED;
-             if (contextLeft) {
-                 GetPaneContext(PaneSlot::Left).CmsModeOverride = newMode;
-             } else {
-                 g_runtime.CmsModeOverride = newMode;
-             }
-             
-             UpdateTargetColorSpaceForEngine(hwnd);
-
-             // If currently displaying a RAW file in Full Decode mode, re-trigger decode with the new color space
-             const auto& pane = GetPaneContext(contextLeft ? PaneSlot::Left : PaneSlot::Primary);
-             if (QuickView::IsRawPath(pane.path) && pane.metadata.IsRawFullDecode) {
-                 ReloadCurrentImage(hwnd);
-             } else {
-                 RefreshImageDisplay(hwnd);
-             }
-             if (!contextLeft) ScheduleGamutWarningAnalysis(hwnd);
-
-             std::wstring msg = L"Color Space: ";
-             switch (newMode) {
-                 case 0: msg += AppStrings::Settings_Option_CmsUnmanaged; break;
-                 case 1: msg += AppStrings::Settings_Option_Auto; break;
-                 case 2: msg += AppStrings::Settings_Option_CmssRGB; break;
-                 case 3: msg += AppStrings::Settings_Option_CmsP3; break;
-                 case 4: msg += AppStrings::Settings_Option_CmsAdobeRGB; break;
-                 case 5: msg += AppStrings::Settings_Option_CmsGray; break;
-                 case 6: msg += AppStrings::Settings_Option_CmsProPhoto; break;
-             }
-             g_osd.Show(hwnd, msg, false);
-             RequestRepaint(PaintLayer::All);
-             break;
-        }
-
-        case IDM_SOFT_PROOF_TOGGLE: {
-             std::wstring& currentProfile = contextLeft ? GetPaneContext(PaneSlot::Left).SoftProofProfilePath : g_runtime.SoftProofProfilePath;
-             bool& currentEnable = contextLeft ? GetPaneContext(PaneSlot::Left).EnableSoftProofing : g_runtime.EnableSoftProofing;
-
-             if (currentProfile.empty() && !g_config.CustomSoftProofProfile.empty()) {
-                 currentProfile = g_config.CustomSoftProofProfile;
-             }
-             if (currentProfile.empty()) {
-                 g_osd.Show(hwnd, L"Please select a Soft Proof Profile first.", false);
-                 break;
-             }
-             currentEnable = !currentEnable;
-             RefreshImageDisplay(hwnd);
-             if (!contextLeft) ScheduleGamutWarningAnalysis(hwnd);
-             g_osd.Show(hwnd, currentEnable ? L"Soft Proofing: ON" : L"Soft Proofing: OFF", false);
-             break;
-        }
-        case IDM_SOFT_PROOF_CUSTOM: {
-             if (contextLeft) {
-                 GetPaneContext(PaneSlot::Left).SoftProofProfilePath = g_config.CustomSoftProofProfile;
-                 GetPaneContext(PaneSlot::Left).EnableSoftProofing = true;
-             } else {
-                 g_runtime.SoftProofProfilePath = g_config.CustomSoftProofProfile;
-                 g_runtime.EnableSoftProofing = true;
-             }
-             RefreshImageDisplay(hwnd);
-             if (!contextLeft) ScheduleGamutWarningAnalysis(hwnd);
-             g_osd.Show(hwnd, L"Soft Proofing Target Updated", false);
-             break;
-        }
-
-        case IDM_PIXEL_ART_MODE: {
-             // Toggle Pixel Art Mode (Nearest Neighbor) - Temporary runtime override
-             bool isCurrentlyPixelArt = GetCurrentPixelArtState(hwnd);
-
-             if (isCurrentlyPixelArt) {
-                 g_runtime.PixelArtModeOverride = 2; // Force OFF
-                 g_osd.Show(hwnd, L"Pixel Art Mode: OFF", false);
-             } else {
-                 g_runtime.PixelArtModeOverride = 1; // Force ON
-                 g_osd.Show(hwnd, L"Pixel Art Mode: ON", false);
-             }
-
-             // Update interpolation immediately by redrawing the surface
-             if (GetPaneContext(PaneSlot::Primary).resource) {
-                 RenderImageToDComp(hwnd, GetPaneContext(PaneSlot::Primary).resource, true);
-                 if (g_compEngine && g_compEngine->IsInitialized()) {
-                     RECT rc; GetClientRect(hwnd, &rc);
-                     SyncDCompState(hwnd, (float)rc.right, (float)rc.bottom);
-                 }
-             }
-             RequestRepaint(PaintLayer::All);
-             break;
-        }
-
-        case IDM_WALLPAPER_FILL:
-        case IDM_WALLPAPER_FIT:
-        case IDM_WALLPAPER_TILE: {
-            if (!contextPath.empty()) {
-                // Use IDesktopWallpaper COM interface
-                CoInitialize(nullptr);
-                IDesktopWallpaper* pWallpaper = nullptr;
-                HRESULT hr = CoCreateInstance(__uuidof(DesktopWallpaper), nullptr, CLSCTX_ALL, 
-                                              IID_PPV_ARGS(&pWallpaper));
-                if (SUCCEEDED(hr) && pWallpaper) {
-                    DESKTOP_WALLPAPER_POSITION pos = DWPOS_FILL;
-                    if (cmdId == IDM_WALLPAPER_FIT) pos = DWPOS_FIT;
-                    else if (cmdId == IDM_WALLPAPER_TILE) pos = DWPOS_TILE;
-                    
-                    pWallpaper->SetPosition(pos);
-                    hr = pWallpaper->SetWallpaper(nullptr, contextPath.c_str());
-                    pWallpaper->Release();
-                    
-                    if (SUCCEEDED(hr)) {
-                        g_osd.Show(hwnd, AppStrings::OSD_WallpaperSet, false);
-                    } else {
-                        g_osd.Show(hwnd, AppStrings::OSD_WallpaperFailed, true);
-                    }
-                    RequestRepaint(PaintLayer::Dynamic);
-                }
-                CoUninitialize();
-            }
-            break;
-        }
-
-        case IDM_FIX_EXTENSION: {
-            if (!contextPath.empty() && !contextMeta.Format.empty()) {
-                std::wstring fmt = contextMeta.Format;
-                std::transform(fmt.begin(), fmt.end(), fmt.begin(), ::towlower);
-                
-                std::wstring_view newExt = GetPrimaryExtensionForFormat(fmt);
-                
-                if (!newExt.empty()) {
-                    size_t lastDot = contextPath.find_last_of(L'.');
-                    std::wstring basePath = (lastDot != std::wstring_view::npos) ? std::wstring(contextPath.substr(0, lastDot)) : std::wstring(contextPath);
-                    std::wstring newPath = basePath + std::wstring(newExt);
-                    
-                    std::wstring msg = L"Format detected: " + contextMeta.Format + L"\nChange extension to " + std::wstring(newExt) + L"?";
-                    
-                    std::vector<DialogButton> buttons = {
-                        { DialogResult::Yes, L"Rename", true },
-                        { DialogResult::Cancel, L"Cancel" }
-                    };
-                    
-                    DialogResult result = AppContext::GetInstance().DialogCtrl->ShowDialog(hwnd, L"Fix Extension", msg, D2D1::ColorF(D2D1::ColorF::Orange), buttons);
-                    if (result == DialogResult::Yes) {
-                        if (contextLeft) {
-                            if (MoveFileW(contextPath.c_str(), newPath.c_str())) {
-                                AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, newPath, [hwnd](bool success){
-                                    if (success) {
-                                        g_osd.Show(hwnd, L"Extension Fixed (Left)", false);
-                                        MarkCompareDirty();
-                                        RequestRepaint(PaintLayer::Image | PaintLayer::Static);
-                                    }
-                                });
-                            } else {
-                                g_osd.Show(hwnd, std::wstring(L"Rename Failed"), true);
-                            }
-                        } else {
-                            ReleaseImageResources();
-                            if (MoveFileW(contextPath.c_str(), newPath.c_str())) {
-                                GetPaneContext(PaneSlot::Primary).path = newPath;
-                                g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
-                                g_preserveViewStateOnNextLoad = true;
-                                LoadImageAsync(hwnd, newPath);
-                                g_osd.Show(hwnd, L"Extension Fixed", false);
-                            } else {
-                                g_preservedViewState = GetPaneContext(PaneSlot::Primary).view;
-                                g_preserveViewStateOnNextLoad = true;
-                                LoadImageAsync(hwnd, GetPaneContext(PaneSlot::Primary).path); // Reload old
-                                g_osd.Show(hwnd, std::wstring(L"Rename Failed"), true);
-                            }
-                        }
-                    }
-                    RequestRepaint(PaintLayer::All);
-                }
-            }
-            break;
-        }
-        case IDM_SETTINGS: {
-            if (g_settingsOverlay.IsVisible()) {
-                g_settingsOverlay.OpenTab(6);
-            } else {
-                if (g_gallery.IsVisible()) {
-                    g_gallery.Close();
-                    NotifyGallerySessionEnded();
-                    RestoreOverlayWindowState(hwnd);
-                }
-                SaveOverlayWindowState(hwnd);
-                g_settingsOverlay.Toggle(); // Open
-            }
-            RequestRepaint(PaintLayer::Static);
-            break;
-        }
-
-        case IDM_EXIT: {
-            PostMessage(hwnd, WM_CLOSE, 0, 0);
-            break;
-        }
-        // TODO: Implement other menu commands
-        default:
-            break;
-        }
-        return 0;
-    }
+    case WM_COMMAND:
+        return HandleWmCommand(hwnd, wParam, lParam);
 
     case WM_CLIPBOARD_PRERENDER_READY: {
         g_osd.Show(hwnd, g_cropState.IsActive ? AppStrings::OSD_CropCopied : AppStrings::OSD_PixelsCopied, false, false, D2D1::ColorF(D2D1::ColorF::White), OSDPosition::Bottom, 1500);
@@ -18154,6 +18172,7 @@ static void ComparePairSideBySide(HWND hwnd, const std::wstring& renderedPath, c
     RequestRepaint(PaintLayer::All);
 }
 
+[[clang::minsize, clang::noinline]]
 bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
     [[maybe_unused]] bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     [[maybe_unused]] bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;

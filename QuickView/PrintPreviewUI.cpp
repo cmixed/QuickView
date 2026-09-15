@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <string>
 #include <thread>
+#include "AsyncJob.h"
 
 extern int GetEffectiveExifOrientation(int baseExif, const EditState& editState);
 
@@ -925,7 +926,7 @@ bool PrintPreviewUI::OnLButtonUp(float x, float y) {
         g_osd.Show(m_hwnd, AppStrings::OSD_PrintJobStarted, false, false, D2D1::ColorF(D2D1::ColorF::White), OSDPosition::Bottom, 5000);
 
         PrintManager::GetInstance().IncrementActiveJobs();
-        std::thread([settings = m_settings, hwnd = m_hwnd]() {
+        QuickView::RunDetached([settings = m_settings, hwnd = m_hwnd]() {
             CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
             HRESULT hr = S_OK;
             auto result = PrintManager::GetInstance().ExecutePrintJob(settings);
@@ -935,7 +936,7 @@ bool PrintPreviewUI::OnLButtonUp(float x, float y) {
             CoUninitialize();
             PrintManager::GetInstance().DecrementActiveJobs();
             PostMessage(hwnd, WM_APP + 98, static_cast<WPARAM>(hr), 0); // WM_PRINT_FINISHED
-        }).detach();
+        });
     } else if (PointInRect(x, y, m_ui.rectCombo)) {
         m_isComboOpen = true;
     } else if (PointInRect(x, y, m_ui.btnProperties)) {

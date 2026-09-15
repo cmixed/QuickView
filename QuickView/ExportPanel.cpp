@@ -19,6 +19,7 @@
 #include "PaneContext.h"
 #include "ImageEngine.h"
 #include <thread>
+#include "AsyncJob.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -618,7 +619,7 @@ void ExportPanel::TriggerAsyncEstimate() {
         opts.OutputPath = L"dummy.jpg";
     }
 
-    std::thread([opts, currentGen, hwnd = m_hwnd, pThis = this]() {
+    QuickView::PostThreadPool([opts, currentGen, hwnd = m_hwnd, pThis = this]() {
         HRESULT hrCo = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         
         if (pThis->m_estimateGeneration.load() != currentGen) {
@@ -637,7 +638,7 @@ void ExportPanel::TriggerAsyncEstimate() {
         PostMessageW(hwnd, WM_APP_ESTIMATE_READY, (WPARAM)currentGen, (LPARAM)bytes);
         
         if (SUCCEEDED(hrCo)) CoUninitialize();
-    }).detach();
+    });
 }
 
 void ExportPanel::OnEstimateReady(uint64_t gen, uint64_t bytes) {

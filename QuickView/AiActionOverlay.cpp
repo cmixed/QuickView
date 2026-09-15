@@ -10,6 +10,7 @@
 #include <thread>
 #include <chrono>
 #include <cmath>
+#include "AsyncJob.h"
 
 extern OSDState g_osd;
 extern HWND g_mainHwnd;
@@ -18,6 +19,12 @@ extern void RequestRepaint(QuickView::PaintLayer layer);
 
 #ifndef EM_SETCUEBANNER
 #define EM_SETCUEBANNER 0x1501
+#endif
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wignored-attributes"
+#pragma clang attribute push([[clang::minsize]], apply_to = function)
 #endif
 
 namespace QuickView::UI {
@@ -559,7 +566,7 @@ void AiActionOverlay::ExecuteSelectedOrPrompt() {
                 }
             }, m_currentPromptText);
 
-        std::thread([hwnd, adhocName, currentTaskId, taskFinished]() {
+        QuickView::RunDetached([hwnd, adhocName, currentTaskId, taskFinished]() {
             auto startTime = std::chrono::steady_clock::now();
             while (!taskFinished->load() && AI::AiActionManager::Instance().IsRunning() && AI::AiActionManager::Instance().GetCurrentTaskId() == currentTaskId) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -574,7 +581,7 @@ void AiActionOverlay::ExecuteSelectedOrPrompt() {
                 fakeProgress = (std::max)(0.05f, (std::min)(fakeProgress, 0.95f));
                 g_osd.UpdatePersistentTask(hwnd, cloudMsg, fakeProgress);
             }
-        }).detach();
+        });
     }
 }
 
@@ -650,7 +657,7 @@ void AiActionOverlay::TriggerAction(size_t filteredIndex) {
         }, m_currentPromptText, cropL, cropT, cropR, cropB);
 
     std::wstring actName = act.name;
-    std::thread([hwnd, actName, baseUrl, isSdWebUi, currentTaskId, taskFinished]() {
+    QuickView::RunDetached([hwnd, actName, baseUrl, isSdWebUi, currentTaskId, taskFinished]() {
         auto startTime = std::chrono::steady_clock::now();
         while (!taskFinished->load() && AI::AiActionManager::Instance().IsRunning() && AI::AiActionManager::Instance().GetCurrentTaskId() == currentTaskId) {
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -691,7 +698,7 @@ void AiActionOverlay::TriggerAction(size_t filteredIndex) {
 
             g_osd.UpdatePersistentTask(hwnd, cloudMsg, fakeProgress);
         }
-    }).detach();
+    });
 }
 
 void AiActionOverlay::StartInpaintSelection() {
@@ -1139,3 +1146,8 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
 }
 
 } // namespace QuickView::UI
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#pragma clang diagnostic pop
+#endif

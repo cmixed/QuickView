@@ -179,6 +179,16 @@ public:
 private:
     void CreateResources(ID2D1DeviceContext* pRT);
     
+    void BuildGeneralTab(SettingsTab& tabGeneral);
+    void BuildThemeTab(SettingsTab& tabTheme);
+    void BuildVisualsTab(SettingsTab& tabVisuals);
+    void BuildControlTab(SettingsTab& tabControl);
+    void BuildKeysTab(SettingsTab& tabKeys);
+    void BuildImageTab(SettingsTab& tabImage);
+    void BuildPluginsTab(SettingsTab& tabPlugins);
+    void BuildAdvancedTab(SettingsTab& tabAdvanced);
+    void BuildAboutTab(SettingsTab& tabAbout);
+    
     void DrawToggle(ID2D1DeviceContext* pRT, const D2D1_RECT_F& rect, bool isOn, bool isHovered);
     void DrawSlider(ID2D1DeviceContext *pRT, const D2D1_RECT_F &rect, float val,
                     float minV, float maxV, bool isHovered,

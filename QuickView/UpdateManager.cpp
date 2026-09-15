@@ -10,6 +10,7 @@
 #include <shlwapi.h>
 #include <wincrypt.h>
 #include "EditState.h"
+#include "AsyncJob.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -43,9 +44,9 @@ void UpdateManager::StartBackgroundCheck(int delaySeconds) {
     // Reset status to ensure UI updates
     m_status = UpdateStatus::Idle;
 
-    std::thread([this, delaySeconds]() {
+    QuickView::RunDetached([this, delaySeconds]() {
         CheckThread(delaySeconds);
-    }).detach();
+    });
 }
 
 void UpdateManager::CheckThread(int delaySeconds) {

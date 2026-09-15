@@ -7,6 +7,7 @@ static constexpr const char* CURRENT_MODULE = "ImageEngine";
 #include "EditState.h"      // [v9.9] Access g_runtime.ForceRawDecode for dispatch decisions
 #include "TileManager.h"    // [Infinity Engine]
 #include "OffscreenWebView2.h"
+#include "AsyncJob.h"
 
 #include <algorithm>
 #include <psapi.h>
@@ -840,11 +841,11 @@ std::vector<EngineEvent> ImageEngine::PollState() {
                 // Schedule a deferred wakeup so PollState re-enters after 500ms
                 // to check the idle duration (message loop won't fire without events)
                 if (!m_startupWakeupPending.exchange(true)) {
-                    std::thread([this]() {
+                    QuickView::RunDetached([this]() {
                         std::this_thread::sleep_for(std::chrono::milliseconds(500));
                         m_startupWakeupPending = false;
                         QueueEvent(EngineEvent{}); // Wake PollState
-                    }).detach();
+                    });
                 }
             } else {
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1807,7 +1808,7 @@ void ImageEngine::RequestFullMetadata() {
     }
 
     // Launch Async (Detached)
-    std::thread([this, path, id]() {
+    QuickView::RunDetached([this, path, id]() {
         // [v5.4] Robustness: RAII Cleaner to ensure we ALWAYS remove from pending set
         struct PendingCleaner {
             FastLane& lane;
@@ -1867,7 +1868,7 @@ void ImageEngine::RequestFullMetadata() {
         
         // Destructor of 'cleaner' runs here, removing ID from pending set.
         
-    }).detach();
+    });
 }
 
 
