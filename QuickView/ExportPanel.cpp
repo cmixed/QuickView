@@ -236,7 +236,8 @@ PanelLayout ExportPanel::ComputeLayout(float canvasWidth, float canvasHeight) co
 }
 
 void ExportPanel::Show(HWND hwnd, int initialWidth, int initialHeight, const std::wstring& originalPath, 
-                       PendingAction pending, PaneSlot targetSlot, std::shared_ptr<RawImageFrame> sourceFrame) {
+                       PendingAction pending, PaneSlot targetSlot, std::shared_ptr<RawImageFrame> sourceFrame,
+                       ExportMode mode) {
     m_hwnd = hwnd;
     m_isVisible = true;
     m_pendingAction = pending;
@@ -245,7 +246,7 @@ void ExportPanel::Show(HWND hwnd, int initialWidth, int initialHeight, const std
 
     auto& targetPane = GetPaneContext(m_targetSlot);
     m_isModified = IsImageModified() || targetPane.editState.IsDirty || (m_customSourceFrame != nullptr) || (targetPane.currentFrame != nullptr);
-    m_exportMode = (pending != PendingAction::None) ? ExportMode::UnsavedLeave : ExportMode::NormalExport;
+    m_exportMode = (mode == ExportMode::UnsavedLeave || pending != PendingAction::None) ? ExportMode::UnsavedLeave : ExportMode::NormalExport;
 
     // Use dimensions of in-memory source frame if available
     if (m_customSourceFrame && m_customSourceFrame->width > 0 && m_customSourceFrame->height > 0) {

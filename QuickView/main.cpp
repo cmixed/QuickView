@@ -704,7 +704,7 @@ void AdjustWindowForOverlay(HWND hwnd, bool isClosed);
 int g_galleryContextMenuIndex = -1;
 // [Fix] Track long operations in the compare left pane
 bool g_isLeftPaneDecoding = false;
-std::function<void(bool)> g_leftPaneReadyCallback = nullptr;
+CompareSlotCallback g_leftPaneReadyCallback;
 
 std::atomic<bool> g_isPhase2Debouncing{false}; // Suppress IsIdle logic during phase 2 delay
 bool g_isNavigatingToTitan = false; // Is the currently loading image a Titan image?
@@ -5523,18 +5523,23 @@ void LoadConfig() {
 
 
 void DiscardChanges() {
+    auto& primaryPane = GetPaneContext(PaneSlot::Primary);
     // Save original path BEFORE reset (Reset clears it)
-    std::wstring originalPath = GetPaneContext(PaneSlot::Primary).editState.OriginalFilePath;
-    
-    if (GetPaneContext(PaneSlot::Primary).editState.IsDirty && !GetPaneContext(PaneSlot::Primary).editState.TempFilePath.empty()) {
-        ReleaseImageResources();
-        if (!DeleteFileW(GetPaneContext(PaneSlot::Primary).editState.TempFilePath.c_str())) { Sleep(100); DeleteFileW(GetPaneContext(PaneSlot::Primary).editState.TempFilePath.c_str()); }
+    std::wstring originalPath = primaryPane.editState.OriginalFilePath;
+    if (originalPath.empty()) {
+        originalPath = primaryPane.path;
     }
-    GetPaneContext(PaneSlot::Primary).editState.Reset();
+    
+    if (primaryPane.editState.IsDirty && !primaryPane.editState.TempFilePath.empty()) {
+        ReleaseImageResources();
+        if (!DeleteFileW(primaryPane.editState.TempFilePath.c_str())) { Sleep(100); DeleteFileW(primaryPane.editState.TempFilePath.c_str()); }
+    }
+    primaryPane.editState.Reset();
+    primaryPane.currentFrame.reset();
     
     // Restore to original file path if we had one
     if (!originalPath.empty()) {
-        GetPaneContext(PaneSlot::Primary).path = originalPath;
+        primaryPane.path = originalPath;
         ReloadCurrentImage(GetActiveWindow());
     }
 }
@@ -5598,7 +5603,7 @@ bool CheckUnsavedChanges(HWND hwnd, QuickView::PendingAction pending = QuickView
             pending = QuickView::PendingAction::ExitCropMode;
         }
 
-        QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, pending, PaneSlot::Primary, primaryPane.currentFrame);
+        QuickView::ExportPanel::GetInstance().Show(hwnd, targetW, targetH, targetPath, pending, PaneSlot::Primary, primaryPane.currentFrame, QuickView::ExportMode::UnsavedLeave);
         RequestRepaint(PaintLayer::All);
         return false; // Intercept navigation until user completes ExportPanel action
     }
@@ -10444,6 +10449,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             float winH = (float)rcClient.bottom;
             RenderImageToDComp(hwnd, primaryPane.resource, true);
             SyncDCompState(hwnd, winW, winH, false);
+            g_toolbar.UpdateLayout(winW, winH);
             RequestRepaint(PaintLayer::All);
 
             const wchar_t* succMsg = AppStrings::OSD_AiGenerationSuccess ? AppStrings::OSD_AiGenerationSuccess : L"AI 处理完成！已进入卷帘对比模式";
@@ -10760,7 +10766,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_TIMER: {
         if (wParam == IDT_SLIDESHOW) {
             if (g_slideshowState.IsActive && g_slideshowState.IsPlaying) {
-                if (CheckUnsavedChanges(hwnd)) {
+                if (CheckUnsavedChanges(hwnd, QuickView::PendingAction::NavigateNext)) {
                     Navigate(hwnd, 1);
                 }
             } else {
@@ -13895,7 +13901,8 @@ SKIP_EDGE_NAV:;
 
         if (g_config.ThumbWheelMode == 0) { // Navigate
             int direction = (delta > 0.0f) ? 1 : -1; // Positive is usually right, negative is left
-            if (delta != 0.0f && CheckUnsavedChanges(hwnd)) {
+            QuickView::PendingAction pending = (direction > 0) ? QuickView::PendingAction::NavigateNext : QuickView::PendingAction::NavigatePrev;
+            if (delta != 0.0f && CheckUnsavedChanges(hwnd, pending)) {
                 Navigate(hwnd, direction);
             }
         } else if (g_config.ThumbWheelMode == 1) { // Zoom
@@ -14064,7 +14071,8 @@ SKIP_EDGE_NAV:;
 
             if (g_config.ThumbWheelMode == 0) { // Navigate
                 int direction = (delta > 0.0f) ? 1 : -1;
-                if (delta != 0.0f && CheckUnsavedChanges(hwnd)) {
+                QuickView::PendingAction pending = (direction > 0) ? QuickView::PendingAction::NavigateNext : QuickView::PendingAction::NavigatePrev;
+                if (delta != 0.0f && CheckUnsavedChanges(hwnd, pending)) {
                     Navigate(hwnd, direction);
                 }
             } else if (g_config.ThumbWheelMode == 1) { // Zoom
@@ -14136,7 +14144,8 @@ SKIP_EDGE_NAV:;
         if (IsCompareModeActive()) {
             if (shouldNavigate) {
                 int direction = (delta > 0.0f) ? -1 : 1;
-                if (delta != 0.0f && CheckUnsavedChanges(hwnd)) {
+                QuickView::PendingAction pending = (direction > 0) ? QuickView::PendingAction::NavigateNext : QuickView::PendingAction::NavigatePrev;
+                if (delta != 0.0f && CheckUnsavedChanges(hwnd, pending)) {
                     Navigate(hwnd, direction);
                 }
                 return 0;
@@ -14154,7 +14163,8 @@ SKIP_EDGE_NAV:;
 
         if (shouldNavigate) {
             int direction = (delta > 0.0f) ? -1 : 1;
-            if (delta != 0.0f && CheckUnsavedChanges(hwnd)) {
+            QuickView::PendingAction pending = (direction > 0) ? QuickView::PendingAction::NavigateNext : QuickView::PendingAction::NavigatePrev;
+            if (delta != 0.0f && CheckUnsavedChanges(hwnd, pending)) {
                 Navigate(hwnd, direction);
             }
             return 0;
@@ -14967,10 +14977,11 @@ void ProcessEngineEvents(HWND hwnd) {
                 g_isLeftPaneDecoding = false;
                 
                 // Fire pending callback if one exists
-                if (g_leftPaneReadyCallback) {
-                    auto cb = std::move(g_leftPaneReadyCallback);
-                    g_leftPaneReadyCallback = nullptr;
-                    cb(true);
+                if (g_leftPaneReadyCallback.pfn) {
+                    auto cb = g_leftPaneReadyCallback;
+                    g_leftPaneReadyCallback = {};
+                    cb.Invoke(true);
+                    cb.Reset();
                 }
                 
                 if (g_runtime.ShowCompareInfo && IsTelemetryNeeded() && (pane.metadata.HistL.empty() || !pane.metadata.IsFullMetadataLoaded)) {
@@ -15624,10 +15635,11 @@ void ProcessEngineEvents(HWND hwnd) {
             
             if (targetSlot == PaneSlot::Left) {
                 g_isLeftPaneDecoding = false;
-                if (g_leftPaneReadyCallback) {
-                    auto cb = std::move(g_leftPaneReadyCallback);
-                    g_leftPaneReadyCallback = nullptr;
-                    cb(false);
+                if (g_leftPaneReadyCallback.pfn) {
+                    auto cb = g_leftPaneReadyCallback;
+                    g_leftPaneReadyCallback = {};
+                    cb.Invoke(false);
+                    cb.Reset();
                 }
                 pane.valid = false;
                 MarkCompareDirty();
@@ -16572,14 +16584,25 @@ void NavigateEdge(HWND hwnd, bool toLast) {
         QuickView::BrowseDirection browseDir = toLast ? QuickView::BrowseDirection::FORWARD : QuickView::BrowseDirection::BACKWARD;
 
         if (!leftPath.empty()) {
-            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, leftPath, [hwnd, rightPath, browseDir](bool success){
-                if (success) {
-                    MarkCompareDirty();
+            struct LeftBrowseSlotCtx {
+                HWND hwnd;
+                std::wstring rightPath;
+                QuickView::BrowseDirection browseDir;
+            };
+            auto* ctx = new LeftBrowseSlotCtx{ hwnd, std::move(rightPath), browseDir };
+            CompareSlotCallback cb;
+            cb.userCtx = ctx;
+            cb.pfn = [](void* u, bool success) {
+                auto* c = static_cast<LeftBrowseSlotCtx*>(u);
+                if (IsWindow(c->hwnd)) {
+                    if (success) MarkCompareDirty();
+                    if (!c->rightPath.empty()) {
+                        LoadImageAsync(c->hwnd, c->rightPath, true, c->browseDir);
+                    }
                 }
-                if (!rightPath.empty()) {
-                    LoadImageAsync(hwnd, rightPath, true, browseDir);
-                }
-            });
+            };
+            cb.cleanup = [](void* u) { delete static_cast<LeftBrowseSlotCtx*>(u); };
+            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, leftPath, cb);
         } else {
             GetPaneContext(PaneSlot::Left).Reset();
             MarkCompareDirty();
@@ -16684,13 +16707,23 @@ void Navigate(HWND hwnd, int direction) {
         }
 
         ArmPairRawFullDecode(rendered, raw);
-        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, rendered, [hwnd, raw](bool success) {
-            if (success) {
-                MarkCompareDirty();
+        struct LeftPairSlotCtx {
+            HWND hwnd;
+            std::wstring raw;
+        };
+        auto* ctx = new LeftPairSlotCtx{ hwnd, raw };
+        CompareSlotCallback cb;
+        cb.userCtx = ctx;
+        cb.pfn = [](void* u, bool success) {
+            auto* c = static_cast<LeftPairSlotCtx*>(u);
+            if (IsWindow(c->hwnd)) {
+                if (success) MarkCompareDirty();
+                LoadImageAsync(c->hwnd, c->raw.c_str());
+                RequestRepaint(PaintLayer::Image | PaintLayer::Static);
             }
-            LoadImageAsync(hwnd, raw.c_str());
-            RequestRepaint(PaintLayer::Image | PaintLayer::Static);
-        });
+        };
+        cb.cleanup = [](void* u) { delete static_cast<LeftPairSlotCtx*>(u); };
+        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, rendered, cb);
         return;
     }
 
@@ -16747,14 +16780,25 @@ void Navigate(HWND hwnd, int direction) {
         QuickView::BrowseDirection browseDir = (direction > 0) ? QuickView::BrowseDirection::FORWARD : QuickView::BrowseDirection::BACKWARD;
 
         if (!leftPath.empty()) {
-            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, leftPath, [hwnd, rightPath, browseDir](bool success){
-                if (success) {
-                    MarkCompareDirty();
+            struct LeftBrowseSlotCtx2 {
+                HWND hwnd;
+                std::wstring rightPath;
+                QuickView::BrowseDirection browseDir;
+            };
+            auto* ctx = new LeftBrowseSlotCtx2{ hwnd, std::move(rightPath), browseDir };
+            CompareSlotCallback cb;
+            cb.userCtx = ctx;
+            cb.pfn = [](void* u, bool success) {
+                auto* c = static_cast<LeftBrowseSlotCtx2*>(u);
+                if (IsWindow(c->hwnd)) {
+                    if (success) MarkCompareDirty();
+                    if (!c->rightPath.empty()) {
+                        LoadImageAsync(c->hwnd, c->rightPath, true, c->browseDir);
+                    }
                 }
-                if (!rightPath.empty()) {
-                    LoadImageAsync(hwnd, rightPath, true, browseDir);
-                }
-            });
+            };
+            cb.cleanup = [](void* u) { delete static_cast<LeftBrowseSlotCtx2*>(u); };
+            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, leftPath, cb);
         } else {
             GetPaneContext(PaneSlot::Left).Reset();
             MarkCompareDirty();
@@ -18123,26 +18167,33 @@ static void ComparePairSideBySide(HWND hwnd, const std::wstring& renderedPath, c
     // Armed immediately before each RAW load (by value: outlives the helper
     // in async callbacks): a load interleaved by EnterMode's message pumping
     // may have cleared the pair tracking.
-    auto armRawFullDecode = [renderedPath, rawPath]() {
-        ArmPairRawFullDecode(renderedPath, rawPath);
-    };
-
     if (viewingRaw) {
         // Left pane captured the RAW -- replace it with the rendered sibling,
         // then reload the right pane as RAW at full decode. Unconditionally:
         // stale metadata may claim full decode while the resident pixels are
         // an upscaled preview; a genuine full frame re-hits the cache instantly.
-        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, renderedPath, [hwnd, rawPath, armRawFullDecode](bool success) {
-            if (success) {
-                MarkCompareDirty();
+        struct LeftArmSlotCtx {
+            HWND hwnd;
+            std::wstring rawPath;
+            std::wstring renderedPath;
+        };
+        auto* ctx = new LeftArmSlotCtx{ hwnd, rawPath, renderedPath };
+        CompareSlotCallback cb;
+        cb.userCtx = ctx;
+        cb.pfn = [](void* u, bool success) {
+            auto* c = static_cast<LeftArmSlotCtx*>(u);
+            if (IsWindow(c->hwnd)) {
+                if (success) MarkCompareDirty();
+                ArmPairRawFullDecode(c->renderedPath, c->rawPath);
+                LoadImageAsync(c->hwnd, c->rawPath.c_str());
+                RequestRepaint(PaintLayer::Image | PaintLayer::Static);
             }
-            armRawFullDecode();
-            LoadImageAsync(hwnd, rawPath.c_str());
-            RequestRepaint(PaintLayer::Image | PaintLayer::Static);
-        });
+        };
+        cb.cleanup = [](void* u) { delete static_cast<LeftArmSlotCtx*>(u); };
+        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, renderedPath, cb);
     } else {
         // Left pane captured the rendered image -- load the RAW on the right
-        armRawFullDecode();
+        ArmPairRawFullDecode(renderedPath, rawPath);
         LoadImageAsync(hwnd, rawPath.c_str());
     }
 
@@ -18179,7 +18230,7 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
     case HotkeyAction::NavNext:
         if (alt && GetPaneContext(PaneSlot::Primary).resource.animator) {
             HandleAnimFrameStep(hwnd, true);
-        } else if (CheckUnsavedChanges(hwnd)) {
+        } else if (CheckUnsavedChanges(hwnd, QuickView::PendingAction::NavigateNext)) {
             Navigate(hwnd, 1);
         }
         return true;
@@ -18187,7 +18238,7 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
     case HotkeyAction::NavPrev:
         if (alt && GetPaneContext(PaneSlot::Primary).resource.animator) {
             HandleAnimFrameStep(hwnd, false);
-        } else if (CheckUnsavedChanges(hwnd)) {
+        } else if (CheckUnsavedChanges(hwnd, QuickView::PendingAction::NavigatePrev)) {
             Navigate(hwnd, -1);
         }
         return true;
@@ -18388,7 +18439,7 @@ bool HandleHotkeyAction(HWND hwnd, HotkeyAction action) {
                 g_osd.Show(hwnd, AppStrings::OSD_AnimPaused, true);
             }
             RequestRepaint(PaintLayer::Dynamic);
-        } else if (CheckUnsavedChanges(hwnd)) {
+        } else if (CheckUnsavedChanges(hwnd, QuickView::PendingAction::NavigateNext)) {
             Navigate(hwnd, 1);
         }
         return true;

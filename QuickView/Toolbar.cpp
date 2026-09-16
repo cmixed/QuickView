@@ -355,6 +355,17 @@ void Toolbar::UpdateLayout(float winW, float winH) {
     if (m_compareMode) {
       if (!isCompareButton(btn.id) && !isAlwaysVisible(btn.id)) return false;
       if (btn.id == ToolbarButtonID::CompareRawToggle && !btn.isWarning) return false;
+      if (btn.id == ToolbarButtonID::CompareSave) {
+        auto& primaryPane = GetPaneContext(PaneSlot::Primary);
+        auto& leftPane = GetPaneContext(PaneSlot::Left);
+        bool hasCrop = primaryPane.editState.HasCrop || leftPane.editState.HasCrop || g_cropState.IsActive;
+        bool hasSr = (primaryPane.metadata.HasSr && primaryPane.metadata.SrScale > 1.0f) ||
+                     (primaryPane.resource.promotedSrBitmap != nullptr) ||
+                     (primaryPane.resource.currentSrLevel > 1.001f) ||
+                     (leftPane.metadata.HasSr && leftPane.metadata.SrScale > 1.0f);
+        bool isDirty = primaryPane.editState.IsDirty || leftPane.editState.IsDirty;
+        return hasCrop || hasSr || isDirty;
+      }
       return true;
     }
 

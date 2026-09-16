@@ -91,7 +91,8 @@ public:
     void Show(HWND hwnd, int initialWidth, int initialHeight, const std::wstring& originalPath, 
               PendingAction pending = PendingAction::None,
               PaneSlot targetSlot = PaneSlot::Primary,
-              std::shared_ptr<RawImageFrame> sourceFrame = nullptr);
+              std::shared_ptr<RawImageFrame> sourceFrame = nullptr,
+              ExportMode mode = ExportMode::NormalExport);
     void Hide();
     bool IsVisible() const { return m_isVisible; }
     bool IsInputFocused() const { 

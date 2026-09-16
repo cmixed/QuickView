@@ -45,7 +45,7 @@ extern std::unique_ptr<ImageEngine> g_imageEngine;
 #include "CompositionEngine.h"
 extern CompositionEngine* g_compEngine;
 
-extern std::function<void(bool)> g_leftPaneReadyCallback;
+extern CompareSlotCallback g_leftPaneReadyCallback;
 extern void MarkCompareDirty();
 extern void ReloadCurrentImage(HWND hwnd);
 extern float ComputeZoomMultiplier(float delta, bool fineInterval);
@@ -241,10 +241,11 @@ void AdjustWindowToImage(HWND hwnd);
 
 
 
-FireAndForget CompareController::LoadImageIntoLeftSlot([[maybe_unused]] HWND hwnd, std::wstring path, std::function<void(bool)> callback) {
+FireAndForget CompareController::LoadImageIntoLeftSlot([[maybe_unused]] HWND hwnd, std::wstring path, CompareSlotCallback callback) {
     const std::wstring localPath = path;
     if (localPath.empty() || !g_imageEngine) {
-        if (callback) callback(false);
+        callback.Invoke(false);
+        callback.Reset();
         co_return;
     }
 
@@ -547,14 +548,29 @@ void CompareController::EnterMode(HWND hwnd) {
             }
 
             if (!leftPath.empty()) {
-                LoadImageIntoLeftSlot(hwnd, leftPath, [hwnd, rightPath, this](bool success) {
-                    if (success) {
-                        MarkDirty();
+                struct LeftSlotLoadCtx {
+                    HWND hwnd;
+                    std::wstring rightPath;
+                    CompareController* ctrl;
+                };
+                auto* ctx = new LeftSlotLoadCtx{ hwnd, std::move(rightPath), this };
+                CompareSlotCallback cb;
+                cb.userCtx = ctx;
+                cb.pfn = [](void* u, bool success) {
+                    auto* c = static_cast<LeftSlotLoadCtx*>(u);
+                    if (IsWindow(c->hwnd)) {
+                        if (success) {
+                            c->ctrl->MarkDirty();
+                        }
+                        if (!c->rightPath.empty() && c->rightPath != GetPaneContext(PaneSlot::Primary).path) {
+                            LoadImageAsync(c->hwnd, c->rightPath, false);
+                        }
                     }
-                    if (!rightPath.empty() && rightPath != GetPaneContext(PaneSlot::Primary).path) {
-                        LoadImageAsync(hwnd, rightPath, false);
-                    }
-                });
+                };
+                cb.cleanup = [](void* u) {
+                    delete static_cast<LeftSlotLoadCtx*>(u);
+                };
+                LoadImageIntoLeftSlot(hwnd, leftPath, cb);
             }
             else {
                 GetPaneContext(PaneSlot::Left).Reset();
@@ -617,6 +633,9 @@ void CompareController::EnterMode(HWND hwnd) {
     g_toolbar.SetCompareMode(true);
     g_toolbar.SetCompareSyncStates(m_context.Compare.syncZoom, m_context.Compare.syncPan);
     g_toolbar.SetCompareInfoState(g_runtime.ShowCompareInfo);
+    RECT rcToolbar{};
+    GetClientRect(hwnd, &rcToolbar);
+    g_toolbar.UpdateLayout((float)rcToolbar.right, (float)rcToolbar.bottom);
     // [Compare RAW] Initial state: right pane is selected by default
     RefreshCompareRawUI(hwnd);
 
@@ -677,6 +696,9 @@ void CompareController::EnterSrCompareMode(HWND hwnd) {
     g_toolbar.SetCompareMode(true);
     g_toolbar.SetCompareSyncStates(m_context.Compare.syncZoom, m_context.Compare.syncPan);
     g_toolbar.SetCompareInfoState(g_runtime.ShowCompareInfo);
+    RECT rcToolbar{};
+    GetClientRect(hwnd, &rcToolbar);
+    g_toolbar.UpdateLayout((float)rcToolbar.right, (float)rcToolbar.bottom);
     RefreshCompareRawUI(hwnd);
 
     // Show OSD banner
@@ -695,7 +717,7 @@ void CompareController::ExitMode(HWND hwnd) {
 
     GetPaneContext(PaneSlot::Left).Reset();
     g_isLeftPaneDecoding = false;
-    g_leftPaneReadyCallback = nullptr;
+    g_leftPaneReadyCallback.Reset();
 
     GetPaneContext(PaneSlot::Primary).view.CompareActive = false;
     GetPaneContext(PaneSlot::Primary).view.CompareSplitRatio = 0.5f;
