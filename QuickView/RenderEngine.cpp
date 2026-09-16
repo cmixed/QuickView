@@ -28,31 +28,7 @@
 
 extern AppConfig g_config;
 
-struct CRenderEngine::GamutProgram {
-  struct AnalyticData {
-    std::array<float, 9> srcToXyz = {};
-    std::array<float, 9> xyzToDst = {};
-    std::vector<float> trcR;
-    std::vector<float> trcG;
-    std::vector<float> trcB;
-    ComPtr<ID3D11ShaderResourceView> trcSrvR;
-    ComPtr<ID3D11ShaderResourceView> trcSrvG;
-    ComPtr<ID3D11ShaderResourceView> trcSrvB;
-  };
 
-  struct LutData {
-    int edge = 0;
-    std::vector<uint8_t> overflowLut;
-    ComPtr<ID3D11Texture3D> overflowTexture;
-    ComPtr<ID3D11ShaderResourceView> overflowSrv;
-  };
-
-  GamutBackendKind backend = GamutBackendKind::Unknown;
-  std::wstring srcName;
-  std::wstring dstName;
-  AnalyticData analytic;
-  LutData lut;
-};
 
 namespace {
 template <typename T>
@@ -1870,17 +1846,17 @@ HRESULT CRenderEngine::AnalyzeGamutWarningIcc(
   key = HashBytes(key, &options.acmAware, sizeof(options.acmAware));
   key = HashWString(key, options.displayState.gdiDeviceName);
 
-  std::shared_ptr<GamutProgram> program;
+  const GamutProgram* program = nullptr;
   {
     std::scoped_lock lock(m_gamutProgramCacheMutex);
     auto it = m_gamutProgramCache.find(key);
     if (it != m_gamutProgramCache.end()) {
-      program = it->second;
+      program = it->second.get();
     }
   }
 
   if (!program) {
-    auto compiled = std::make_shared<GamutProgram>();
+    auto compiled = std::make_unique<GamutProgram>();
     ScopedCmsProfile srcProfile;
     ScopedCmsProfile dstProfile;
     if (!OpenCmsProfileFromBlob(srcBlob, &srcProfile)) {
@@ -1910,9 +1886,8 @@ HRESULT CRenderEngine::AnalyzeGamutWarningIcc(
 
     {
       std::scoped_lock lock(m_gamutProgramCacheMutex);
-      m_gamutProgramCache[key] = compiled;
+      program = m_gamutProgramCache.insert_or_assign(key, std::move(compiled)).first->second.get();
     }
-    program = std::move(compiled);
   }
 
   auto dispatchWithProgram = [&](int maxDimension,
@@ -2146,23 +2121,41 @@ HRESULT CRenderEngine::ResolveSourceColorContext(
 
   // Auto (1) and Gray (5): Use embedded ICC profile if available
   if (!frame.iccProfile.empty()) {
-    ColorContextCacheKey key{frame.iccProfile};
+    const uint8_t* pData = frame.iccProfile.data();
+    const size_t dataSize = frame.iccProfile.size();
+
+    // 64-bit FNV-1a hash (zero heap allocation)
+    uint64_t hash = 14695981039346656037ULL;
+    for (size_t i = 0; i < dataSize; ++i) {
+      hash = (hash ^ pData[i]) * 1099511628211ULL;
+    }
+
     std::lock_guard<std::mutex> lock(m_cacheMutex);
-    auto it = m_colorContextCache.find(key);
-    if (it != m_colorContextCache.end()) {
-      *outContext = it->second.Get();
-      if (*outContext)
-        (*outContext)->AddRef();
-      return S_OK;
+    for (size_t i = 0; i < m_colorContextCount; ++i) {
+      auto& entry = m_colorContextCache[i];
+      if (entry.hash == hash && entry.size == dataSize &&
+          entry.profileData.size() == dataSize &&
+          std::memcmp(entry.profileData.data(), pData, dataSize) == 0) {
+        return entry.context.CopyTo(outContext);
+      }
     }
 
     ComPtr<ID2D1ColorContext> embeddedContext;
     if (SUCCEEDED(m_d2dContext->CreateColorContext(
-            D2D1_COLOR_SPACE_CUSTOM, frame.iccProfile.data(),
-            static_cast<UINT32>(frame.iccProfile.size()), &embeddedContext))) {
-      m_colorContextCache[key] = embeddedContext;
-      *outContext = embeddedContext.Detach();
-      return S_OK;
+            D2D1_COLOR_SPACE_CUSTOM, pData,
+            static_cast<UINT32>(dataSize), &embeddedContext))) {
+      size_t slot = 0;
+      if (m_colorContextCount < COLOR_CONTEXT_CACHE_CAPACITY) {
+        slot = m_colorContextCount++;
+      } else {
+        slot = m_colorContextNextSlot++ % COLOR_CONTEXT_CACHE_CAPACITY;
+      }
+      auto& entry = m_colorContextCache[slot];
+      entry.hash = hash;
+      entry.size = dataSize;
+      entry.profileData = frame.iccProfile;
+      entry.context = embeddedContext;
+      return embeddedContext.CopyTo(outContext);
     }
   }
 

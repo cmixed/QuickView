@@ -13,16 +13,18 @@
 #include "ComputeEngine.h"
 #include "Plugin/qvx_sr.h"
 #include <mutex>
-#include <map>
+#include <array>
 #include <string>
 #include <vector>
 
 // Direct2D Effects GUIDs
 #include <d2d1effects.h>
 
-struct ColorContextCacheKey {
-    std::vector<uint8_t> data;
-    bool operator<(const ColorContextCacheKey& other) const { return data < other.data; }
+struct ColorContextCacheEntry {
+    uint64_t hash = 0;
+    size_t size = 0;
+    std::vector<uint8_t> profileData;
+    Microsoft::WRL::ComPtr<ID2D1ColorContext> context;
 };
 
 bool TryLoadProfileBytesForPrimaries(QuickView::ColorPrimaries primaries, std::vector<uint8_t>* outBytes);
@@ -33,8 +35,6 @@ bool TryLoadProfileBytesForPrimaries(QuickView::ColorPrimaries primaries, std::v
 /// </summary>
 class CRenderEngine {
 public:
-    struct GamutProgram;
-
     enum class GamutTargetKind : uint8_t {
         ScreenTarget = 0,
         ProofTarget
@@ -51,6 +51,32 @@ public:
         AnalyticMatrixTrc,
         Lut3DCompiled,
         CpuReferenceFallback
+    };
+
+    struct GamutProgram {
+        struct AnalyticData {
+            std::array<float, 9> srcToXyz = {};
+            std::array<float, 9> xyzToDst = {};
+            std::vector<float> trcR;
+            std::vector<float> trcG;
+            std::vector<float> trcB;
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> trcSrvR;
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> trcSrvG;
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> trcSrvB;
+        };
+
+        struct LutData {
+            int edge = 0;
+            std::vector<uint8_t> overflowLut;
+            Microsoft::WRL::ComPtr<ID3D11Texture3D> overflowTexture;
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> overflowSrv;
+        };
+
+        GamutBackendKind backend = GamutBackendKind::Unknown;
+        std::wstring srcName;
+        std::wstring dstName;
+        AnalyticData analytic;
+        LutData lut;
     };
 
     struct GamutWarningAnalysisOptions {
@@ -179,9 +205,12 @@ public:
     ID2D1DeviceContext* GetDeviceContext() const { return m_d2dContext.Get(); }
 
 private:
-    std::map<ColorContextCacheKey, Microsoft::WRL::ComPtr<ID2D1ColorContext>> m_colorContextCache;
+    static constexpr size_t COLOR_CONTEXT_CACHE_CAPACITY = 16;
+    std::array<ColorContextCacheEntry, COLOR_CONTEXT_CACHE_CAPACITY> m_colorContextCache;
+    size_t m_colorContextCount = 0;
+    size_t m_colorContextNextSlot = 0;
     std::mutex m_cacheMutex;
-    mutable std::unordered_map<size_t, std::shared_ptr<GamutProgram>> m_gamutProgramCache;
+    mutable std::unordered_map<size_t, std::unique_ptr<GamutProgram>> m_gamutProgramCache;
     mutable std::mutex m_gamutProgramCacheMutex;
     HRESULT CreateDeviceResources();
     HRESULT ResolveSourceColorContext(const QuickView::RawImageFrame& frame,

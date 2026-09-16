@@ -22,7 +22,6 @@
 #include <string>
 #include <memory>
 #include <chrono>
-#include <functional>
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "dcomp.lib")
