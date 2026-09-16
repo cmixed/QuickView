@@ -22,10 +22,10 @@ void ShowContextMenu(HWND hwnd, POINT pt, bool hasImage, bool needsExtensionFix,
                      bool isCrossMonitor, bool isCompareMode, bool isPixelArtMode,
                      int cmsMode, bool enableSoftProofing, const std::wstring& softProofProfilePath) {
 
-    std::vector<std::unique_ptr<std::wstring>> menuStrings;
-    auto cacheStr = [&](std::wstring s) -> const wchar_t* {
-        menuStrings.push_back(std::make_unique<std::wstring>(std::move(s)));
-        return menuStrings.back()->c_str();
+    LinearWideStringPool menuStrings;
+    menuStrings.Reserve(512);
+    auto cacheStr = [&](std::wstring_view s) -> const wchar_t* {
+        return menuStrings.Store(s);
     };
 
     auto getHK = [&](HotkeyAction action) -> const wchar_t* {
@@ -33,8 +33,7 @@ void ShowContextMenu(HWND hwnd, POINT pt, bool hasImage, bool needsExtensionFix,
         if (idx >= g_hotkeys.size()) return nullptr;
         std::wstring s = KeyComboToString(g_hotkeys[idx].combo);
         if (s.empty() || s == L"None") return nullptr;
-        menuStrings.push_back(std::make_unique<std::wstring>(std::move(s)));
-        return menuStrings.back()->c_str();
+        return menuStrings.Store(s);
     };
 
     bool isSrAvailable = (QuickView::PluginHost::Instance().GetSrPluginInstallState() != QuickView::PluginInstallState::NotInstalled) &&

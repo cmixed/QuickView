@@ -21,6 +21,47 @@ extern void RequestRepaint(QuickView::PaintLayer layer);
 #define EM_SETCUEBANNER 0x1501
 #endif
 
+namespace {
+
+struct AiActionUiCtx {
+    std::wstring actionName;
+    std::shared_ptr<std::atomic<bool>> taskFinished;
+};
+
+void OnAiActionComplete(void* ctx, const QuickView::AI::ExecutionResult& res) {
+    auto* pCtx = static_cast<AiActionUiCtx*>(ctx);
+    if (pCtx && pCtx->taskFinished) {
+        pCtx->taskFinished->store(true);
+    }
+    if (!IsWindow(g_mainHwnd)) return;
+
+    if (!res.success) {
+        g_osd.EndPersistentTask(g_mainHwnd);
+        QuickView::AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
+        return;
+    }
+
+    if (!res.resultImageData.empty()) {
+        auto* pData = new QuickView::AI::AsyncAiImageResult();
+        pData->imageData = std::move(res.resultImageData);
+        pData->actionName = pCtx ? pCtx->actionName : L"";
+        pData->width = res.imageWidth;
+        pData->height = res.imageHeight;
+        PostMessageW(g_mainHwnd, QuickView::AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
+    } else if (!res.textContent.empty()) {
+        std::wstring displayMsg = (pCtx ? pCtx->actionName : L"") + L": " + res.textContent;
+        g_osd.EndPersistentTask(g_mainHwnd, displayMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 8000);
+    } else {
+        g_osd.EndPersistentTask(g_mainHwnd);
+    }
+}
+
+void CleanAiActionUiCtx(void* ctx) {
+    delete static_cast<AiActionUiCtx*>(ctx);
+}
+
+} // anonymous namespace
+
 namespace QuickView::UI {
 
 AiActionOverlay& AiActionOverlay::Instance() {
@@ -537,28 +578,10 @@ void AiActionOverlay::ExecuteSelectedOrPrompt() {
 
         auto taskFinished = std::make_shared<std::atomic<bool>>(false);
         std::wstring adhocName = customAct.name;
+        auto* ctx = new AiActionUiCtx{ adhocName, taskFinished };
         uint64_t currentTaskId = AI::AiActionManager::Instance().ExecuteAction(
-            customAct, hwnd, [adhocName, taskFinished](const AI::ExecutionResult& res) {
-                taskFinished->store(true);
-                if (!res.success) {
-                    g_osd.EndPersistentTask(g_mainHwnd);
-                    AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
-                    return;
-                }
-                if (!res.resultImageData.empty()) {
-                    auto* pData = new AI::AsyncAiImageResult();
-                    pData->imageData = std::move(res.resultImageData);
-                    pData->actionName = adhocName;
-                    pData->width = res.imageWidth;
-                    pData->height = res.imageHeight;
-                    PostMessageW(g_mainHwnd, AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
-                } else if (!res.textContent.empty()) {
-                    std::wstring displayMsg = adhocName + L": " + res.textContent;
-                    g_osd.EndPersistentTask(g_mainHwnd, displayMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 8000);
-                } else {
-                    g_osd.EndPersistentTask(g_mainHwnd);
-                }
-            }, m_currentPromptText);
+            customAct, hwnd, AI::ActionCallback(OnAiActionComplete, ctx, CleanAiActionUiCtx),
+            m_currentPromptText);
 
         QuickView::RunDetached([hwnd, adhocName, currentTaskId, taskFinished]() {
             auto startTime = std::chrono::steady_clock::now();
@@ -626,29 +649,10 @@ void AiActionOverlay::TriggerAction(size_t filteredIndex) {
     int cropR = hasActiveSelection ? (int)std::round((std::max)(g_cropState.CropLeft, g_cropState.CropRight)) : 0;
     int cropB = hasActiveSelection ? (int)std::round((std::max)(g_cropState.CropTop, g_cropState.CropBottom)) : 0;
 
+    auto* ctx = new AiActionUiCtx{ act.name, taskFinished };
     uint64_t currentTaskId = AI::AiActionManager::Instance().ExecuteAction(
-        act, hwnd, [act, taskFinished](const AI::ExecutionResult& res) {
-            taskFinished->store(true);
-            if (!res.success) {
-                g_osd.EndPersistentTask(g_mainHwnd);
-                AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
-                return;
-            }
-
-            if (!res.resultImageData.empty()) {
-                auto* pData = new AI::AsyncAiImageResult();
-                pData->imageData = std::move(res.resultImageData);
-                pData->actionName = act.name;
-                pData->width = res.imageWidth;
-                pData->height = res.imageHeight;
-                PostMessageW(g_mainHwnd, AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
-            } else if (!res.textContent.empty()) {
-                std::wstring displayMsg = act.name + L": " + res.textContent;
-                g_osd.EndPersistentTask(g_mainHwnd, displayMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 8000);
-            } else {
-                g_osd.EndPersistentTask(g_mainHwnd);
-            }
-        }, m_currentPromptText, cropL, cropT, cropR, cropB);
+        act, hwnd, AI::ActionCallback(OnAiActionComplete, ctx, CleanAiActionUiCtx),
+        m_currentPromptText, cropL, cropT, cropR, cropB);
 
     std::wstring actName = act.name;
     QuickView::RunDetached([hwnd, actName, baseUrl, isSdWebUi, currentTaskId, taskFinished]() {

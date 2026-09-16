@@ -59,6 +59,7 @@ option(ENABLE_LTO  "Enable Link Time Optimization (ThinLTO)" OFF)
 # ============================================================================
 set(QUICKVIEW_SOURCES
     QuickView/main.cpp
+    QuickView/StringUtils.cpp
     QuickView/AsyncJob.cpp
     QuickView/BootPreloader.cpp
     QuickView/ImageExporter.cpp
@@ -476,6 +477,7 @@ add_executable(QuickViewTests
     QuickView/AppStrings.cpp
     QuickView/Plugin/PluginHost.cpp
     QuickView/AsyncJob.cpp
+    QuickView/StringUtils.cpp
     third_party/yyjson/yyjson.c
     QuickView/pch.cpp
 )

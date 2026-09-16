@@ -249,7 +249,7 @@ FireAndForget CompareController::LoadImageIntoLeftSlot([[maybe_unused]] HWND hwn
         co_return;
     }
 
-    g_leftPaneReadyCallback = callback;
+    g_leftPaneReadyCallback = std::move(callback);
     
     // Set left pane state to decoding/loading
     g_isLeftPaneDecoding = true;
@@ -570,7 +570,7 @@ void CompareController::EnterMode(HWND hwnd) {
                 cb.cleanup = [](void* u) {
                     delete static_cast<LeftSlotLoadCtx*>(u);
                 };
-                LoadImageIntoLeftSlot(hwnd, leftPath, cb);
+                LoadImageIntoLeftSlot(hwnd, leftPath, std::move(cb));
             }
             else {
                 GetPaneContext(PaneSlot::Left).Reset();
@@ -756,12 +756,16 @@ void CompareController::ReloadPaneForDisplayChange([[maybe_unused]] HWND hwnd, C
             return;
         }
 
-        LoadImageIntoLeftSlot(hwnd, GetPaneContext(PaneSlot::Left).path, [this](bool success) {
-            if (success) {
-                MarkDirty();
-                RequestRepaint(QuickView::PaintLayer::Image  | QuickView::PaintLayer::Dynamic);
-            }
-        });
+        LoadImageIntoLeftSlot(hwnd, GetPaneContext(PaneSlot::Left).path, CompareSlotCallback(
+            [](void* u, bool success) {
+                if (success) {
+                    auto* self = static_cast<CompareController*>(u);
+                    self->MarkDirty();
+                    RequestRepaint(QuickView::PaintLayer::Image | QuickView::PaintLayer::Dynamic);
+                }
+            },
+            this
+        ));
         return;
     }
 

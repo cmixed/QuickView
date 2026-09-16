@@ -12,6 +12,7 @@
 #include "ImageTypes.h" // [Direct D2D] RawImageFrame
 #include "ImageLoaderSimd.h"
 #include "Plugin/PluginHost.h"
+#include "StringUtils.h"
 #include <DirectXPackedVector.h>
 
 
@@ -281,10 +282,8 @@ std::wstring DescribeLcmsProfile(cmsHPROFILE profile, const wchar_t* fallback) {
   if (cmsGetProfileInfoASCII(profile, cmsInfoDescription, "en", "US",
                              buffer, static_cast<cmsUInt32Number>(sizeof(buffer))) > 0 &&
       buffer[0] != '\0') {
-    const int size = MultiByteToWideChar(CP_UTF8, 0, buffer, -1, nullptr, 0);
-    if (size > 1) {
-      std::wstring wide(size - 1, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, buffer, -1, wide.data(), size);
+    std::wstring wide = QuickView::Utf8ToWide(buffer);
+    if (!wide.empty()) {
       return wide;
     }
   }

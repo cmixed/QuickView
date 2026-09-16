@@ -1381,7 +1381,7 @@ void AiActionManager::BlendMaskGuidedFeathered(
 // --- Execution & Task Lifecycle ---
 uint64_t AiActionManager::ExecuteAction(
     const ActionDesc& action, HWND hwnd,
-    std::function<void(const ExecutionResult&)> onComplete,
+    ActionCallback onComplete,
     std::wstring_view customPrompt,
     int cropL, int cropT, int cropR, int cropB) {
 
@@ -1434,14 +1434,14 @@ uint64_t AiActionManager::ExecuteAction(
 
     if (shouldInpaint && hasSelection) {
         std::wstring promptCopy = actCopy.promptTemplate;
-        QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete]() {
-            InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete);
+        QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete = std::move(onComplete)]() mutable {
+            InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, std::move(onComplete));
         });
         return taskId;
     }
 
-    QuickView::RunDetached([this, taskId, actCopy, profCopy, hwnd, onComplete]() {
-        WorkerThread(taskId, actCopy, profCopy, hwnd, onComplete);
+    QuickView::RunDetached([this, taskId, actCopy, profCopy, hwnd, onComplete = std::move(onComplete)]() mutable {
+        WorkerThread(taskId, actCopy, profCopy, hwnd, std::move(onComplete));
     });
 
     return taskId;
@@ -1519,7 +1519,7 @@ static void ComputeTargetDimensions(
 
 void AiActionManager::WorkerThread(
     uint64_t taskId, ActionDesc action, ModelProfile profile,
-    HWND /*hwnd*/, std::function<void(const ExecutionResult&)> callback) {
+    HWND /*hwnd*/, ActionCallback callback) {
 
     ExecutionResult result;
     result.success = false;
@@ -1993,9 +1993,9 @@ void AiActionManager::FetchModelsAsync(
     std::string baseUrl,
     std::string apiKey,
     ApiProtocol protocol,
-    std::function<void(bool success, const std::vector<std::string>& models, const std::wstring& errorMsg)> onComplete)
+    ModelsCallback onComplete)
 {
-    QuickView::RunDetached([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() {
+    QuickView::RunDetached([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() mutable {
         std::vector<std::string> models;
 
         if (baseUrl.empty()) {
@@ -2226,9 +2226,9 @@ void AiActionManager::TestConnectionAsync(
     std::string baseUrl,
     std::string apiKey,
     ApiProtocol protocol,
-    std::function<void(bool success, int statusCode, int latencyMs, const std::wstring& message)> onComplete)
+    LatencyCallback onComplete)
 {
-    QuickView::RunDetached([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() {
+    QuickView::RunDetached([baseUrl = std::move(baseUrl), apiKey = std::move(apiKey), protocol, onComplete = std::move(onComplete)]() mutable {
         if (baseUrl.empty()) {
             if (onComplete) onComplete(false, 0, 0, AppStrings::AiError_InvalidUrl);
             return;
@@ -2594,7 +2594,7 @@ uint64_t AiActionManager::ExecuteInpaint(
     int cropL, int cropT, int cropR, int cropB,
     std::wstring_view customPrompt,
     HWND hwnd,
-    std::function<void(const ExecutionResult&)> onComplete) {
+    ActionCallback onComplete) {
 
     CancelCurrentTask();
 
@@ -2628,8 +2628,8 @@ uint64_t AiActionManager::ExecuteInpaint(
     ModelProfile profCopy = *profile;
     std::wstring promptCopy(customPrompt);
 
-    QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete]() {
-        InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete);
+    QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete = std::move(onComplete)]() mutable {
+        InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, std::move(onComplete));
     });
 
     return taskId;
@@ -2638,7 +2638,7 @@ uint64_t AiActionManager::ExecuteInpaint(
 void AiActionManager::InpaintWorkerThread(
     uint64_t taskId, int cropL, int cropT, int cropR, int cropB,
     std::wstring prompt, ModelProfile profile, HWND /*hwnd*/,
-    std::function<void(const ExecutionResult&)> callback) {
+    ActionCallback callback) {
 
     ExecutionResult result;
     result.success = false;

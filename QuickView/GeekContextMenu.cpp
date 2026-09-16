@@ -130,7 +130,7 @@ void GeekContextMenu::ShowMenu(HWND parent, int sx, int sy,
                                 std::vector<ActionButton> actions,
                                 std::vector<GeekMenuItem> items,
                                 bool isTouch,
-                                std::vector<std::unique_ptr<std::wstring>> stringCache) {
+                                LinearWideStringPool stringCache) {
     DismissAll();
     EnsureClassRegistered();
 
@@ -402,6 +402,16 @@ LRESULT GeekContextMenu::HandleMsg(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (wp == VK_ESCAPE) { DismissAll(0); return 0; }
         break;
     case WM_MOUSEWHEEL: {
+        POINT pt;
+        GetCursorPos(&pt);
+        if (m_childMenu && m_childMenu->m_hwnd) {
+            RECT childRc;
+            GetWindowRect(m_childMenu->m_hwnd, &childRc);
+            if (PtInRect(&childRc, pt)) {
+                return m_childMenu->HandleMsg(m_childMenu->m_hwnd, msg, wp, lp);
+            }
+        }
+
         if (m_totalBodyH <= m_maxBodyH) return 0;
         CloseSubmenu();
         short delta = static_cast<short>(HIWORD(wp));
@@ -648,11 +658,19 @@ void GeekContextMenu::CalculateLayout() {
     GetMonitorInfoW(hMon, &mi);
     float waH = static_cast<float>(mi.rcWork.bottom - mi.rcWork.top) / m_scale;
 
-    // Use full work area height with safety margin instead of arbitrary 0.85 scaling.
+    // Use full work area height with safety margin for root menu.
+    // For cascading submenus, cap height gracefully so large item lists (like soft proofing profiles)
+    // remain scrollable instead of stretching across the entire monitor.
     const float bottomPad = m_actions.empty() ? 16.0f : MENU_PAD;
     const float nonBodyH = m_bodyStartY + bottomPad;
     constexpr float SCREEN_MARGIN = 8.0f;
-    const float maxAvailableTotalH = std::max(100.0f, waH - SCREEN_MARGIN * 2.0f);
+    float maxAvailableTotalH = std::max(100.0f, waH - SCREEN_MARGIN * 2.0f);
+    if (m_parentMenu != nullptr) {
+        constexpr float MAX_SUBMENU_ITEMS = 16.0f;
+        float submenuMaxH = itemH * MAX_SUBMENU_ITEMS + nonBodyH;
+        float screenCapH = waH * 0.70f;
+        maxAvailableTotalH = (std::min)(maxAvailableTotalH, (std::min)(submenuMaxH, screenCapH));
+    }
     const float calculatedMaxBodyH = std::max(0.0f, maxAvailableTotalH - nonBodyH);
 
     // Provide 4.0 DIP slack to avoid subpixel rounding triggering scroll on high-DPI displays.

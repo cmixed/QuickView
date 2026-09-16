@@ -16,7 +16,7 @@
 #include <memory>
 #include <atomic>
 #include <mutex>
-#include <functional>
+#include <type_traits>
 #include <winhttp.h>
 #include <wincrypt.h>
 #include <commctrl.h>
@@ -24,6 +24,171 @@
 #include "AppContext.h"
 
 namespace QuickView::AI {
+
+struct ActionCallback {
+    void (*pfn)(void* ctx, const ExecutionResult& res) = nullptr;
+    void* ctx = nullptr;
+    void (*cleanup)(void* ctx) = nullptr;
+
+    constexpr ActionCallback() noexcept = default;
+
+    template <typename F>
+        requires std::is_convertible_v<F, void (*)(const ExecutionResult&)>
+    constexpr ActionCallback(F fn) noexcept {
+        void (*simpleFn)(const ExecutionResult&) = fn;
+        if (simpleFn) {
+            ctx = reinterpret_cast<void*>(simpleFn);
+            pfn = [](void* c, const ExecutionResult& r) {
+                if (c) reinterpret_cast<void (*)(const ExecutionResult&)>(c)(r);
+            };
+            cleanup = nullptr;
+        }
+    }
+
+    constexpr ActionCallback(void (*fn)(void*, const ExecutionResult&), void* c, void (*cleanFn)(void*) = nullptr) noexcept
+        : pfn(fn), ctx(c), cleanup(cleanFn) {}
+
+    ~ActionCallback() { Reset(); }
+    ActionCallback(ActionCallback&& o) noexcept : pfn(o.pfn), ctx(o.ctx), cleanup(o.cleanup) {
+        o.pfn = nullptr; o.ctx = nullptr; o.cleanup = nullptr;
+    }
+    ActionCallback(const ActionCallback&) = delete;
+    ActionCallback& operator=(ActionCallback&& o) noexcept {
+        if (this != &o) {
+            Reset();
+            pfn = o.pfn; ctx = o.ctx; cleanup = o.cleanup;
+            o.pfn = nullptr; o.ctx = nullptr; o.cleanup = nullptr;
+        }
+        return *this;
+    }
+    ActionCallback& operator=(const ActionCallback&) = delete;
+
+    void Invoke(const ExecutionResult& res) const {
+        if (pfn) pfn(ctx, res);
+    }
+    void operator()(const ExecutionResult& res) const {
+        Invoke(res);
+    }
+    void Reset() noexcept {
+        if (cleanup && ctx) {
+            cleanup(ctx);
+            ctx = nullptr;
+        }
+        pfn = nullptr;
+        cleanup = nullptr;
+    }
+    explicit operator bool() const noexcept { return pfn != nullptr; }
+};
+
+struct ModelsCallback {
+    void (*pfn)(void* ctx, bool success, const std::vector<std::string>& models, const std::wstring& errorMsg) = nullptr;
+    void* ctx = nullptr;
+    void (*cleanup)(void* ctx) = nullptr;
+
+    constexpr ModelsCallback() noexcept = default;
+
+    template <typename F>
+        requires std::is_convertible_v<F, void (*)(bool, const std::vector<std::string>&, const std::wstring&)>
+    constexpr ModelsCallback(F fn) noexcept {
+        void (*simpleFn)(bool, const std::vector<std::string>&, const std::wstring&) = fn;
+        if (simpleFn) {
+            ctx = reinterpret_cast<void*>(simpleFn);
+            pfn = [](void* c, bool s, const std::vector<std::string>& m, const std::wstring& e) {
+                if (c) reinterpret_cast<void (*)(bool, const std::vector<std::string>&, const std::wstring&)>(c)(s, m, e);
+            };
+            cleanup = nullptr;
+        }
+    }
+
+    constexpr ModelsCallback(void (*fn)(void*, bool, const std::vector<std::string>&, const std::wstring&), void* c, void (*cleanFn)(void*) = nullptr) noexcept
+        : pfn(fn), ctx(c), cleanup(cleanFn) {}
+
+    ~ModelsCallback() { Reset(); }
+    ModelsCallback(ModelsCallback&& o) noexcept : pfn(o.pfn), ctx(o.ctx), cleanup(o.cleanup) {
+        o.pfn = nullptr; o.ctx = nullptr; o.cleanup = nullptr;
+    }
+    ModelsCallback(const ModelsCallback&) = delete;
+    ModelsCallback& operator=(ModelsCallback&& o) noexcept {
+        if (this != &o) {
+            Reset();
+            pfn = o.pfn; ctx = o.ctx; cleanup = o.cleanup;
+            o.pfn = nullptr; o.ctx = nullptr; o.cleanup = nullptr;
+        }
+        return *this;
+    }
+    ModelsCallback& operator=(const ModelsCallback&) = delete;
+
+    void Invoke(bool success, const std::vector<std::string>& models, const std::wstring& errorMsg) const {
+        if (pfn) pfn(ctx, success, models, errorMsg);
+    }
+    void operator()(bool success, const std::vector<std::string>& models, const std::wstring& errorMsg) const {
+        Invoke(success, models, errorMsg);
+    }
+    void Reset() noexcept {
+        if (cleanup && ctx) {
+            cleanup(ctx);
+            ctx = nullptr;
+        }
+        pfn = nullptr;
+        cleanup = nullptr;
+    }
+    explicit operator bool() const noexcept { return pfn != nullptr; }
+};
+
+struct LatencyCallback {
+    void (*pfn)(void* ctx, bool success, int statusCode, int latencyMs, const std::wstring& message) = nullptr;
+    void* ctx = nullptr;
+    void (*cleanup)(void* ctx) = nullptr;
+
+    constexpr LatencyCallback() noexcept = default;
+
+    template <typename F>
+        requires std::is_convertible_v<F, void (*)(bool, int, int, const std::wstring&)>
+    constexpr LatencyCallback(F fn) noexcept {
+        void (*simpleFn)(bool, int, int, const std::wstring&) = fn;
+        if (simpleFn) {
+            ctx = reinterpret_cast<void*>(simpleFn);
+            pfn = [](void* c, bool s, int code, int lat, const std::wstring& m) {
+                if (c) reinterpret_cast<void (*)(bool, int, int, const std::wstring&)>(c)(s, code, lat, m);
+            };
+            cleanup = nullptr;
+        }
+    }
+
+    constexpr LatencyCallback(void (*fn)(void*, bool, int, int, const std::wstring&), void* c, void (*cleanFn)(void*) = nullptr) noexcept
+        : pfn(fn), ctx(c), cleanup(cleanFn) {}
+
+    ~LatencyCallback() { Reset(); }
+    LatencyCallback(LatencyCallback&& o) noexcept : pfn(o.pfn), ctx(o.ctx), cleanup(o.cleanup) {
+        o.pfn = nullptr; o.ctx = nullptr; o.cleanup = nullptr;
+    }
+    LatencyCallback(const LatencyCallback&) = delete;
+    LatencyCallback& operator=(LatencyCallback&& o) noexcept {
+        if (this != &o) {
+            Reset();
+            pfn = o.pfn; ctx = o.ctx; cleanup = o.cleanup;
+            o.pfn = nullptr; o.ctx = nullptr; o.cleanup = nullptr;
+        }
+        return *this;
+    }
+    LatencyCallback& operator=(const LatencyCallback&) = delete;
+
+    void Invoke(bool success, int statusCode, int latencyMs, const std::wstring& message) const {
+        if (pfn) pfn(ctx, success, statusCode, latencyMs, message);
+    }
+    void operator()(bool success, int statusCode, int latencyMs, const std::wstring& message) const {
+        Invoke(success, statusCode, latencyMs, message);
+    }
+    void Reset() noexcept {
+        if (cleanup && ctx) {
+            cleanup(ctx);
+            ctx = nullptr;
+        }
+        pfn = nullptr;
+        cleanup = nullptr;
+    }
+    explicit operator bool() const noexcept { return pfn != nullptr; }
+};
 
 class AiActionManager {
 public:
@@ -59,14 +224,14 @@ public:
     // --- Execution & Task Lifecycle ---
     uint64_t ExecuteAction(
         const ActionDesc& action, HWND hwnd,
-        std::function<void(const ExecutionResult&)> onComplete,
+        ActionCallback onComplete,
         std::wstring_view customPrompt = L"",
         int cropL = 0, int cropT = 0, int cropR = 0, int cropB = 0);
     uint64_t ExecuteInpaint(
         int cropL, int cropT, int cropR, int cropB,
         std::wstring_view customPrompt,
         HWND hwnd,
-        std::function<void(const ExecutionResult&)> onComplete);
+        ActionCallback onComplete);
     void CancelCurrentTask();
     bool IsRunning() const { return m_isRunning.load(); }
     uint64_t GetCurrentTaskId() const { return m_currentTaskId.load(); }
@@ -76,14 +241,14 @@ public:
         std::string baseUrl,
         std::string apiKey,
         ApiProtocol protocol,
-        std::function<void(bool success, const std::vector<std::string>& models, const std::wstring& errorMsg)> onComplete);
+        ModelsCallback onComplete);
 
     // --- Connection Testing & Latency Probing ---
     void TestConnectionAsync(
         std::string baseUrl,
         std::string apiKey,
         ApiProtocol protocol,
-        std::function<void(bool success, int statusCode, int latencyMs, const std::wstring& message)> onComplete);
+        LatencyCallback onComplete);
 
     // --- Error Formatting & Native Dialog Presentation ---
     static void ExtractSemanticError(
@@ -131,11 +296,11 @@ private:
     void InitDefaultTemplates();
 
     // Worker thread function
-    void WorkerThread(uint64_t taskId, ActionDesc action, ModelProfile profile, HWND hwnd, std::function<void(const ExecutionResult&)> callback);
+    void WorkerThread(uint64_t taskId, ActionDesc action, ModelProfile profile, HWND hwnd, ActionCallback callback);
     void InpaintWorkerThread(
         uint64_t taskId, int cropL, int cropT, int cropR, int cropB,
         std::wstring prompt, ModelProfile profile, HWND hwnd,
-        std::function<void(const ExecutionResult&)> callback);
+        ActionCallback callback);
 
     bool OpenAiHttpRequest(
         const wchar_t* userAgent,

@@ -3,6 +3,7 @@
 #include "AppStrings.h"
 #include "ArchiveVFS.h"
 #include "yyjson.h"
+#include "StringUtils.h"
 #include <cwchar>
 #include <cstdlib>
 #include <charconv>
@@ -465,14 +466,10 @@ std::wstring PluginHost::GetModelDisplayName(const std::string& modelId) const {
     auto models = GetCurrentSrModels();
     for (const auto& m : models) {
         if (m.modelId == modelId) {
-            wchar_t wName[128] = { 0 };
-            MultiByteToWideChar(CP_UTF8, 0, m.displayName.c_str(), -1, wName, 128);
-            return wName;
+            return QuickView::Utf8ToWide(m.displayName);
         }
     }
-    wchar_t wFallback[128] = { 0 };
-    MultiByteToWideChar(CP_UTF8, 0, modelId.c_str(), -1, wFallback, 128);
-    return wFallback;
+    return QuickView::Utf8ToWide(modelId);
 }
 
 std::vector<SrParamEntry> PluginHost::GetCurrentSrParams() const {
@@ -562,9 +559,7 @@ void PluginHost::LoadConfig(const wchar_t* iniPath) {
 
     wchar_t modelBuf[128] = { 0 };
     GetPrivateProfileStringW(L"SuperResolution", L"SrModelId", L"realesr-animevideov3-auto", modelBuf, 128, iniPath);
-    char modelIdUtf8[256] = { 0 };
-    WideCharToMultiByte(CP_UTF8, 0, modelBuf, -1, modelIdUtf8, sizeof(modelIdUtf8), nullptr, nullptr);
-    m_srModelId = modelIdUtf8;
+    m_srModelId = QuickView::WideToUtf8(modelBuf);
     if (m_srModelId.empty()) {
         m_srModelId = "realesr-animevideov3-auto";
     }
@@ -609,8 +604,8 @@ void PluginHost::LoadConfig(const wchar_t* iniPath) {
     // Load plugin-specific dynamic parameters from [Plugin.<plugin_id>] section
     EnsureSrModuleLoaded();
     const char* pluginId = (m_srHeader && m_srHeader->plugin_id) ? m_srHeader->plugin_id : "sr_ncnn_vulkan";
-    wchar_t section[128];
-    MultiByteToWideChar(CP_UTF8, 0, pluginId, -1, section, 128);
+    wchar_t section[128] = { 0 };
+    QuickView::Utf8ToWide(pluginId, section);
     std::wstring fullSection = L"Plugin." + std::wstring(section);
 
     if (m_srHeader && m_srVTable && m_srVTable->get_param_count && m_srVTable->get_param_desc) {
@@ -618,9 +613,9 @@ void PluginHost::LoadConfig(const wchar_t* iniPath) {
         for (uint32_t i = 0; i < count; ++i) {
             const QVX_ParamDesc* pDesc = m_srVTable->get_param_desc(i);
             if (!pDesc || !pDesc->id) continue;
-            wchar_t keyWide[64];
+            wchar_t keyWide[64] = { 0 };
             wchar_t valWide[64] = { 0 };
-            MultiByteToWideChar(CP_UTF8, 0, pDesc->id, -1, keyWide, 64);
+            QuickView::Utf8ToWide(pDesc->id, keyWide);
             if (GetPrivateProfileStringW(fullSection.c_str(), keyWide, L"", valWide, 64, iniPath) > 0) {
                 wchar_t* pEnd = nullptr;
                 float fVal = wcstof(valWide, &pEnd);
@@ -631,9 +626,9 @@ void PluginHost::LoadConfig(const wchar_t* iniPath) {
         // Fallback standard parameters if plugin is not loaded during cold boot
         const char* fallbackKeys[] = { "tile_size", "denoise" };
         for (const char* k : fallbackKeys) {
-            wchar_t keyWide[64];
+            wchar_t keyWide[64] = { 0 };
             wchar_t valWide[64] = { 0 };
-            MultiByteToWideChar(CP_UTF8, 0, k, -1, keyWide, 64);
+            QuickView::Utf8ToWide(k, keyWide);
             if (GetPrivateProfileStringW(fullSection.c_str(), keyWide, L"", valWide, 64, iniPath) > 0) {
                 wchar_t* pEnd = nullptr;
                 float fVal = wcstof(valWide, &pEnd);
@@ -655,7 +650,7 @@ void PluginHost::SaveConfig(const wchar_t* iniPath) const {
     WritePrivateProfileStringW(L"SuperResolution", L"SrPluginPath", relativeForIni.c_str(), iniPath);
 
     wchar_t modelWide[128] = { 0 };
-    MultiByteToWideChar(CP_UTF8, 0, m_srModelId.c_str(), -1, modelWide, 128);
+    QuickView::Utf8ToWide(m_srModelId, modelWide);
     WritePrivateProfileStringW(L"SuperResolution", L"SrModelId", modelWide, iniPath);
 
     WritePrivateProfileStringW(L"SuperResolution", L"SrAutoTrigger", m_srAutoTrigger.load(std::memory_order_relaxed) ? L"1" : L"0", iniPath);
@@ -680,13 +675,13 @@ void PluginHost::SaveConfig(const wchar_t* iniPath) const {
 
     // Save all dynamic params under active plugin ID section
     const char* pluginId = (m_srHeader && m_srHeader->plugin_id) ? m_srHeader->plugin_id : "sr_ncnn_vulkan";
-    wchar_t section[128];
-    MultiByteToWideChar(CP_UTF8, 0, pluginId, -1, section, 128);
+    wchar_t section[128] = { 0 };
+    QuickView::Utf8ToWide(pluginId, section);
     std::wstring fullSection = L"Plugin." + std::wstring(section);
     for (const auto& kv : m_dynamicParams) {
-        wchar_t keyWide[64];
-        wchar_t valWide[32];
-        MultiByteToWideChar(CP_UTF8, 0, kv.first.c_str(), -1, keyWide, 64);
+        wchar_t keyWide[64] = { 0 };
+        wchar_t valWide[32] = { 0 };
+        QuickView::Utf8ToWide(kv.first, keyWide);
         swprintf_s(valWide, L"%.4f", kv.second);
         WritePrivateProfileStringW(fullSection.c_str(), keyWide, valWide, iniPath);
     }
@@ -1064,9 +1059,7 @@ static bool WinHttpDownloadSingleUrl(
                 wchar_t locBuf[2048] = { 0 };
                 DWORD locSize = sizeof(locBuf);
                 if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, locBuf, &locSize, WINHTTP_NO_HEADER_INDEX)) {
-                    char nextUrlBuf[2048] = { 0 };
-                    WideCharToMultiByte(CP_UTF8, 0, locBuf, -1, nextUrlBuf, sizeof(nextUrlBuf), nullptr, nullptr);
-                    std::string nextUrl = nextUrlBuf;
+                    std::string nextUrl = QuickView::WideToUtf8(locBuf);
                     if (nextUrl.find("://") == std::string::npos) {
                         if (!nextUrl.empty() && nextUrl[0] == '/') {
                             nextUrl = (isHttps ? "https://" : "http://") + hostStr + nextUrl;
@@ -1231,9 +1224,7 @@ bool PluginHost::DownloadPlugin(const std::wstring& pluginName, const std::strin
 
     std::string url = downloadUrl;
     if (url.empty()) {
-        char nameBuf[128] = { 0 };
-        WideCharToMultiByte(CP_UTF8, 0, pluginName.c_str(), -1, nameBuf, sizeof(nameBuf), nullptr, nullptr);
-        url = std::string("https://justnullname.github.io/QuickView/plugins/") + nameBuf;
+        url = std::string("https://justnullname.github.io/QuickView/plugins/") + QuickView::WideToUtf8(pluginName);
     }
 
     bool isZip = (url.find(".zip") != std::string::npos || pluginName.ends_with(L".zip"));

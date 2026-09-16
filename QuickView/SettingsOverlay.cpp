@@ -15,7 +15,6 @@
 #include <cmath>
 #include <Shlobj.h>
 #include <commdlg.h>
-#include <functional>
 #include "UpdateManager.h"
 #include <vector>
 #include <shellapi.h>
@@ -295,11 +294,8 @@ std::wstring GetSystemInfo() {
     SYSTEM_INFO si; GetNativeSystemInfo(&si);
     if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64) arch = L"ARM64";
 
-    // 3. SIMD (via Highway runtime dispatch)
     const char* hwTarget = ImageLoaderSimd::GetActiveTargetName();
-    int len = MultiByteToWideChar(CP_UTF8, 0, hwTarget, -1, nullptr, 0);
-    std::wstring targetW(len > 0 ? len - 1 : 0, L'\0');
-    if (len > 0) MultiByteToWideChar(CP_UTF8, 0, hwTarget, -1, targetW.data(), len);
+    std::wstring targetW = QuickView::Utf8ToWide(hwTarget ? hwTarget : "");
     std::wstring simd = L"SIMD: Highway " + targetW + L" [Active]";
 
     return osVer + L" | " + arch + L" | " + simd;
@@ -1004,6 +1000,52 @@ namespace {
     using QuickView::WideToUtf8;
     using QuickView::Utf8ToWide;
 
+    struct FetchModelsSettingsCtx {
+        size_t pIdx = 0;
+        SettingsOverlay* ov = nullptr;
+    };
+
+    static void OnFetchModelsOverlayComplete(void* u, bool success, const std::vector<std::string>& models, const std::wstring& errMsg) {
+        auto* p = static_cast<FetchModelsSettingsCtx*>(u);
+        if (!p) return;
+        size_t pIdx = p->pIdx;
+        SettingsOverlay* ov = p->ov;
+        if (pIdx < s_aiUi.profileIsFetchingModels.size()) {
+            s_aiUi.profileIsFetchingModels[pIdx] = false;
+        }
+        if (!IsWindow(::g_mainHwnd)) return;
+
+        if (!success) {
+            std::wstring msg = (AppStrings::OSD_AiFetchModelsFailed ? AppStrings::OSD_AiFetchModelsFailed : L"Failed to fetch models: ") + errMsg;
+            ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 4000);
+            if (ov) ov->RequestRebuild();
+            return;
+        }
+
+        auto& mgr = QuickView::AI::AiActionManager::Instance();
+        auto& profiles = mgr.GetProfiles();
+        if (pIdx < profiles.size()) {
+            profiles[pIdx].fetchedModels = models;
+            if (!models.empty() && profiles[pIdx].defaultModel.empty()) {
+                profiles[pIdx].defaultModel = models[0];
+                if (pIdx < s_aiUi.profileModels.size()) {
+                    s_aiUi.profileModels[pIdx] = Utf8ToWide(models[0]);
+                }
+            }
+            mgr.SaveConfig();
+        }
+
+        wchar_t countBuf[128] = { 0 };
+        const wchar_t* succFmt = AppStrings::OSD_AiFetchModelsSuccessFormat ? AppStrings::OSD_AiFetchModelsSuccessFormat : L"Fetched %zu available models";
+        swprintf_s(countBuf, succFmt, models.size());
+        ::g_osd.Show(::g_mainHwnd, countBuf, false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
+        if (ov) ov->RequestRebuild();
+    }
+
+    static void CleanFetchModelsSettingsCtx(void* u) {
+        delete static_cast<FetchModelsSettingsCtx*>(u);
+    }
+
     static std::wstring FormatMaskedKey(const std::wstring& plain) {
         if (plain.empty()) return L"";
         if (plain.length() <= 8) {
@@ -1520,13 +1562,7 @@ namespace {
                         std::wstring newVal = AppContext::GetInstance().DialogCtrl->ShowInputDialog(
                             ::g_mainHwnd, L"", L"", curModel, L"OK");
                         if (!newVal.empty()) {
-                            int len = WideCharToMultiByte(CP_UTF8, 0, newVal.c_str(), -1, nullptr, 0, nullptr, nullptr);
-                            std::string utf8Val;
-                            if (len > 0) {
-                                utf8Val.resize(len - 1);
-                                WideCharToMultiByte(CP_UTF8, 0, newVal.c_str(), -1, utf8Val.data(), len, nullptr, nullptr);
-                            }
-                            pr[pIdx].defaultModel = utf8Val;
+                            pr[pIdx].defaultModel = WideToUtf8(newVal);
                             if (pIdx < s_aiUi.profileModels.size()) {
                                 s_aiUi.profileModels[pIdx] = newVal;
                             }
@@ -1537,11 +1573,7 @@ namespace {
                         // Trigger online discovery
                         std::string plainKey = QuickView::AI::AiActionManager::DecryptApiKey(pr[pIdx].encryptedApiKey);
                         if (plainKey.empty() && pIdx < s_aiUi.profileKeys.size()) {
-                            int len = WideCharToMultiByte(CP_UTF8, 0, s_aiUi.profileKeys[pIdx].c_str(), -1, nullptr, 0, nullptr, nullptr);
-                            if (len > 0) {
-                                plainKey.resize(len - 1);
-                                WideCharToMultiByte(CP_UTF8, 0, s_aiUi.profileKeys[pIdx].c_str(), -1, plainKey.data(), len, nullptr, nullptr);
-                            }
+                            plainKey = WideToUtf8(s_aiUi.profileKeys[pIdx]);
                         }
 
                         s_aiUi.profileIsFetchingModels[pIdx] = true;
@@ -1558,36 +1590,9 @@ namespace {
                             targetProtocol = QuickView::AI::ApiProtocol::ComfyUI;
                         }
 
-                        m.FetchModelsAsync(targetUrl, plainKey, targetProtocol, [pIdx, ov](bool success, const std::vector<std::string>& models, const std::wstring& errMsg) {
-                            if (pIdx < s_aiUi.profileIsFetchingModels.size()) {
-                                s_aiUi.profileIsFetchingModels[pIdx] = false;
-                            }
-                            if (!success) {
-                                std::wstring msg = (AppStrings::OSD_AiFetchModelsFailed ? AppStrings::OSD_AiFetchModelsFailed : L"Failed to fetch models: ") + errMsg;
-                                ::g_osd.Show(::g_mainHwnd, msg.c_str(), false, false, D2D1::ColorF(D2D1::ColorF::OrangeRed), OSDPosition::Bottom, 4000);
-                                if (ov) ov->RequestRebuild();
-                                return;
-                            }
-
-                            auto& mgr = QuickView::AI::AiActionManager::Instance();
-                            auto& profiles = mgr.GetProfiles();
-                            if (pIdx < profiles.size()) {
-                                profiles[pIdx].fetchedModels = models;
-                                if (!models.empty() && profiles[pIdx].defaultModel.empty()) {
-                                    profiles[pIdx].defaultModel = models[0];
-                                    if (pIdx < s_aiUi.profileModels.size()) {
-                                        s_aiUi.profileModels[pIdx] = Utf8ToWide(models[0]);
-                                    }
-                                }
-                                mgr.SaveConfig();
-                            }
-
-                            wchar_t countBuf[128] = { 0 };
-                            const wchar_t* succFmt = AppStrings::OSD_AiFetchModelsSuccessFormat ? AppStrings::OSD_AiFetchModelsSuccessFormat : L"Fetched %zu available models";
-                            swprintf_s(countBuf, succFmt, models.size());
-                            ::g_osd.Show(::g_mainHwnd, countBuf, false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
-                            if (ov) ov->RequestRebuild();
-                        });
+                        auto* ctx = new FetchModelsSettingsCtx{ pIdx, ov };
+                        m.FetchModelsAsync(targetUrl, plainKey, targetProtocol, QuickView::AI::ModelsCallback(
+                            OnFetchModelsOverlayComplete, ctx, CleanFetchModelsSettingsCtx));
                     } else if (choice >= 1 && choice <= static_cast<int>(pr[pIdx].fetchedModels.size())) {
                         pr[pIdx].defaultModel = pr[pIdx].fetchedModels[choice - 1];
                         if (pIdx < s_aiUi.profileModels.size()) {
@@ -1703,6 +1708,7 @@ namespace {
                     }
 
                     m.TestConnectionAsync(targetUrl, plainKey, targetProtocol, [](bool success, int statusCode, int latencyMs, const std::wstring& message) {
+                        if (!IsWindow(::g_mainHwnd)) return;
                         if (success) {
                             wchar_t connBuf[128] = { 0 };
                             const wchar_t* connFmt = AppStrings::OSD_AiConnSuccessFormat ? AppStrings::OSD_AiConnSuccessFormat : L"Connected successfully! Latency: %dms (HTTP %d)";
@@ -3728,13 +3734,8 @@ void SettingsOverlay::BuildPluginsTab(SettingsTab& tabPlugins) {
             if (!s_models.empty()) {
                 std::string currentModelId = pluginHost.GetSrModelId();
                 for (size_t i = 0; i < s_models.size(); ++i) {
-                    wchar_t wbuf[128] = { 0 };
-                    MultiByteToWideChar(CP_UTF8, 0, s_models[i].displayName.c_str(), -1, wbuf, 128);
-                    s_modelDisplayNames.push_back(wbuf);
-
-                    wchar_t descBuf[512] = { 0 };
-                    MultiByteToWideChar(CP_UTF8, 0, s_models[i].description.c_str(), -1, descBuf, 512);
-                    s_modelDescriptions.push_back(descBuf);
+                    s_modelDisplayNames.push_back(Utf8ToWide(s_models[i].displayName));
+                    s_modelDescriptions.push_back(Utf8ToWide(s_models[i].description));
 
                     if (s_models[i].modelId == currentModelId || (currentModelId.empty() && i == 0)) {
                         s_modelChoiceIndex = static_cast<int>(i);
@@ -3799,9 +3800,7 @@ void SettingsOverlay::BuildPluginsTab(SettingsTab& tabPlugins) {
 
                 for (const auto& cand : candidates) {
                     if (cand.supportedInterfaces & (1 << QVX_IFACE_SUPER_RESOLUTION)) {
-                        wchar_t wName[128] = { 0 };
-                        MultiByteToWideChar(CP_UTF8, 0, cand.pluginName.c_str(), -1, wName, 128);
-                        std::wstring label = wName;
+                        std::wstring label = Utf8ToWide(cand.pluginName);
                         if (label.empty()) {
                             label = cand.filePath;
                         }
@@ -4120,15 +4119,11 @@ void SettingsOverlay::BuildPluginsTab(SettingsTab& tabPlugins) {
                         if (strcmp(p.desc.id, "denoise") == 0 && currentModelId != "realesr-general-x4v3") {
                             continue;
                         }
-                        wchar_t wLabel[128] = { 0 };
-                        MultiByteToWideChar(CP_UTF8, 0, p.desc.label ? p.desc.label : p.desc.id, -1, wLabel, 128);
-                        s_paramLabels[i] = wLabel;
+                        s_paramLabels[i] = Utf8ToWide(p.desc.label ? p.desc.label : p.desc.id);
 
                         const wchar_t* pTooltip = nullptr;
                         if (p.desc.tooltip && p.desc.tooltip[0] != '\0') {
-                            wchar_t wTip[256] = { 0 };
-                            MultiByteToWideChar(CP_UTF8, 0, p.desc.tooltip, -1, wTip, 256);
-                            s_paramTooltips[i] = wTip;
+                            s_paramTooltips[i] = Utf8ToWide(p.desc.tooltip);
                             pTooltip = s_paramTooltips[i].c_str();
                         }
 
@@ -4243,9 +4238,7 @@ void SettingsOverlay::BuildPluginsTab(SettingsTab& tabPlugins) {
                             std::vector<std::wstring> optStrs;
                             std::vector<std::wstring_view> optViews;
                             for (uint32_t o = 0; o < (p.desc.enum_param.options[o].label ? p.desc.enum_param.option_count : 0); ++o) {
-                                wchar_t optW[128] = { 0 };
-                                MultiByteToWideChar(CP_UTF8, 0, p.desc.enum_param.options[o].label, -1, optW, 128);
-                                optStrs.push_back(optW);
+                                optStrs.push_back(Utf8ToWide(p.desc.enum_param.options[o].label));
                             }
                             s_enumOptionLabels.push_back(std::move(optStrs));
                             const auto& curStrs = s_enumOptionLabels.back();
@@ -4773,15 +4766,8 @@ void SettingsOverlay::BuildAboutTab(SettingsTab& tabAbout) {
          if (UpdateManager::Get().GetStatus() == UpdateStatus::NewVersionFound) {
              std::string v = UpdateManager::Get().GetRemoteVersion().version;
              std::string log = UpdateManager::Get().GetRemoteVersion().changelog;
-             auto to_wide = [](const std::string& s) -> std::wstring {
-                 if (s.empty()) return L"";
-                 int sz = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
-                 std::wstring w(sz, 0);
-                 MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), &w[0], sz);
-                 return w;
-             };
-             overlay->m_updateVersion = to_wide(v);
-             overlay->m_updateLog = to_wide(log);
+             overlay->m_updateVersion = QuickView::Utf8ToWide(v);
+             overlay->m_updateLog = QuickView::Utf8ToWide(log);
              overlay->m_toastScrollY = 0.0f;
              overlay->m_showUpdateToast = true;
              overlay->SetVisible(false); // Close Settings to focus on Update (Fixes visibility/focus issues)
@@ -7836,35 +7822,14 @@ SettingsAction SettingsOverlay::OnLButtonDown(float x, float y) {
                          s_aiUi.profileIsFetchingModels[pIdx] = true;
                          std::string plainKey = QuickView::AI::AiActionManager::DecryptApiKey(pr[pIdx].encryptedApiKey);
                          if (plainKey.empty() && pIdx < s_aiUi.profileKeys.size()) {
-                             int len = WideCharToMultiByte(CP_UTF8, 0, s_aiUi.profileKeys[pIdx].c_str(), -1, nullptr, 0, nullptr, nullptr);
-                             if (len > 0) {
-                                 plainKey.resize(len - 1);
-                                 WideCharToMultiByte(CP_UTF8, 0, s_aiUi.profileKeys[pIdx].c_str(), -1, plainKey.data(), len, nullptr, nullptr);
-                             }
+                             plainKey = QuickView::WideToUtf8(s_aiUi.profileKeys[pIdx]);
                          }
 
                          ::g_osd.Show(::g_mainHwnd, AppStrings::OSD_AiFetchingModels ? AppStrings::OSD_AiFetchingModels : L"Discovering available models...", false, false, D2D1::ColorF(D2D1::ColorF::LightSkyBlue), OSDPosition::Bottom, 2500);
 
-                         m.FetchModelsAsync(pr[pIdx].baseUrl, plainKey, pr[pIdx].protocol, [pIdx, this](bool success, const std::vector<std::string>& models, [[maybe_unused]] const std::wstring& errMsg) {
-                             if (pIdx < s_aiUi.profileIsFetchingModels.size()) {
-                                 s_aiUi.profileIsFetchingModels[pIdx] = false;
-                             }
-                             if (success) {
-                                 auto& mgr = QuickView::AI::AiActionManager::Instance();
-                                 auto& profiles = mgr.GetProfiles();
-                                 if (pIdx < profiles.size()) {
-                                     profiles[pIdx].fetchedModels = models;
-                                     if (!models.empty() && profiles[pIdx].defaultModel.empty()) {
-                                         profiles[pIdx].defaultModel = models[0];
-                                     }
-                                     mgr.SaveConfig();
-                                 }
-                                 wchar_t msgBuf[128] = { 0 };
-                                 swprintf_s(msgBuf, AppStrings::OSD_AiFetchModelsSuccessFormat ? AppStrings::OSD_AiFetchModelsSuccessFormat : L"Successfully fetched %zu available models", models.size());
-                                 ::g_osd.Show(::g_mainHwnd, msgBuf, false, false, D2D1::ColorF(D2D1::ColorF::LightGreen), OSDPosition::Bottom, 3000);
-                                 this->RequestRebuild();
-                             }
-                         });
+                         auto* ctx = new FetchModelsSettingsCtx{ pIdx, this };
+                         m.FetchModelsAsync(pr[pIdx].baseUrl, plainKey, pr[pIdx].protocol, QuickView::AI::ModelsCallback(
+                             OnFetchModelsOverlayComplete, ctx, CleanFetchModelsSettingsCtx));
                      }
                  }
              }

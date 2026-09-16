@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include "StringUtils.h"
 
 using namespace Microsoft::WRL;
 
@@ -49,14 +50,7 @@ std::wstring WebContentHost::BuildBlankHtml() {
 }
 
 std::wstring WebContentHost::BuildComplexSvgHtml(std::string_view utf8Svg, float contentW, float contentH) {
-    int size = MultiByteToWideChar(CP_UTF8, 0, utf8Svg.data(),
-                                   static_cast<int>(utf8Svg.size()), nullptr, 0);
-    std::wstring wXml;
-    if (size > 0) {
-        wXml.resize(static_cast<size_t>(size));
-        MultiByteToWideChar(CP_UTF8, 0, utf8Svg.data(),
-                            static_cast<int>(utf8Svg.size()), wXml.data(), size);
-    }
+    std::wstring wXml = Utf8ToWide(utf8Svg);
 
     (void)contentW;
     (void)contentH;

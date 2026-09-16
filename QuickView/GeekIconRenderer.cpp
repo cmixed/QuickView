@@ -2,19 +2,31 @@
 #include "GeekIconLibrary.h"
 #include "GeekIconRenderer.h"
 
-#include <unordered_map>
 #include <mutex>
 #include <array>
 
 namespace QuickView::UI {
 
-// Factory-aware geometry cache.
+// Factory-aware geometry flat cache (Contiguous array, zero heap allocations/hash buckets)
 // ID2D1PathGeometry is bound to the ID2D1Factory that created it.
 // We track the factory pointer and invalidate on mismatch.
+struct GeometryCacheEntry {
+    const GeekIcons::VectorIcon* icon = nullptr;
+    ComPtr<ID2D1PathGeometry> geometry;
+};
+constexpr size_t MAX_GEOMETRY_CACHE = 64;
 static ID2D1Factory* s_cachedFactory = nullptr;
-static std::unordered_map<const GeekIcons::VectorIcon*, ComPtr<ID2D1PathGeometry>> s_geometryCache;
+static std::array<GeometryCacheEntry, MAX_GEOMETRY_CACHE> s_geometryCache;
+static size_t s_geometryCount = 0;
+
+struct SparkleCacheEntry {
+    int fontSize = 0;
+    ComPtr<IDWriteTextFormat> format;
+};
+constexpr size_t MAX_SPARKLE_CACHE = 8;
 static ComPtr<IDWriteFactory> s_dwriteFactory;
-static std::unordered_map<int, ComPtr<IDWriteTextFormat>> s_sparkleFormatCache;
+static std::array<SparkleCacheEntry, MAX_SPARKLE_CACHE> s_sparkleCache;
+static size_t s_sparkleCount = 0;
 static std::mutex s_cacheMutex;
 
 static ComPtr<ID2D1PathGeometry> BuildGeometry(ID2D1Factory* factory, const GeekIcons::VectorIcon& icon) {
@@ -91,10 +103,13 @@ void GeekIconRenderer::DrawVectorIcon(
         ComPtr<IDWriteTextFormat> textFormat;
         {
             std::lock_guard<std::mutex> lock(s_cacheMutex);
-            auto it = s_sparkleFormatCache.find(targetFontSize);
-            if (it != s_sparkleFormatCache.end()) {
-                textFormat = it->second;
-            } else {
+            for (size_t i = 0; i < s_sparkleCount; ++i) {
+                if (s_sparkleCache[i].fontSize == targetFontSize) {
+                    textFormat = s_sparkleCache[i].format;
+                    break;
+                }
+            }
+            if (!textFormat) {
                 if (!s_dwriteFactory) {
                     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(s_dwriteFactory.GetAddressOf()));
                 }
@@ -111,7 +126,9 @@ void GeekIconRenderer::DrawVectorIcon(
                     {
                         textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                         textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                        s_sparkleFormatCache[targetFontSize] = textFormat;
+                        if (s_sparkleCount < MAX_SPARKLE_CACHE) {
+                            s_sparkleCache[s_sparkleCount++] = { targetFontSize, textFormat };
+                        }
                     }
                 }
             }
@@ -134,16 +151,25 @@ void GeekIconRenderer::DrawVectorIcon(
 
         // Invalidate entire cache if factory changed (device recreated)
         if (s_cachedFactory != factory.Get()) {
-            s_geometryCache.clear();
+            for (size_t i = 0; i < s_geometryCount; ++i) {
+                s_geometryCache[i] = {};
+            }
+            s_geometryCount = 0;
             s_cachedFactory = factory.Get();
         }
 
-        auto it = s_geometryCache.find(&icon);
-        if (it != s_geometryCache.end()) {
-            geometry = it->second;
-        } else {
+        for (size_t i = 0; i < s_geometryCount; ++i) {
+            if (s_geometryCache[i].icon == &icon) {
+                geometry = s_geometryCache[i].geometry;
+                break;
+            }
+        }
+
+        if (!geometry) {
             geometry = BuildGeometry(factory.Get(), icon);
-            if (geometry) s_geometryCache[&icon] = geometry;
+            if (geometry && s_geometryCount < MAX_GEOMETRY_CACHE) {
+                s_geometryCache[s_geometryCount++] = { &icon, geometry };
+            }
         }
     }
 

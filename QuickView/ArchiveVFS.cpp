@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ArchiveVFS.h"
+#include "StringUtils.h"
 #include "QuickViewETW.h"
 #include "../third_party/unrar-mini/rar.hpp"
 
@@ -243,14 +244,7 @@ namespace QuickView {
         if (entry.nameOffset + entry.nameLen > size) return L"";
 
         const char* namePtr = (const char*)(data + entry.nameOffset);
-
-        // Lazy UTF-8 to UTF-16 conversion
-        int size_needed = MultiByteToWideChar(CP_UTF8, 0, namePtr, (int)entry.nameLen, NULL, 0);
-        if (size_needed <= 0) return L"";
-
-        ::std::wstring wstrTo(size_needed, 0);
-        MultiByteToWideChar(CP_UTF8, 0, namePtr, (int)entry.nameLen, &wstrTo[0], size_needed);
-        return wstrTo;
+        return Utf8ToWide(std::string_view(namePtr, entry.nameLen));
     }
 
     ::std::string_view ZipArchive::GetEntryNameView(size_t index) const {
@@ -402,12 +396,11 @@ namespace QuickView {
                 
                 // Convert FileName to UTF-8 and store in m_namesBuffer
                 if (!wideName.empty()) {
-                    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wideName.c_str(), (int)wideName.length(), nullptr, 0, nullptr, nullptr);
-                    if (utf8Len > 0) {
+                    std::string u8 = WideToUtf8(wideName);
+                    if (!u8.empty()) {
                         entry.nameOffset = (uint32_t)m_namesBuffer.size();
-                        entry.nameLen = (uint16_t)utf8Len;
-                        m_namesBuffer.resize(m_namesBuffer.size() + utf8Len);
-                        WideCharToMultiByte(CP_UTF8, 0, wideName.c_str(), (int)wideName.length(), &m_namesBuffer[entry.nameOffset], utf8Len, nullptr, nullptr);
+                        entry.nameLen = (uint16_t)u8.size();
+                        m_namesBuffer.insert(m_namesBuffer.end(), u8.begin(), u8.end());
                     } else {
                         entry.nameOffset = 0;
                         entry.nameLen = 0;
@@ -432,12 +425,7 @@ namespace QuickView {
         if (entry.nameLen == 0) return L"";
 
         ::std::string_view utf8Name(m_namesBuffer.data() + entry.nameOffset, entry.nameLen);
-        int wideLen = MultiByteToWideChar(CP_UTF8, 0, utf8Name.data(), (int)utf8Name.length(), nullptr, 0);
-        if (wideLen <= 0) return L"";
-
-        ::std::wstring res(wideLen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, utf8Name.data(), (int)utf8Name.length(), &res[0], wideLen);
-        return res;
+        return Utf8ToWide(utf8Name);
     }
 
     ::std::string_view RarArchive::GetEntryNameView(size_t index) const {

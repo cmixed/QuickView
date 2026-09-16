@@ -16,6 +16,24 @@ struct CompareSlotCallback {
 
     constexpr CompareSlotCallback() noexcept = default;
 
+    template <typename F>
+        requires std::is_convertible_v<F, void (*)(bool)>
+    constexpr CompareSlotCallback(F fn) noexcept {
+        void (*simpleFn)(bool) = fn;
+        if (simpleFn) {
+            userCtx = reinterpret_cast<void*>(simpleFn);
+            pfn = [](void* u, bool success) {
+                if (u) {
+                    reinterpret_cast<void (*)(bool)>(u)(success);
+                }
+            };
+            cleanup = nullptr;
+        }
+    }
+
+    constexpr CompareSlotCallback(void (*pfn_)(void*, bool), void* ctx, void (*cleanup_)(void*) = nullptr) noexcept
+        : userCtx(ctx), pfn(pfn_), cleanup(cleanup_) {}
+
     ~CompareSlotCallback() {
         Reset();
     }
@@ -27,12 +45,7 @@ struct CompareSlotCallback {
         other.cleanup = nullptr;
     }
 
-    CompareSlotCallback(CompareSlotCallback& other) noexcept
-        : userCtx(other.userCtx), pfn(other.pfn), cleanup(other.cleanup) {
-        other.userCtx = nullptr;
-        other.pfn = nullptr;
-        other.cleanup = nullptr;
-    }
+    CompareSlotCallback(const CompareSlotCallback&) = delete;
 
     CompareSlotCallback& operator=(CompareSlotCallback&& other) noexcept {
         if (this != &other) {
@@ -47,46 +60,7 @@ struct CompareSlotCallback {
         return *this;
     }
 
-    CompareSlotCallback& operator=(CompareSlotCallback& other) noexcept {
-        if (this != &other) {
-            Reset();
-            userCtx = other.userCtx;
-            pfn = other.pfn;
-            cleanup = other.cleanup;
-            other.userCtx = nullptr;
-            other.pfn = nullptr;
-            other.cleanup = nullptr;
-        }
-        return *this;
-    }
-
-    template <typename F>
-        requires (!std::is_same_v<std::remove_cvref_t<F>, CompareSlotCallback> && std::is_invocable_v<F, bool>)
-    CompareSlotCallback(F&& f) {
-        using DecayedF = std::decay_t<F>;
-        if constexpr (std::is_pointer_v<DecayedF>) {
-            userCtx = reinterpret_cast<void*>(f);
-            pfn = [](void* u, bool success) {
-                auto fn = reinterpret_cast<DecayedF>(u);
-                if (fn) fn(success);
-            };
-            cleanup = nullptr;
-        } else if constexpr (std::is_empty_v<DecayedF>) {
-            pfn = [](void*, bool success) {
-                DecayedF{}(success);
-            };
-            cleanup = nullptr;
-        } else {
-            auto* p = new DecayedF(std::forward<F>(f));
-            userCtx = p;
-            pfn = [](void* u, bool success) {
-                (*static_cast<DecayedF*>(u))(success);
-            };
-            cleanup = [](void* u) {
-                delete static_cast<DecayedF*>(u);
-            };
-        }
-    }
+    CompareSlotCallback& operator=(const CompareSlotCallback&) = delete;
 
     void Invoke(bool success) const {
         if (pfn) {
@@ -94,7 +68,7 @@ struct CompareSlotCallback {
         }
     }
 
-    void Reset() {
+    void Reset() noexcept {
         if (cleanup && userCtx) {
             cleanup(userCtx);
             userCtx = nullptr;

@@ -181,25 +181,32 @@ TEST_F(AiActionManagerTest, UniversalSemanticExtractionHandlesNestedFastApiValid
 
 TEST_F(AiActionManagerTest, ProbeLocalSdWebUiModelsIfRunning) {
     HANDLE hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    bool probeSuccess = false;
-    std::vector<std::string> fetchedModels;
+    struct TestProbeCtx {
+        HANDLE hEvent;
+        bool probeSuccess = false;
+        std::vector<std::string> fetchedModels;
+    } ctx{ hEvent, false, {} };
 
     QuickView::AI::AiActionManager::Instance().FetchModelsAsync(
         "http://127.0.0.1:7860/", "", QuickView::AI::ApiProtocol::StabilityInpaint,
-        [&](bool success, const std::vector<std::string>& models, const std::wstring& /*errMsg*/) {
-            probeSuccess = success;
-            fetchedModels = models;
-            SetEvent(hEvent);
-        }
+        QuickView::AI::ModelsCallback(
+            [](void* u, bool success, const std::vector<std::string>& models, const std::wstring& /*errMsg*/) {
+                auto* c = static_cast<TestProbeCtx*>(u);
+                c->probeSuccess = success;
+                c->fetchedModels = models;
+                SetEvent(c->hEvent);
+            },
+            &ctx
+        )
     );
 
     DWORD waitResult = WaitForSingleObject(hEvent, 4000);
     CloseHandle(hEvent);
 
-    if (waitResult == WAIT_OBJECT_0 && probeSuccess) {
-        EXPECT_FALSE(fetchedModels.empty());
+    if (waitResult == WAIT_OBJECT_0 && ctx.probeSuccess) {
+        EXPECT_FALSE(ctx.fetchedModels.empty());
         bool foundDreamshaper = false;
-        for (const auto& m : fetchedModels) {
+        for (const auto& m : ctx.fetchedModels) {
             if (m.find("dreamshaper") != std::string::npos || m.find("v1-5") != std::string::npos) {
                 foundDreamshaper = true;
                 // Verify trailing hash brackets like " [879db523c3]" are stripped cleanly
@@ -223,23 +230,30 @@ TEST_F(AiActionManagerTest, PollSdProgressIfRunning) {
 
 TEST_F(AiActionManagerTest, TestConnectionAsyncWithLocalSdWebUi) {
     HANDLE hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    bool connSuccess = false;
-    int code = 0;
+    struct TestConnCtx {
+        HANDLE hEvent;
+        bool connSuccess = false;
+        int code = 0;
+    } ctx{ hEvent, false, 0 };
 
     QuickView::AI::AiActionManager::Instance().TestConnectionAsync(
         "http://127.0.0.1:7860/", "", QuickView::AI::ApiProtocol::StabilityInpaint,
-        [&](bool success, int statusCode, int /*latencyMs*/, const std::wstring& /*msg*/) {
-            connSuccess = success;
-            code = statusCode;
-            SetEvent(hEvent);
-        }
+        QuickView::AI::LatencyCallback(
+            [](void* u, bool success, int statusCode, int /*latencyMs*/, const std::wstring& /*msg*/) {
+                auto* c = static_cast<TestConnCtx*>(u);
+                c->connSuccess = success;
+                c->code = statusCode;
+                SetEvent(c->hEvent);
+            },
+            &ctx
+        )
     );
 
     DWORD waitResult = WaitForSingleObject(hEvent, 4000);
     CloseHandle(hEvent);
 
-    if (waitResult == WAIT_OBJECT_0 && connSuccess) {
-        EXPECT_EQ(code, 200);
+    if (waitResult == WAIT_OBJECT_0 && ctx.connSuccess) {
+        EXPECT_EQ(ctx.code, 200);
     }
 }
 
@@ -298,25 +312,32 @@ TEST_F(AiActionManagerTest, GeminiNativeEndpointLiveRoutingProbeWithoutKey) {
     // 2. Authentication header uses only "x-goog-api-key" without "Authorization: Bearer" (no 401)
     // 3. Official endpoint responds with HTTP 400 API_KEY_INVALID rather than 401 or 404
     HANDLE hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    int returnedStatusCode = 0;
+    struct TestRouteCtx {
+        HANDLE hEvent;
+        int returnedStatusCode = 0;
+    } ctx{ hEvent, 0 };
 
     QuickView::AI::AiActionManager::Instance().TestConnectionAsync(
         "https://generativelanguage.googleapis.com/v1beta/openai/",
         "AIzaSyTest_DummyKey_For_Routing_Verification",
         QuickView::AI::ApiProtocol::GeminiNative,
-        [&](bool /*success*/, int statusCode, int /*latencyMs*/, const std::wstring& /*msg*/) {
-            returnedStatusCode = statusCode;
-            SetEvent(hEvent);
-        }
+        QuickView::AI::LatencyCallback(
+            [](void* u, bool /*success*/, int statusCode, int /*latencyMs*/, const std::wstring& /*msg*/) {
+                auto* c = static_cast<TestRouteCtx*>(u);
+                c->returnedStatusCode = statusCode;
+                SetEvent(c->hEvent);
+            },
+            &ctx
+        )
     );
 
     DWORD waitResult = WaitForSingleObject(hEvent, 10000);
     CloseHandle(hEvent);
 
-    if (waitResult == WAIT_OBJECT_0 && returnedStatusCode > 0) {
-        EXPECT_EQ(returnedStatusCode, 400);
-        EXPECT_NE(returnedStatusCode, 401);
-        EXPECT_NE(returnedStatusCode, 404);
+    if (waitResult == WAIT_OBJECT_0 && ctx.returnedStatusCode > 0) {
+        EXPECT_EQ(ctx.returnedStatusCode, 400);
+        EXPECT_NE(ctx.returnedStatusCode, 401);
+        EXPECT_NE(ctx.returnedStatusCode, 404);
     }
 }
 

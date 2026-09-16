@@ -17,8 +17,24 @@ class AsyncJob {
 public:
     AsyncJob() noexcept = default;
 
+    // Direct C-style callback with context (Zero heap allocation, zero template bloat)
+    AsyncJob(void (*fn)(void*), void* ctx, void (*cleanup)(void*) = nullptr) noexcept
+        : m_target(ctx), m_invoker(fn), m_deleter(cleanup) {}
+
+    // Matches stateless lambdas and function pointers without heap allocation
     template <typename F>
-        requires (!std::is_same_v<std::decay_t<F>, AsyncJob>)
+        requires std::is_convertible_v<F, void (*)()>
+    AsyncJob(F fn) noexcept
+        : m_target(reinterpret_cast<void*>(static_cast<void (*)()>(fn)))
+        , m_invoker([](void* ptr) noexcept {
+            reinterpret_cast<void (*)()>(ptr)();
+        })
+        , m_deleter(nullptr) {}
+
+    template <typename F>
+        requires (!std::is_same_v<std::decay_t<F>, AsyncJob> &&
+                  !std::is_convertible_v<F, void (*)()> &&
+                  !std::is_convertible_v<F, void (*)(void*)>)
     AsyncJob(F&& f) {
         using DecayF = std::decay_t<F>;
         auto* p = new DecayF(std::forward<F>(f));
@@ -54,7 +70,7 @@ public:
     }
 
     void RunAndDestroy() noexcept {
-        if (m_invoker && m_target) {
+        if (m_invoker) {
             m_invoker(m_target);
         }
         Reset();
@@ -63,14 +79,14 @@ public:
     void Reset() noexcept {
         if (m_deleter && m_target) {
             m_deleter(m_target);
-            m_target = nullptr;
-            m_invoker = nullptr;
-            m_deleter = nullptr;
         }
+        m_target = nullptr;
+        m_invoker = nullptr;
+        m_deleter = nullptr;
     }
 
     explicit operator bool() const noexcept {
-        return m_target != nullptr;
+        return m_invoker != nullptr;
     }
 };
 

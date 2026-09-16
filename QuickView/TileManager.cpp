@@ -506,4 +506,35 @@ namespace QuickView {
         return progress;
     }
 
+    void TileManager::ForEachReadyTile(const RegionRect& rect, void (*callback)(const TileKey& key, TileState* tile, void* userCtx), void* userCtx) {
+        if (!callback) return;
+        std::lock_guard lock(m_mutex);
+        int l = m_currentLOD;
+        if (l < 0 || l >= (int)m_layers.size() || !m_layers[l]) return;
+
+        int tileSize = TILE_SIZE << l;
+        int startX = rect.x / tileSize;
+        int startY = rect.y / tileSize;
+        int endX = (rect.x + rect.w + tileSize - 1) / tileSize;
+        int endY = (rect.y + rect.h + tileSize - 1) / tileSize;
+
+        if (startX < 0) startX = 0;
+        if (startY < 0) startY = 0;
+        int w = m_layers[l]->GetWidth();
+        int h = m_layers[l]->GetHeight();
+        if (endX > w) endX = w;
+        if (endY > h) endY = h;
+
+        for (int y = startY; y < endY; ++y) {
+            for (int x = startX; x < endX; ++x) {
+                TileEntry* entry = m_layers[l]->GetEntry(x, y);
+                if (entry && entry->state.load(std::memory_order_relaxed) == TileStateCode::Ready) {
+                    if (entry->data) {
+                        callback(TileKey::From(x, y, l), entry->data.get(), userCtx);
+                    }
+                }
+            }
+        }
+    }
+
 } // namespace QuickView

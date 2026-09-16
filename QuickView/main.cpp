@@ -8662,36 +8662,52 @@ static void TriggerInpaintCurrentSelection(HWND hwnd) {
 
     auto taskFinished = std::make_shared<std::atomic<bool>>(false);
 
-    auto onCompleteCallback = [taskFinished, actName](const QuickView::AI::ExecutionResult& res) {
-        taskFinished->store(true);
-        if (!res.success) {
-            g_osd.EndPersistentTask(g_mainHwnd);
-            QuickView::AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
-            return;
-        }
-
-        if (!res.resultImageData.empty()) {
-            auto* pData = new QuickView::AI::AsyncAiImageResult();
-            pData->imageData = std::move(res.resultImageData);
-            pData->actionName = actName;
-            pData->width = res.imageWidth;
-            pData->height = res.imageHeight;
-            PostMessageW(g_mainHwnd, QuickView::AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
-        } else if (!res.textContent.empty()) {
-            std::wstring displayMsg = actName + L": " + res.textContent;
-            g_osd.EndPersistentTask(g_mainHwnd, displayMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 8000);
-        } else {
-            g_osd.EndPersistentTask(g_mainHwnd);
-        }
+    struct MainAiActionCtx {
+        std::wstring actName;
+        std::shared_ptr<std::atomic<bool>> taskFinished;
     };
+    auto* aiCtx = new MainAiActionCtx{ actName, taskFinished };
+    QuickView::AI::ActionCallback onCompleteCallback(
+        [](void* ctx, const QuickView::AI::ExecutionResult& res) {
+            auto* pCtx = static_cast<MainAiActionCtx*>(ctx);
+            if (pCtx && pCtx->taskFinished) {
+                pCtx->taskFinished->store(true);
+            }
+            if (!IsWindow(g_mainHwnd)) return;
+
+            if (!res.success) {
+                g_osd.EndPersistentTask(g_mainHwnd);
+                QuickView::AI::AiActionManager::ShowAiErrorDialog(g_mainHwnd, res);
+                return;
+            }
+
+            if (!res.resultImageData.empty()) {
+                auto* pData = new QuickView::AI::AsyncAiImageResult();
+                pData->imageData = std::move(res.resultImageData);
+                pData->actionName = pCtx ? pCtx->actName : L"";
+                pData->width = res.imageWidth;
+                pData->height = res.imageHeight;
+                PostMessageW(g_mainHwnd, QuickView::AI::WM_AI_ACTION_COMPLETED, 0, reinterpret_cast<LPARAM>(pData));
+            } else if (!res.textContent.empty()) {
+                std::wstring displayMsg = (pCtx ? pCtx->actName : L"") + L": " + res.textContent;
+                g_osd.EndPersistentTask(g_mainHwnd, displayMsg, false, D2D1::ColorF(D2D1::ColorF::LightGreen), 8000);
+            } else {
+                g_osd.EndPersistentTask(g_mainHwnd);
+            }
+        },
+        aiCtx,
+        [](void* ctx) {
+            delete static_cast<MainAiActionCtx*>(ctx);
+        }
+    );
 
     uint64_t currentTaskId = 0;
     if (pendingAct) {
         currentTaskId = QuickView::AI::AiActionManager::Instance().ExecuteAction(
-            *pendingAct, hwnd, onCompleteCallback, customPrompt, cropL, cropT, cropR, cropB);
+            *pendingAct, hwnd, std::move(onCompleteCallback), customPrompt, cropL, cropT, cropR, cropB);
     } else {
         currentTaskId = QuickView::AI::AiActionManager::Instance().ExecuteInpaint(
-            cropL, cropT, cropR, cropB, customPrompt, hwnd, onCompleteCallback);
+            cropL, cropT, cropR, cropB, customPrompt, hwnd, std::move(onCompleteCallback));
     }
 
     QuickView::RunDetached([hwnd, actName, currentTaskId, taskFinished]() {
@@ -9222,13 +9238,17 @@ static LRESULT HandleWmCommand(HWND hwnd, WPARAM wParam, [[maybe_unused]] LPARAM
                     std::wstring oldPath = GetPaneContext(PaneSlot::Left).path;
                     if (MoveFileW(oldPath.c_str(), newPath.c_str())) {
                         g_undoManager.PushRename(oldPath, newPath, true);
-                        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, newPath, [hwnd](bool success){
-                            if (success) {
-                                g_osd.Show(hwnd, L"Renamed (Left)", false);
-                                MarkCompareDirty();
-                                RequestRepaint(PaintLayer::Image | PaintLayer::Static);
-                            }
-                        });
+                        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, newPath, CompareSlotCallback(
+                            [](void* u, bool success) {
+                                auto h = static_cast<HWND>(u);
+                                if (IsWindow(h) && success) {
+                                    g_osd.Show(h, L"Renamed (Left)", false);
+                                    MarkCompareDirty();
+                                    RequestRepaint(PaintLayer::Image | PaintLayer::Static);
+                                }
+                            },
+                            hwnd
+                        ));
                     } else {
                         g_osd.Show(hwnd, L"Rename Failed", true);
                     }
@@ -9357,19 +9377,24 @@ static LRESULT HandleWmCommand(HWND hwnd, WPARAM wParam, [[maybe_unused]] LPARAM
                         if (nextPath == recycleTarget) nextPath = leftNavigator.PeekPrevious();
 
                         if (!nextPath.empty()) {
-                            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, nextPath, [hwnd](bool success) {
-                                if (success) {
-                                    AppContext::GetInstance().Compare.activePane = ComparePane::Left;
-                                    AppContext::GetInstance().Compare.contextPane = ComparePane::Left;
-                                    AppContext::GetInstance().Compare.selectedPane = ComparePane::Left;
-                                    MarkCompareDirty();
-                                    RequestRepaint(PaintLayer::Image | PaintLayer::Static | PaintLayer::Dynamic);
-                                } else {
-                                    GetPaneContext(PaneSlot::Left).Reset();
-                                    AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
-                                    RequestRepaint(PaintLayer::All);
-                                }
-                            });
+                            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, nextPath, CompareSlotCallback(
+                                [](void* u, bool success) {
+                                    auto h = static_cast<HWND>(u);
+                                    if (!IsWindow(h)) return;
+                                    if (success) {
+                                        AppContext::GetInstance().Compare.activePane = ComparePane::Left;
+                                        AppContext::GetInstance().Compare.contextPane = ComparePane::Left;
+                                        AppContext::GetInstance().Compare.selectedPane = ComparePane::Left;
+                                        MarkCompareDirty();
+                                        RequestRepaint(PaintLayer::Image | PaintLayer::Static | PaintLayer::Dynamic);
+                                    } else {
+                                        GetPaneContext(PaneSlot::Left).Reset();
+                                        AppContext::GetInstance().CompareCtrl->ExitMode(h);
+                                        RequestRepaint(PaintLayer::All);
+                                    }
+                                },
+                                hwnd
+                            ));
                         } else {
                             GetPaneContext(PaneSlot::Left).Reset();
                             AppContext::GetInstance().CompareCtrl->ExitMode(hwnd);
@@ -9884,13 +9909,17 @@ static LRESULT HandleWmCommand(HWND hwnd, WPARAM wParam, [[maybe_unused]] LPARAM
                     if (result == DialogResult::Yes) {
                         if (contextLeft) {
                             if (MoveFileW(contextPath.c_str(), newPath.c_str())) {
-                                AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, newPath, [hwnd](bool success){
-                                    if (success) {
-                                        g_osd.Show(hwnd, L"Extension Fixed (Left)", false);
-                                        MarkCompareDirty();
-                                        RequestRepaint(PaintLayer::Image | PaintLayer::Static);
-                                    }
-                                });
+                                AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, newPath, CompareSlotCallback(
+                                    [](void* u, bool success) {
+                                        auto h = static_cast<HWND>(u);
+                                        if (IsWindow(h) && success) {
+                                            g_osd.Show(h, L"Extension Fixed (Left)", false);
+                                            MarkCompareDirty();
+                                            RequestRepaint(PaintLayer::Image | PaintLayer::Static);
+                                        }
+                                    },
+                                    hwnd
+                                ));
                             } else {
                                 g_osd.Show(hwnd, std::wstring(L"Rename Failed"), true);
                             }
@@ -14978,8 +15007,7 @@ void ProcessEngineEvents(HWND hwnd) {
                 
                 // Fire pending callback if one exists
                 if (g_leftPaneReadyCallback.pfn) {
-                    auto cb = g_leftPaneReadyCallback;
-                    g_leftPaneReadyCallback = {};
+                    auto cb = std::move(g_leftPaneReadyCallback);
                     cb.Invoke(true);
                     cb.Reset();
                 }
@@ -15636,8 +15664,7 @@ void ProcessEngineEvents(HWND hwnd) {
             if (targetSlot == PaneSlot::Left) {
                 g_isLeftPaneDecoding = false;
                 if (g_leftPaneReadyCallback.pfn) {
-                    auto cb = g_leftPaneReadyCallback;
-                    g_leftPaneReadyCallback = {};
+                    auto cb = std::move(g_leftPaneReadyCallback);
                     cb.Invoke(false);
                     cb.Reset();
                 }
@@ -16602,7 +16629,7 @@ void NavigateEdge(HWND hwnd, bool toLast) {
                 }
             };
             cb.cleanup = [](void* u) { delete static_cast<LeftBrowseSlotCtx*>(u); };
-            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, leftPath, cb);
+            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, leftPath, std::move(cb));
         } else {
             GetPaneContext(PaneSlot::Left).Reset();
             MarkCompareDirty();
@@ -16723,7 +16750,7 @@ void Navigate(HWND hwnd, int direction) {
             }
         };
         cb.cleanup = [](void* u) { delete static_cast<LeftPairSlotCtx*>(u); };
-        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, rendered, cb);
+        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, rendered, std::move(cb));
         return;
     }
 
@@ -16798,7 +16825,7 @@ void Navigate(HWND hwnd, int direction) {
                 }
             };
             cb.cleanup = [](void* u) { delete static_cast<LeftBrowseSlotCtx2*>(u); };
-            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, leftPath, cb);
+            AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, leftPath, std::move(cb));
         } else {
             GetPaneContext(PaneSlot::Left).Reset();
             MarkCompareDirty();
@@ -18190,7 +18217,7 @@ static void ComparePairSideBySide(HWND hwnd, const std::wstring& renderedPath, c
             }
         };
         cb.cleanup = [](void* u) { delete static_cast<LeftArmSlotCtx*>(u); };
-        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, renderedPath, cb);
+        AppContext::GetInstance().CompareCtrl->LoadImageIntoLeftSlot(hwnd, renderedPath, std::move(cb));
     } else {
         // Left pane captured the rendered image -- load the RAW on the right
         ArmPairRawFullDecode(renderedPath, rawPath);

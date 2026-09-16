@@ -9,6 +9,7 @@
 #include <wrl/event.h>
 #include <algorithm>
 #include <cmath>
+#include "StringUtils.h"
 
 using namespace Microsoft::WRL;
 
@@ -151,16 +152,8 @@ std::wstring WebViewThumbService::UserDataFolder() {
 }
 
 std::wstring WebViewThumbService::BuildHtml(const std::vector<uint8_t>& utf8Xml) {
-    int size = MultiByteToWideChar(CP_UTF8, 0,
-                                   reinterpret_cast<const char*>(utf8Xml.data()),
-                                   static_cast<int>(utf8Xml.size()), nullptr, 0);
-    std::wstring wXml;
-    if (size > 0) {
-        wXml.resize(static_cast<size_t>(size));
-        MultiByteToWideChar(CP_UTF8, 0,
-                            reinterpret_cast<const char*>(utf8Xml.data()),
-                            static_cast<int>(utf8Xml.size()), wXml.data(), size);
-    }
+    std::string_view sv(reinterpret_cast<const char*>(utf8Xml.data()), utf8Xml.size());
+    std::wstring wXml = Utf8ToWide(sv);
     return L"<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
            L"<style>"
            L"html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;"
