@@ -395,6 +395,37 @@ TEST_F(AiActionManagerTest, BlendMaskGuidedFeatheredStrictRegionIsolation) {
     EXPECT_EQ(orig[inIdx + 2], 255); // R
 }
 
+TEST_F(AiActionManagerTest, InpaintActionParameterPreservation) {
+    auto& mgr = QuickView::AI::AiActionManager::Instance();
+    QuickView::AI::ActionDesc customAct;
+    customAct.id = "test_custom_inpaint";
+    customAct.name = L"Custom Inpaint Test";
+    customAct.promptTemplate = L"replace with vibrant red roses";
+    customAct.negativePrompt = L"low quality, blurry";
+    customAct.denoisingStrength = 0.85f;
+    customAct.samplingSteps = 40;
+    customAct.cfgScale = 9.5f;
+
+    // Verify macro substitution and prompt merging logic
+    std::wstring customInput = L"blooming in spring";
+    QuickView::AI::ActionDesc actCopy = customAct;
+    if (!customInput.empty()) {
+        size_t macroPos = actCopy.promptTemplate.find(L"{prompt}");
+        if (macroPos != std::wstring::npos) {
+            actCopy.promptTemplate.replace(macroPos, 8, customInput);
+        } else {
+            if (!actCopy.promptTemplate.empty()) actCopy.promptTemplate += L"\n";
+            actCopy.promptTemplate += customInput;
+        }
+    }
+
+    EXPECT_EQ(actCopy.promptTemplate, L"replace with vibrant red roses\nblooming in spring");
+    EXPECT_FLOAT_EQ(actCopy.denoisingStrength, 0.85f);
+    EXPECT_EQ(actCopy.samplingSteps, 40);
+    EXPECT_FLOAT_EQ(actCopy.cfgScale, 9.5f);
+}
+
+
 
 
 

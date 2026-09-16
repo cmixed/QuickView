@@ -37,9 +37,8 @@ enum class MaxResolution : uint32_t {
 
 // Scope Mode: Full Image vs Selection / Inpainting
 enum class ScopeMode : uint8_t {
-    Auto = 0,               // Use selection if active, otherwise process full image
-    ForceFullImage,         // Always process full image
-    CropAndBlend            // Crop selection, inpaint/generate, and alpha-feather back onto base
+    FullImage = 0,          // Always process full image
+    CropAndBlend = 1        // Crop selection, inpaint/generate, and alpha-feather back onto base
 };
 
 // Target Output Aspect Ratio & Size Framing
@@ -80,7 +79,7 @@ struct ActionDesc {
     std::string modelProfileId;             // Bound ModelProfile ID (empty = use global default profile)
     std::wstring promptTemplate;            // Prompt template (supports {prompt} macro)
     std::wstring negativePrompt;            // Optional negative prompt
-    ScopeMode scopeMode = ScopeMode::Auto;  // Processing target scope
+    ScopeMode scopeMode = ScopeMode::FullImage;  // Processing target scope
     OutputAspectRatio aspectRatio = OutputAspectRatio::Auto; // Target output aspect ratio & framing
     TargetResolution targetResolution = TargetResolution::Res_2K; // Target output resolution policy (1K/2K/4K)
     float denoisingStrength = 0.35f;        // Denoising strength for img2img (0.0~1.0, default 0.35 for fidelity)

@@ -37,8 +37,12 @@ public:
     bool OnMouseMove(float x, float y);
     bool OnLButtonDown(float x, float y);
     bool OnMouseWheel(float delta);
-    int GetHoverIndex() const { return m_hoverIndex; }
-    void StartInpaintSelection();
+    int GetHoverIndex() const {
+        if (m_hoverIndex != -1) return m_hoverIndex;
+        if (m_hoverInpaintCard || m_hoverAdhocCard || m_hoverExpandBtn) return 0;
+        return -1;
+    }
+    void StartInpaintSelection(std::wstring customPrompt = L"", std::string pendingActionId = "");
 
     // Text & Filter callbacks (called from Edit control subclass)
     void OnPromptTextChanged();
@@ -86,6 +90,9 @@ private:
 
     D2D1_RECT_F m_inpaintCardRect = {};
     bool m_hoverInpaintCard = false;
+
+    D2D1_RECT_F m_adhocCardRect = {};
+    bool m_hoverAdhocCard = false;
 
     D2D1_RECT_F m_listClipRect = {};
     std::vector<D2D1_RECT_F> m_itemRects;

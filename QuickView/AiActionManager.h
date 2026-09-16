@@ -13,6 +13,7 @@
 #include "pch.h"
 #include <vector>
 #include <string>
+#include <optional>
 #include <memory>
 #include <atomic>
 #include <mutex>
@@ -231,7 +232,8 @@ public:
         int cropL, int cropT, int cropR, int cropB,
         std::wstring_view customPrompt,
         HWND hwnd,
-        ActionCallback onComplete);
+        ActionCallback onComplete,
+        const ActionDesc* sourceAction = nullptr);
     void CancelCurrentTask();
     bool IsRunning() const { return m_isRunning.load(); }
     uint64_t GetCurrentTaskId() const { return m_currentTaskId.load(); }
@@ -300,7 +302,8 @@ private:
     void InpaintWorkerThread(
         uint64_t taskId, int cropL, int cropT, int cropR, int cropB,
         std::wstring prompt, ModelProfile profile, HWND hwnd,
-        ActionCallback callback);
+        ActionCallback callback,
+        std::optional<ActionDesc> sourceAction = std::nullopt);
 
     bool OpenAiHttpRequest(
         const wchar_t* userAgent,

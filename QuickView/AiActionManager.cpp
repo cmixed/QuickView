@@ -764,7 +764,7 @@ void AiActionManager::InitDefaultTemplates() {
     act1.modelProfileId = "";
     act1.promptTemplate = L"masterpiece, highly detailed, sharp focus, pristine textures, professional photography, natural lighting, crystal clear details, 8k uhd, masterwork";
     act1.negativePrompt = L"blurry, noise, low quality, artifacts, distorted, deformed, oversaturated, watermark, bad quality, grainy";
-    act1.scopeMode = ScopeMode::Auto;
+    act1.scopeMode = ScopeMode::FullImage;
     act1.denoisingStrength = 0.35f; // Crucial: 0.35 preserves exact shapes & subject geometry!
     act1.samplingSteps = 25;
     act1.cfgScale = 7.0f;
@@ -790,7 +790,7 @@ void AiActionManager::InitDefaultTemplates() {
     act3.modelProfileId = "";
     act3.promptTemplate = L"commercial product photography, professional studio softbox lighting, octane render, soft ambient occlusion, elegant shadows, raytracing reflections, premium presentation";
     act3.negativePrompt = L"harsh flash, flat lighting, amateur snapshot, bad lighting, cluttered background, underexposed, overexposed, noise";
-    act3.scopeMode = ScopeMode::ForceFullImage;
+    act3.scopeMode = ScopeMode::FullImage;
     act3.denoisingStrength = 0.40f;
     act3.samplingSteps = 25;
     act3.cfgScale = 7.0f;
@@ -803,7 +803,7 @@ void AiActionManager::InitDefaultTemplates() {
     act4.modelProfileId = "";
     act4.promptTemplate = L"photorealistic industrial and architectural prototype rendering, physical based rendering, realistic materials, metal and glass textures, pristine finish, canon 5d photography";
     act4.negativePrompt = L"sketch, lineart, drawing, cartoon, unrealistic, low resolution, 2d, illustration";
-    act4.scopeMode = ScopeMode::ForceFullImage;
+    act4.scopeMode = ScopeMode::FullImage;
     act4.denoisingStrength = 0.55f;
     act4.samplingSteps = 30;
     act4.cfgScale = 8.0f;
@@ -816,7 +816,7 @@ void AiActionManager::InitDefaultTemplates() {
     act5.modelProfileId = "";
     act5.promptTemplate = L"masterpiece anime illustration, Makoto Shinkai aesthetic, vibrant clean colors, beautiful atmospheric lighting, crisp lineart, cel shading, delicate details";
     act5.negativePrompt = L"photo, photorealistic, 3d render, messy lines, bad anatomy, bad quality, realistic skin";
-    act5.scopeMode = ScopeMode::ForceFullImage;
+    act5.scopeMode = ScopeMode::FullImage;
     act5.denoisingStrength = 0.50f;
     act5.samplingSteps = 25;
     act5.cfgScale = 7.5f;
@@ -1044,7 +1044,15 @@ bool AiActionManager::LoadConfig() {
                 if (nStr) a.negativePrompt = Utf8ToWide(nStr);
             }
             yyjson_val* scope = yyjson_obj_get(aVal, "scope_mode");
-            if (scope) a.scopeMode = static_cast<ScopeMode>(yyjson_get_int(scope));
+            if (scope) {
+                int sVal = yyjson_get_int(scope);
+                if (sVal == 2 || (sVal == 1 && a.id == "action_inpaint_watermark")) {
+                    a.scopeMode = ScopeMode::CropAndBlend;
+                } else {
+                    a.scopeMode = (sVal == 1 && (a.id == "action_studio_lighting" || a.id == "action_sketch_to_photo" || a.id == "action_anime_style"))
+                        ? ScopeMode::FullImage : static_cast<ScopeMode>(sVal);
+                }
+            }
 
             yyjson_val* denoise = yyjson_obj_get(aVal, "denoising_strength");
             if (denoise) {
@@ -1429,13 +1437,12 @@ uint64_t AiActionManager::ExecuteAction(
 
     // Check if we should execute inpaint / region selection
     bool hasSelection = (std::abs(cropR - cropL) >= 8 && std::abs(cropB - cropT) >= 8);
-    bool shouldInpaint = (actCopy.scopeMode == ScopeMode::CropAndBlend) ||
-                         (actCopy.scopeMode == ScopeMode::Auto && hasSelection);
+    bool shouldInpaint = (actCopy.scopeMode == ScopeMode::CropAndBlend);
 
     if (shouldInpaint && hasSelection) {
         std::wstring promptCopy = actCopy.promptTemplate;
-        QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete = std::move(onComplete)]() mutable {
-            InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, std::move(onComplete));
+        QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, actCopy, onComplete = std::move(onComplete)]() mutable {
+            InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, std::move(onComplete), actCopy);
         });
         return taskId;
     }
@@ -2594,12 +2601,19 @@ uint64_t AiActionManager::ExecuteInpaint(
     int cropL, int cropT, int cropR, int cropB,
     std::wstring_view customPrompt,
     HWND hwnd,
-    ActionCallback onComplete) {
+    ActionCallback onComplete,
+    const ActionDesc* sourceAction) {
 
     CancelCurrentTask();
 
-    // Strictly respect the user's active default profile!
-    const ModelProfile* profile = GetDefaultProfile();
+    // Strictly respect the profile: if sourceAction specifies one, use it, else default profile
+    const ModelProfile* profile = nullptr;
+    if (sourceAction && !sourceAction->modelProfileId.empty()) {
+        profile = FindProfile(sourceAction->modelProfileId);
+    }
+    if (!profile) {
+        profile = GetDefaultProfile();
+    }
     if (!profile) {
         for (const auto& p : m_profiles) {
             if (p.protocol == ApiProtocol::GeminiNative || p.protocol == ApiProtocol::StabilityInpaint || p.protocol == ApiProtocol::OpenAiImagesEdit) {
@@ -2627,9 +2641,11 @@ uint64_t AiActionManager::ExecuteInpaint(
 
     ModelProfile profCopy = *profile;
     std::wstring promptCopy(customPrompt);
+    std::optional<ActionDesc> actionOpt;
+    if (sourceAction) actionOpt = *sourceAction;
 
-    QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, onComplete = std::move(onComplete)]() mutable {
-        InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, std::move(onComplete));
+    QuickView::RunDetached([this, taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, actionOpt, onComplete = std::move(onComplete)]() mutable {
+        InpaintWorkerThread(taskId, cropL, cropT, cropR, cropB, promptCopy, profCopy, hwnd, std::move(onComplete), actionOpt);
     });
 
     return taskId;
@@ -2638,7 +2654,8 @@ uint64_t AiActionManager::ExecuteInpaint(
 void AiActionManager::InpaintWorkerThread(
     uint64_t taskId, int cropL, int cropT, int cropR, int cropB,
     std::wstring prompt, ModelProfile profile, HWND /*hwnd*/,
-    ActionCallback callback) {
+    ActionCallback callback,
+    std::optional<ActionDesc> sourceAction) {
 
     ExecutionResult result;
     result.success = false;
@@ -2736,14 +2753,34 @@ void AiActionManager::InpaintWorkerThread(
     std::string sliceB64 = BinaryToBase64(slicePngBytes.data(), slicePngBytes.size());
     std::string maskB64 = BinaryToBase64(maskPngBytes.data(), maskPngBytes.size());
 
-    // 5. Build Prompts
+    // 5. Build Hyperparameters & Prompts
+    int actualSteps = 25;
+    double actualCfg = 7.0;
+    double actualDenoise = 0.75;
+    std::string utf8Negative = "text, watermark, logo, signature, letters, numbers, blur, smear, artifacts, boundary lines, seam, defect";
+
+    if (sourceAction.has_value()) {
+        if (sourceAction->samplingSteps >= 5 && sourceAction->samplingSteps <= 150) {
+            actualSteps = sourceAction->samplingSteps;
+        }
+        if (sourceAction->cfgScale >= 1.0f && sourceAction->cfgScale <= 30.0f) {
+            actualCfg = static_cast<double>(sourceAction->cfgScale);
+        }
+        if (sourceAction->denoisingStrength > 0.0f && sourceAction->denoisingStrength <= 1.0f) {
+            actualDenoise = static_cast<double>(sourceAction->denoisingStrength);
+        }
+        if (!sourceAction->negativePrompt.empty()) {
+            utf8Negative = WideToUtf8(sourceAction->negativePrompt);
+        }
+    }
+
     std::string utf8Prompt;
-    if (!prompt.empty()) {
+    bool isCustomUserPrompt = !prompt.empty();
+    if (isCustomUserPrompt) {
         utf8Prompt = WideToUtf8(prompt);
     } else {
         utf8Prompt = "flawless seamless background fill, natural continuation of texture, pristine clean surface, smooth transition, high quality restoration, uninterrupted surface";
     }
-    std::string utf8Negative = "text, watermark, logo, signature, letters, numbers, blur, smear, artifacts, boundary lines, seam, defect";
 
     // 6. Network Dispatch
     bool isLocal = (profile.protocol == ApiProtocol::ComfyUI ||
@@ -2814,8 +2851,13 @@ void AiActionManager::InpaintWorkerThread(
 
         yyjson_mut_val* partsArr = yyjson_mut_arr(doc);
 
-        std::string inpaintTaskDesc = "Task: Inpainting & Generative Fill. Modify only the masked area to seamlessly match the instruction: " +
-            utf8Prompt + ". Seamlessly blend the reconstructed region with the surrounding context, maintaining consistent lighting, texture, and colors. Output only the complete restored image.";
+        std::string inpaintTaskDesc;
+        if (isCustomUserPrompt) {
+            inpaintTaskDesc = "Task: Inpainting & Generative Fill. Modify only the masked area to seamlessly match the instruction: " +
+                utf8Prompt + ". Seamlessly blend the reconstructed region with the surrounding context, maintaining consistent lighting, texture, and colors. Output only the complete restored image.";
+        } else {
+            inpaintTaskDesc = "Task: Object Removal & Inpainting. Seamlessly remove whatever is in the masked region and fill it with natural background continuation matching the surrounding texture and lighting. Output only the complete restored image.";
+        }
         yyjson_mut_val* textPart = yyjson_mut_obj(doc);
         yyjson_mut_obj_add_str(doc, textPart, "text", inpaintTaskDesc.c_str());
         yyjson_mut_arr_append(partsArr, textPart);
@@ -2860,9 +2902,9 @@ void AiActionManager::InpaintWorkerThread(
 
         yyjson_mut_obj_add_str(doc, root, "prompt", utf8Prompt.c_str());
         yyjson_mut_obj_add_str(doc, root, "negative_prompt", utf8Negative.c_str());
-        yyjson_mut_obj_add_int(doc, root, "steps", 25);
-        yyjson_mut_obj_add_real(doc, root, "cfg_scale", 7.0);
-        yyjson_mut_obj_add_real(doc, root, "denoising_strength", 0.75);
+        yyjson_mut_obj_add_int(doc, root, "steps", actualSteps);
+        yyjson_mut_obj_add_real(doc, root, "cfg_scale", actualCfg);
+        yyjson_mut_obj_add_real(doc, root, "denoising_strength", actualDenoise);
         yyjson_mut_obj_add_int(doc, root, "mask_blur", 4);
         yyjson_mut_obj_add_int(doc, root, "inpainting_fill", 1);
         yyjson_mut_obj_add_int(doc, root, "inpaint_full_res", 0);

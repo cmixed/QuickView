@@ -665,7 +665,6 @@ const wchar_t *AiAction_Title = nullptr;
 const wchar_t *AiAction_EscHint = nullptr;
 const wchar_t *AiAction_ScopeCropAndBlend = nullptr;
 const wchar_t *AiAction_ScopeForceFull = nullptr;
-const wchar_t *AiAction_ScopeAuto = nullptr;
 const wchar_t *AiAction_FooterQuickKeys = nullptr;
 const wchar_t *AiAction_Placeholder = nullptr;
 const wchar_t *AiAction_InpaintTitle = nullptr;
@@ -691,6 +690,8 @@ const wchar_t *OSD_AiSelectionTooSmall = nullptr;
 const wchar_t *OSD_AiEmptyResult = nullptr;
 const wchar_t *OSD_AiDecodeFailed = nullptr;
 const wchar_t *OSD_AiTextureFailed = nullptr;
+const wchar_t *OSD_AiEmptyPromptHint = nullptr;
+const wchar_t *OSD_AiInpaintPromptEmptyHint = nullptr;
 const wchar_t *Settings_Tab_Ai = nullptr;
 const wchar_t *Settings_Header_AiProviders = nullptr;
 const wchar_t *Settings_Desc_AiProviders = nullptr;
@@ -721,7 +722,6 @@ const wchar_t *Settings_Option_AiRes4K = nullptr;
 const wchar_t *Settings_Option_AiRes2K = nullptr;
 const wchar_t *Settings_Option_AiRes1K = nullptr;
 const wchar_t *Settings_Option_AiResOriginal = nullptr;
-const wchar_t *Settings_Option_AiScopeAuto = nullptr;
 const wchar_t *Settings_Option_AiScopeForceFull = nullptr;
 const wchar_t *Settings_Option_AiScopeCropBlend = nullptr;
 const wchar_t *Settings_Option_AiCustomEndpoint = nullptr;
@@ -1424,7 +1424,6 @@ struct LanguageTable {
     const wchar_t *AiAction_EscHint;
     const wchar_t *AiAction_ScopeCropAndBlend;
     const wchar_t *AiAction_ScopeForceFull;
-    const wchar_t *AiAction_ScopeAuto;
     const wchar_t *AiAction_FooterQuickKeys;
     const wchar_t *AiAction_Placeholder;
     const wchar_t *AiAction_InpaintTitle;
@@ -1450,6 +1449,8 @@ struct LanguageTable {
     const wchar_t *OSD_AiEmptyResult;
     const wchar_t *OSD_AiDecodeFailed;
     const wchar_t *OSD_AiTextureFailed;
+    const wchar_t *OSD_AiEmptyPromptHint;
+    const wchar_t *OSD_AiInpaintPromptEmptyHint;
     const wchar_t *Settings_Tab_Ai;
     const wchar_t *Settings_Header_AiProviders;
     const wchar_t *Settings_Desc_AiProviders;
@@ -1480,7 +1481,6 @@ struct LanguageTable {
     const wchar_t *Settings_Option_AiRes2K;
     const wchar_t *Settings_Option_AiRes1K;
     const wchar_t *Settings_Option_AiResOriginal;
-    const wchar_t *Settings_Option_AiScopeAuto;
     const wchar_t *Settings_Option_AiScopeForceFull;
     const wchar_t *Settings_Option_AiScopeCropBlend;
     const wchar_t *Settings_Option_AiCustomEndpoint;
@@ -2180,7 +2180,6 @@ static const LanguageTable Table_EN = {
     L"[Esc] Close", // AiAction_EscHint
     L"Inpaint Selection", // AiAction_ScopeCropAndBlend
     L"Full Image", // AiAction_ScopeForceFull
-    L"Auto Scope", // AiAction_ScopeAuto
     L"Press 1~9 / 0 to execute", // AiAction_FooterQuickKeys
     L"Type prompt, or search presets...", // AiAction_Placeholder
     L"AI Inpaint & Erase", // AiAction_InpaintTitle
@@ -2206,6 +2205,8 @@ static const LanguageTable Table_EN = {
     L"AI generation returned empty result", // OSD_AiEmptyResult
     L"Failed to decode AI image result", // OSD_AiDecodeFailed
     L"Failed to create GPU texture for AI image", // OSD_AiTextureFailed
+    L"Please enter a prompt or select a preset action", // OSD_AiEmptyPromptHint
+    L"Please enter a prompt for inpainting first", // OSD_AiInpaintPromptEmptyHint
     L"AI Actions", // Settings_Tab_Ai
     L"AI Model Providers", // Settings_Header_AiProviders
     L"Manage AI endpoints, DPAPI-secured keys, and model identifiers.", // Settings_Desc_AiProviders
@@ -2236,8 +2237,7 @@ static const LanguageTable Table_EN = {
     L"2K QHD (2048px)", // Settings_Option_AiRes2K
     L"1K Standard (1024px)", // Settings_Option_AiRes1K
     L"Unrestricted (Native)", // Settings_Option_AiResOriginal
-    L"Auto (Selection First)", // Settings_Option_AiScopeAuto
-    L"Force Full Image", // Settings_Option_AiScopeForceFull
+    L"Full Image", // Settings_Option_AiScopeForceFull
     L"Inpaint & Blend", // Settings_Option_AiScopeCropBlend
     L"Custom (OpenAI Compatible)", // Settings_Option_AiCustomEndpoint
     L"Local ComfyUI", // Settings_Option_AiLocalComfyUI
@@ -2936,7 +2936,6 @@ static const LanguageTable Table_CN = {
     L"[Esc] 退出", // AiAction_EscHint
     L"选区修补", // AiAction_ScopeCropAndBlend
     L"全图生成", // AiAction_ScopeForceFull
-    L"自适应", // AiAction_ScopeAuto
     L"按 1~9 / 0 快速执行", // AiAction_FooterQuickKeys
     L"输入临时提示词，或搜索预设动作...", // AiAction_Placeholder
     L"选区局部重绘 (AI Inpaint)", // AiAction_InpaintTitle
@@ -2962,6 +2961,8 @@ static const LanguageTable Table_CN = {
     L"AI 生成结果为空", // OSD_AiEmptyResult
     L"解码 AI 图像失败", // OSD_AiDecodeFailed
     L"创建 GPU 纹理失败", // OSD_AiTextureFailed
+    L"请输入提示词，或选择预设动作", // OSD_AiEmptyPromptHint
+    L"请先输入局部重绘提示词", // OSD_AiInpaintPromptEmptyHint
     L"AI 动作", // Settings_Tab_Ai
     L"AI 模型服务商配置", // Settings_Header_AiProviders
     L"配置 AI 端点地址、DPAPI 安全密钥及大模型。", // Settings_Desc_AiProviders
@@ -2992,8 +2993,7 @@ static const LanguageTable Table_CN = {
     L"2K 高清 (2048px)", // Settings_Option_AiRes2K
     L"1K 标准 (1024px)", // Settings_Option_AiRes1K
     L"原始尺寸 (不限制)", // Settings_Option_AiResOriginal
-    L"自适应 (选区优先)", // Settings_Option_AiScopeAuto
-    L"强制全图", // Settings_Option_AiScopeForceFull
+    L"全图处理", // Settings_Option_AiScopeForceFull
     L"局部修补 (贴回羽化)", // Settings_Option_AiScopeCropBlend
     L"自定义 (兼容 OpenAI 端点)", // Settings_Option_AiCustomEndpoint
     L"本地 ComfyUI", // Settings_Option_AiLocalComfyUI
@@ -3692,7 +3692,6 @@ static const LanguageTable Table_TW = {
     L"[Esc] 結束", // AiAction_EscHint
     L"選區修補", // AiAction_ScopeCropAndBlend
     L"全圖生成", // AiAction_ScopeForceFull
-    L"自適應", // AiAction_ScopeAuto
     L"按 1~9 / 0 快速執行", // AiAction_FooterQuickKeys
     L"輸入臨時提示詞，或搜尋預設動作...", // AiAction_Placeholder
     L"選區局部重繪 (AI Inpaint)", // AiAction_InpaintTitle
@@ -3718,6 +3717,8 @@ static const LanguageTable Table_TW = {
     L"AI 生成結果為空", // OSD_AiEmptyResult
     L"解碼 AI 影像失敗", // OSD_AiDecodeFailed
     L"建立 GPU 紋理失敗", // OSD_AiTextureFailed
+    L"請輸入提示詞，或選擇預設動作", // OSD_AiEmptyPromptHint
+    L"請先輸入局部重繪提示詞", // OSD_AiInpaintPromptEmptyHint
     L"AI 動作", // Settings_Tab_Ai
     L"AI 模型服務商設定", // Settings_Header_AiProviders
     L"管理 AI 端點位址、DPAPI 安全金鑰及模型。", // Settings_Desc_AiProviders
@@ -3748,8 +3749,7 @@ static const LanguageTable Table_TW = {
     L"2K 高畫質 (2048px)", // Settings_Option_AiRes2K
     L"1K 標準 (1024px)", // Settings_Option_AiRes1K
     L"原始尺寸 (不限制)", // Settings_Option_AiResOriginal
-    L"自適應 (選區優先)", // Settings_Option_AiScopeAuto
-    L"強制全圖", // Settings_Option_AiScopeForceFull
+    L"全圖處理", // Settings_Option_AiScopeForceFull
     L"局部修補 (貼回羽化)", // Settings_Option_AiScopeCropBlend
     L"自訂 (相容 OpenAI 端點)", // Settings_Option_AiCustomEndpoint
     L"本機 ComfyUI", // Settings_Option_AiLocalComfyUI
@@ -4448,7 +4448,6 @@ static const LanguageTable Table_JA = {
     L"[Esc] 閉じる", // AiAction_EscHint
     L"選択範囲の修復", // AiAction_ScopeCropAndBlend
     L"画像全体を生成", // AiAction_ScopeForceFull
-    L"自動判定", // AiAction_ScopeAuto
     L"数字キー 1~9 / 0 で即時実行", // AiAction_FooterQuickKeys
     L"プロンプトを入力、またはプリセットを検索...", // AiAction_Placeholder
     L"領域インペイント (AI Inpaint)", // AiAction_InpaintTitle
@@ -4474,6 +4473,8 @@ static const LanguageTable Table_JA = {
     L"AI 生成結果が空です", // OSD_AiEmptyResult
     L"AI 画像のデコードに失敗しました", // OSD_AiDecodeFailed
     L"GPU テクスチャの作成に失敗しました", // OSD_AiTextureFailed
+    L"プロンプトを入力するか、プリセットアクションを選択してください", // OSD_AiEmptyPromptHint
+    L"先に部分再描画プロンプトを入力してください", // OSD_AiInpaintPromptEmptyHint
     L"AI アクション", // Settings_Tab_Ai
     L"AI プロバイダー設定", // Settings_Header_AiProviders
     L"API エンドポイント、DPAPI 暗号化キー、モデルを管理します。", // Settings_Desc_AiProviders
@@ -4504,8 +4505,7 @@ static const LanguageTable Table_JA = {
     L"2K 高画質 (2048px)", // Settings_Option_AiRes2K
     L"1K 標準 (1024px)", // Settings_Option_AiRes1K
     L"制限なし (オリジナル)", // Settings_Option_AiResOriginal
-    L"自動 (選択範囲優先)", // Settings_Option_AiScopeAuto
-    L"強制的に画像全体", // Settings_Option_AiScopeForceFull
+    L"画像全体", // Settings_Option_AiScopeForceFull
     L"部分修復・ブレンド", // Settings_Option_AiScopeCropBlend
     L"カスタム (OpenAI 互換)", // Settings_Option_AiCustomEndpoint
     L"ローカル ComfyUI", // Settings_Option_AiLocalComfyUI
@@ -5204,7 +5204,6 @@ static const LanguageTable Table_RU = {
     L"[Esc] Закрыть", // AiAction_EscHint
     L"Восстановление области", // AiAction_ScopeCropAndBlend
     L"Всё изображение", // AiAction_ScopeForceFull
-    L"Автовыбор", // AiAction_ScopeAuto
     L"Клавиши 1~9 / 0 для быстрого запуска", // AiAction_FooterQuickKeys
     L"Введите запрос или найдите действие...", // AiAction_Placeholder
     L"Инпейнт выделения (AI Inpaint)", // AiAction_InpaintTitle
@@ -5230,6 +5229,8 @@ static const LanguageTable Table_RU = {
     L"Результат генерации AI пуст", // OSD_AiEmptyResult
     L"Ошибка декодирования изображения AI", // OSD_AiDecodeFailed
     L"Не удалось создать текстуру GPU", // OSD_AiTextureFailed
+    L"Пожалуйста, введите запрос или выберите пресет", // OSD_AiEmptyPromptHint
+    L"Сначала введите запрос для частичной перерисовки", // OSD_AiInpaintPromptEmptyHint
     L"AI Действия", // Settings_Tab_Ai
     L"Провайдеры AI моделей", // Settings_Header_AiProviders
     L"Управление адресами API, ключами (DPAPI) и моделями.", // Settings_Desc_AiProviders
@@ -5260,7 +5261,6 @@ static const LanguageTable Table_RU = {
     L"2K Высокое (2048px)", // Settings_Option_AiRes2K
     L"1K Стандартное (1024px)", // Settings_Option_AiRes1K
     L"Без ограничений (Native)", // Settings_Option_AiResOriginal
-    L"Авто (сначала выделение)", // Settings_Option_AiScopeAuto
     L"Всё изображение", // Settings_Option_AiScopeForceFull
     L"Замена и смешивание", // Settings_Option_AiScopeCropBlend
     L"Пользовательский (OpenAI API)", // Settings_Option_AiCustomEndpoint
@@ -5960,7 +5960,6 @@ static const LanguageTable Table_DE = {
     L"[Esc] Schließen", // AiAction_EscHint
     L"Bereich reparieren", // AiAction_ScopeCropAndBlend
     L"Gesamtes Bild", // AiAction_ScopeForceFull
-    L"Automatisch", // AiAction_ScopeAuto
     L"1~9 / 0 für Schnellausführung drücken", // AiAction_FooterQuickKeys
     L"Prompt eingeben oder Presets suchen...", // AiAction_Placeholder
     L"Bereichs-Inpaint (AI Inpaint)", // AiAction_InpaintTitle
@@ -5986,6 +5985,8 @@ static const LanguageTable Table_DE = {
     L"AI-Generierung lieferte leeres Ergebnis", // OSD_AiEmptyResult
     L"Fehler beim Decodieren des AI-Bildes", // OSD_AiDecodeFailed
     L"GPU-Textur konnte nicht erstellt werden", // OSD_AiTextureFailed
+    L"Bitte Prompt eingeben oder Standardaktion auswählen", // OSD_AiEmptyPromptHint
+    L"Bitte zuerst Prompt für die Teil-Neuzeichnung eingeben", // OSD_AiInpaintPromptEmptyHint
     L"AI-Aktionen", // Settings_Tab_Ai
     L"AI-Modellanbieter", // Settings_Header_AiProviders
     L"Verwalten Sie Endpunkte, DPAPI-Schlüssel und Modellkennungen.", // Settings_Desc_AiProviders
@@ -6016,8 +6017,7 @@ static const LanguageTable Table_DE = {
     L"2K QHD (2048px)", // Settings_Option_AiRes2K
     L"1K Standard (1024px)", // Settings_Option_AiRes1K
     L"Unbegrenzt (Original)", // Settings_Option_AiResOriginal
-    L"Automatisch (Auswahl zuerst)", // Settings_Option_AiScopeAuto
-    L"Ganzes Bild erzwingen", // Settings_Option_AiScopeForceFull
+    L"Ganzes Bild", // Settings_Option_AiScopeForceFull
     L"Inpaint & Einblenden", // Settings_Option_AiScopeCropBlend
     L"Benutzerdefiniert (OpenAI-kompatibel)", // Settings_Option_AiCustomEndpoint
     L"Lokales ComfyUI", // Settings_Option_AiLocalComfyUI
@@ -6716,7 +6716,6 @@ static const LanguageTable Table_ES = {
     L"[Esc] Cerrar", // AiAction_EscHint
     L"Reparar selección", // AiAction_ScopeCropAndBlend
     L"Imagen completa", // AiAction_ScopeForceFull
-    L"Automático", // AiAction_ScopeAuto
     L"Pulse 1~9 / 0 para ejecución rápida", // AiAction_FooterQuickKeys
     L"Escribe un prompt o busca acciones...", // AiAction_Placeholder
     L"Inpaint de Selección (AI Inpaint)", // AiAction_InpaintTitle
@@ -6742,6 +6741,8 @@ static const LanguageTable Table_ES = {
     L"El resultado de la generación IA está vacío", // OSD_AiEmptyResult
     L"Error al decodificar la imagen de IA", // OSD_AiDecodeFailed
     L"Error al crear la textura GPU", // OSD_AiTextureFailed
+    L"Por favor, introduce un prompt o selecciona una acción preestablecida", // OSD_AiEmptyPromptHint
+    L"Por favor, introduce primero un prompt para repintar", // OSD_AiInpaintPromptEmptyHint
     L"Acciones IA", // Settings_Tab_Ai
     L"Proveedores de modelos IA", // Settings_Header_AiProviders
     L"Administre extremos de API, claves cifradas (DPAPI) y modelos.", // Settings_Desc_AiProviders
@@ -6772,8 +6773,7 @@ static const LanguageTable Table_ES = {
     L"2K QHD (2048px)", // Settings_Option_AiRes2K
     L"1K Estándar (1024px)", // Settings_Option_AiRes1K
     L"Sin límite (Nativo)", // Settings_Option_AiResOriginal
-    L"Auto (selección primero)", // Settings_Option_AiScopeAuto
-    L"Forzar imagen completa", // Settings_Option_AiScopeForceFull
+    L"Imagen completa", // Settings_Option_AiScopeForceFull
     L"Inpaint y difuminar", // Settings_Option_AiScopeCropBlend
     L"Personalizado (compatible OpenAI)", // Settings_Option_AiCustomEndpoint
     L"ComfyUI local", // Settings_Option_AiLocalComfyUI
@@ -7472,7 +7472,6 @@ static const LanguageTable Table_FR = {
     L"[Échap] Fermer", // AiAction_EscHint
     L"Inpainting de la sélection", // AiAction_ScopeCropAndBlend
     L"Image entière", // AiAction_ScopeForceFull
-    L"Automatique", // AiAction_ScopeAuto
     L"Appuyez sur 1~9 / 0 pour exécution rapide", // AiAction_FooterQuickKeys
     L"Saisir un prompt ou rechercher une action...", // AiAction_Placeholder
     L"Inpaint de Sélection (AI Inpaint)", // AiAction_InpaintTitle
@@ -7498,6 +7497,8 @@ static const LanguageTable Table_FR = {
     L"La génération IA a renvoyé un résultat vide", // OSD_AiEmptyResult
     L"Échec du décodage de l'image IA", // OSD_AiDecodeFailed
     L"Échec de création de la texture GPU", // OSD_AiTextureFailed
+    L"Veuillez saisir un prompt ou sélectionner une action prédéfinie", // OSD_AiEmptyPromptHint
+    L"Veuillez d'abord saisir un prompt pour la retouche partielle", // OSD_AiInpaintPromptEmptyHint
     L"Actions IA", // Settings_Tab_Ai
     L"Fournisseurs de modèles IA", // Settings_Header_AiProviders
     L"Gérez les points de terminaison, les clés (DPAPI) et les modèles.", // Settings_Desc_AiProviders
@@ -7528,8 +7529,7 @@ static const LanguageTable Table_FR = {
     L"2K QHD (2048px)", // Settings_Option_AiRes2K
     L"1K Standard (1024px)", // Settings_Option_AiRes1K
     L"Illimité (Natif)", // Settings_Option_AiResOriginal
-    L"Auto (sélection prioritaire)", // Settings_Option_AiScopeAuto
-    L"Forcer l'image entière", // Settings_Option_AiScopeForceFull
+    L"Image entière", // Settings_Option_AiScopeForceFull
     L"Inpainting et fusion", // Settings_Option_AiScopeCropBlend
     L"Personnalisé (compatible OpenAI)", // Settings_Option_AiCustomEndpoint
     L"ComfyUI local", // Settings_Option_AiLocalComfyUI
@@ -8227,7 +8227,6 @@ void Apply(const LanguageTable& t) {
   AiAction_EscHint = t.AiAction_EscHint;
   AiAction_ScopeCropAndBlend = t.AiAction_ScopeCropAndBlend;
   AiAction_ScopeForceFull = t.AiAction_ScopeForceFull;
-  AiAction_ScopeAuto = t.AiAction_ScopeAuto;
   AiAction_FooterQuickKeys = t.AiAction_FooterQuickKeys;
   AiAction_Placeholder = t.AiAction_Placeholder;
   AiAction_InpaintTitle = t.AiAction_InpaintTitle;
@@ -8253,6 +8252,8 @@ void Apply(const LanguageTable& t) {
   OSD_AiEmptyResult = t.OSD_AiEmptyResult;
   OSD_AiDecodeFailed = t.OSD_AiDecodeFailed;
   OSD_AiTextureFailed = t.OSD_AiTextureFailed;
+  OSD_AiEmptyPromptHint = t.OSD_AiEmptyPromptHint;
+  OSD_AiInpaintPromptEmptyHint = t.OSD_AiInpaintPromptEmptyHint;
   Settings_Tab_Ai = t.Settings_Tab_Ai;
   Settings_Header_AiProviders = t.Settings_Header_AiProviders;
   Settings_Desc_AiProviders = t.Settings_Desc_AiProviders;
@@ -8283,7 +8284,6 @@ void Apply(const LanguageTable& t) {
   Settings_Option_AiRes2K = t.Settings_Option_AiRes2K;
   Settings_Option_AiRes1K = t.Settings_Option_AiRes1K;
   Settings_Option_AiResOriginal = t.Settings_Option_AiResOriginal;
-  Settings_Option_AiScopeAuto = t.Settings_Option_AiScopeAuto;
   Settings_Option_AiScopeForceFull = t.Settings_Option_AiScopeForceFull;
   Settings_Option_AiScopeCropBlend = t.Settings_Option_AiScopeCropBlend;
   Settings_Option_AiCustomEndpoint = t.Settings_Option_AiCustomEndpoint;

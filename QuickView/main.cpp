@@ -640,6 +640,10 @@ static float GetMinWindowWidth() {
         }
     }
 
+    if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+        defaultMinW = std::max(defaultMinW, 460.0f * g_uiScale + 40.0f * g_uiScale);
+    }
+
     if (g_imagePath.empty() && !g_gallery.IsVisible()) {
         defaultMinW = std::max(defaultMinW, 460.0f * g_uiScale);
     }
@@ -694,6 +698,10 @@ static float GetMinWindowHeight() {
         if (reqSize.height > 0.0f) {
             defaultMinH = std::max(defaultMinH, reqSize.height);
         }
+    }
+
+    if (QuickView::UI::AiActionOverlay::Instance().IsVisible()) {
+        defaultMinH = std::max(defaultMinH, 420.0f * g_uiScale + 30.0f * g_uiScale);
     }
 
     return defaultMinH;
@@ -5876,6 +5884,7 @@ void AdjustWindowForOverlay(HWND hwnd, bool isClosed) {
         // Fade-out still reports IsVisible(); only an actually open gallery must block shrink.
         if (g_settingsOverlay.IsVisible() || g_helpOverlay.IsVisible()
             || QuickView::ExportPanel::GetInstance().IsVisible()
+            || QuickView::UI::AiActionOverlay::Instance().IsVisible()
             || g_gallery.GetMode() != GalleryMode::Hidden
             || AppContext::GetInstance().Dialog.IsVisible) {
             return;
@@ -8654,7 +8663,15 @@ static void TriggerInpaintCurrentSelection(HWND hwnd) {
         }
     }
 
-    std::wstring actName = pendingAct ? pendingAct->name : (AppStrings::AiAction_InpaintTitle ? AppStrings::AiAction_InpaintTitle : L"选区局部重绘");
+    std::wstring actName;
+    if (pendingAct) {
+        actName = pendingAct->name;
+    } else if (!customPrompt.empty()) {
+        actName = L"局部重绘: \"" + customPrompt + L"\"";
+        if (actName.size() > 24) actName = actName.substr(0, 21) + L"...\"";
+    } else {
+        actName = (AppStrings::AiAction_InpaintTitle ? AppStrings::AiAction_InpaintTitle : L"选区局部重绘");
+    }
     wchar_t startMsg[256] = { 0 };
     const wchar_t* prepFmt = AppStrings::OSD_AiPreparing ? AppStrings::OSD_AiPreparing : L"✨ AI: %s 准备中 (Esc取消)...";
     swprintf_s(startMsg, prepFmt, actName.c_str());

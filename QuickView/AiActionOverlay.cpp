@@ -16,6 +16,7 @@ extern OSDState g_osd;
 extern HWND g_mainHwnd;
 extern HIMC g_defaultIMC;
 extern void RequestRepaint(QuickView::PaintLayer layer);
+extern void AdjustWindowForOverlay(HWND hwnd, bool isClosed);
 
 #ifndef EM_SETCUEBANNER
 #define EM_SETCUEBANNER 0x1501
@@ -227,7 +228,7 @@ LRESULT CALLBACK AiActionOverlay::EditSubclassProc(HWND hwnd, UINT msg, WPARAM w
                 }
             }
             if (wParam == VK_UP) {
-                if (self.m_selectedIndex > 0) {
+                if (self.m_selectedIndex > -1) {
                     self.m_selectedIndex--;
                     self.EnsureSelectionVisible();
                     RequestRepaint(QuickView::PaintLayer::Static);
@@ -244,7 +245,7 @@ LRESULT CALLBACK AiActionOverlay::EditSubclassProc(HWND hwnd, UINT msg, WPARAM w
                 return 0;
             }
             if (wParam == VK_PRIOR) {
-                self.m_selectedIndex = (std::max)(0, self.m_selectedIndex - self.m_maxVisibleItems);
+                self.m_selectedIndex = (std::max)(-1, self.m_selectedIndex - self.m_maxVisibleItems);
                 self.EnsureSelectionVisible();
                 RequestRepaint(QuickView::PaintLayer::Static);
                 return 0;
@@ -263,7 +264,10 @@ LRESULT CALLBACK AiActionOverlay::EditSubclassProc(HWND hwnd, UINT msg, WPARAM w
             int textLen = GetWindowTextLengthW(hwnd);
             if (textLen == 0 && !isComposing) {
                 if (wParam == '0' || wParam == VK_NUMPAD0) {
-                    self.StartInpaintSelection();
+                    HWND h = self.m_hwnd ? self.m_hwnd : g_mainHwnd;
+                    const wchar_t* inpaintTip = AppStrings::OSD_AiInpaintPromptEmptyHint ? AppStrings::OSD_AiInpaintPromptEmptyHint : L"请先输入局部重绘提示词";
+                    g_osd.Show(h, inpaintTip, false, false, D2D1::ColorF(1.0f, 0.6f, 0.2f), OSDPosition::Bottom, 2500);
+                    SetFocus(hwnd);
                     return 0;
                 }
                 if (wParam >= '1' && wParam <= '9') {
@@ -442,6 +446,7 @@ void AiActionOverlay::OnPromptTextChanged() {
 
     if (buf != m_currentPromptText) {
         m_currentPromptText = std::move(buf);
+        m_selectedIndex = -1;
         UpdateFilteredActions();
         RequestRepaint(QuickView::PaintLayer::Static);
         if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -478,12 +483,16 @@ void AiActionOverlay::UpdateFilteredActions() {
 
     int count = static_cast<int>(m_filteredActionIndices.size());
     if (m_selectedIndex >= count) {
-        m_selectedIndex = (std::max)(0, count - 1);
+        m_selectedIndex = -1;
     }
     EnsureSelectionVisible();
 }
 
 void AiActionOverlay::EnsureSelectionVisible() {
+    if (m_selectedIndex < 0) {
+        m_scrollIndex = 0;
+        return;
+    }
     if (m_selectedIndex < m_scrollIndex) {
         m_scrollIndex = m_selectedIndex;
     }
@@ -498,20 +507,17 @@ void AiActionOverlay::Show() {
     m_visible = true;
     m_hoverIndex = -1;
     m_hoverExpandBtn = false;
+    m_hoverAdhocCard = false;
     m_scrollIndex = 0;
     if (!m_hwnd && g_mainHwnd) m_hwnd = g_mainHwnd;
 
+    HWND targetHwnd = m_hwnd ? m_hwnd : g_mainHwnd;
+    AdjustWindowForOverlay(targetHwnd, false);
+
     UpdateFilteredActions();
 
-    const auto& actions = AI::AiActionManager::Instance().GetActions();
-    const std::string& lastId = AI::AiActionManager::Instance().GetLastActionId();
-    m_selectedIndex = 0;
-    for (size_t i = 0; i < m_filteredActionIndices.size(); ++i) {
-        if (actions[m_filteredActionIndices[i]].id == lastId) {
-            m_selectedIndex = static_cast<int>(i);
-            break;
-        }
-    }
+    // Default to unselected (-1). User must type a prompt or explicitly select an action.
+    m_selectedIndex = -1;
     EnsureSelectionVisible();
 
     CreateOrUpdateEditControl();
@@ -545,6 +551,9 @@ void AiActionOverlay::Hide() {
     }
     SetFocus(m_hwnd ? m_hwnd : g_mainHwnd);
 
+    HWND targetHwnd = m_hwnd ? m_hwnd : g_mainHwnd;
+    AdjustWindowForOverlay(targetHwnd, true);
+
     RequestRepaint(QuickView::PaintLayer::Static);
     if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
 }
@@ -555,19 +564,29 @@ void AiActionOverlay::Toggle() {
 }
 
 void AiActionOverlay::ExecuteSelectedOrPrompt() {
+    // If user explicitly selected a filtered preset action (m_selectedIndex >= 0), trigger it
     if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_filteredActionIndices.size())) {
         TriggerAction(static_cast<size_t>(m_selectedIndex));
         return;
     }
 
+    // Otherwise (m_selectedIndex == -1 or out-of-range with prompt), execute ad-hoc prompt
     if (!m_currentPromptText.empty()) {
+        bool hasActiveSelection = g_cropState.IsActive && g_cropState.Mode == RegionInteractionMode::AiInpaint &&
+            (std::abs(g_cropState.CropRight - g_cropState.CropLeft) >= 8 && std::abs(g_cropState.CropBottom - g_cropState.CropTop) >= 8);
+
         const auto* defaultProf = AI::AiActionManager::Instance().GetDefaultProfile();
         AI::ActionDesc customAct;
         customAct.id = "adhoc_prompt";
         customAct.name = AppStrings::OSD_AiAdhocPrompt ? AppStrings::OSD_AiAdhocPrompt : L"临时指令";
         customAct.modelProfileId = defaultProf ? defaultProf->id : "";
         customAct.promptTemplate = m_currentPromptText;
-        customAct.scopeMode = AI::ScopeMode::Auto;
+        customAct.scopeMode = hasActiveSelection ? AI::ScopeMode::CropAndBlend : AI::ScopeMode::FullImage;
+
+        int cropL = hasActiveSelection ? (int)std::round((std::min)(g_cropState.CropLeft, g_cropState.CropRight)) : 0;
+        int cropT = hasActiveSelection ? (int)std::round((std::min)(g_cropState.CropTop, g_cropState.CropBottom)) : 0;
+        int cropR = hasActiveSelection ? (int)std::round((std::max)(g_cropState.CropLeft, g_cropState.CropRight)) : 0;
+        int cropB = hasActiveSelection ? (int)std::round((std::max)(g_cropState.CropTop, g_cropState.CropBottom)) : 0;
 
         Hide();
         HWND hwnd = m_hwnd ? m_hwnd : g_mainHwnd;
@@ -581,7 +600,7 @@ void AiActionOverlay::ExecuteSelectedOrPrompt() {
         auto* ctx = new AiActionUiCtx{ adhocName, taskFinished };
         uint64_t currentTaskId = AI::AiActionManager::Instance().ExecuteAction(
             customAct, hwnd, AI::ActionCallback(OnAiActionComplete, ctx, CleanAiActionUiCtx),
-            m_currentPromptText);
+            m_currentPromptText, cropL, cropT, cropR, cropB);
 
         QuickView::RunDetached([hwnd, adhocName, currentTaskId, taskFinished]() {
             auto startTime = std::chrono::steady_clock::now();
@@ -599,7 +618,14 @@ void AiActionOverlay::ExecuteSelectedOrPrompt() {
                 g_osd.UpdatePersistentTask(hwnd, cloudMsg, fakeProgress);
             }
         });
+        return;
     }
+
+    // Both prompt is empty and no preset action was selected
+    HWND hwnd = m_hwnd ? m_hwnd : g_mainHwnd;
+    const wchar_t* promptTip = AppStrings::OSD_AiEmptyPromptHint ? AppStrings::OSD_AiEmptyPromptHint : L"请输入提示词，或选择预设动作";
+    g_osd.Show(hwnd, promptTip, false, false, D2D1::ColorF(1.0f, 0.6f, 0.2f), OSDPosition::Bottom, 2500);
+    if (m_hwndPromptEdit) SetFocus(m_hwndPromptEdit);
 }
 
 void AiActionOverlay::TriggerAction(size_t filteredIndex) {
@@ -616,10 +642,7 @@ void AiActionOverlay::TriggerAction(size_t filteredIndex) {
         (std::abs(g_cropState.CropRight - g_cropState.CropLeft) >= 8 && std::abs(g_cropState.CropBottom - g_cropState.CropTop) >= 8);
 
     if (act.scopeMode == AI::ScopeMode::CropAndBlend && !hasActiveSelection) {
-        g_cropState.PendingActionId = act.id;
-        g_cropState.PendingCustomPrompt = m_currentPromptText;
-
-        StartInpaintSelection();
+        StartInpaintSelection(m_currentPromptText, act.id);
 
         wchar_t guide[256] = { 0 };
         const wchar_t* guideFmt = AppStrings::OSD_AiInpaintGuideActionFormat ? AppStrings::OSD_AiInpaintGuideActionFormat : L"请使用鼠标左键框选区域，按 Enter 执行 [%s]";
@@ -699,7 +722,7 @@ void AiActionOverlay::TriggerAction(size_t filteredIndex) {
     });
 }
 
-void AiActionOverlay::StartInpaintSelection() {
+void AiActionOverlay::StartInpaintSelection(std::wstring customPrompt, std::string pendingActionId) {
     Hide();
     g_cropState.Reset();
     g_cropState.Mode = RegionInteractionMode::AiInpaint;
@@ -710,6 +733,8 @@ void AiActionOverlay::StartInpaintSelection() {
     g_cropState.CropTop = 0;
     g_cropState.CropRight = 0;
     g_cropState.CropBottom = 0;
+    g_cropState.PendingCustomPrompt = std::move(customPrompt);
+    g_cropState.PendingActionId = std::move(pendingActionId);
 
     const wchar_t* guide = AppStrings::OSD_AiInpaintGuide ? AppStrings::OSD_AiInpaintGuide : L"请使用鼠标左键框选局部重绘区域 (Enter 执行, Esc 取消)";
     g_osd.Show(m_hwnd ? m_hwnd : g_mainHwnd, guide, false, false, D2D1::ColorF(0.4f, 0.8f, 1.0f), OSDPosition::Bottom, 4000);
@@ -738,10 +763,12 @@ bool AiActionOverlay::OnMouseMove(float x, float y) {
     int prevHover = m_hoverIndex;
     bool prevInpaintHover = m_hoverInpaintCard;
     bool prevExpandHover = m_hoverExpandBtn;
+    bool prevAdhocHover = m_hoverAdhocCard;
 
     m_hoverIndex = -1;
     m_hoverInpaintCard = false;
     m_hoverExpandBtn = false;
+    m_hoverAdhocCard = false;
 
     if (x >= m_expandBtnRect.left && x <= m_expandBtnRect.right &&
         y >= m_expandBtnRect.top && y <= m_expandBtnRect.bottom) {
@@ -753,6 +780,12 @@ bool AiActionOverlay::OnMouseMove(float x, float y) {
         m_hoverInpaintCard = true;
     }
 
+    if (!m_currentPromptText.empty() &&
+        x >= m_adhocCardRect.left && x <= m_adhocCardRect.right &&
+        y >= m_adhocCardRect.top && y <= m_adhocCardRect.bottom) {
+        m_hoverAdhocCard = true;
+    }
+
     for (size_t i = 0; i < m_itemRects.size(); ++i) {
         const auto& r = m_itemRects[i];
         if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
@@ -761,7 +794,8 @@ bool AiActionOverlay::OnMouseMove(float x, float y) {
         }
     }
 
-    if (m_hoverIndex != prevHover || m_hoverInpaintCard != prevInpaintHover || m_hoverExpandBtn != prevExpandHover) {
+    if (m_hoverIndex != prevHover || m_hoverInpaintCard != prevInpaintHover ||
+        m_hoverExpandBtn != prevExpandHover || m_hoverAdhocCard != prevAdhocHover) {
         RequestRepaint(QuickView::PaintLayer::Static);
         if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
     }
@@ -782,17 +816,23 @@ bool AiActionOverlay::OnLButtonDown(float x, float y) {
 
     if (x >= m_inpaintCardRect.left && x <= m_inpaintCardRect.right &&
         y >= m_inpaintCardRect.top && y <= m_inpaintCardRect.bottom) {
-        StartInpaintSelection();
+        if (m_currentPromptText.empty()) {
+            HWND hwnd = m_hwnd ? m_hwnd : g_mainHwnd;
+            const wchar_t* inpaintTip = AppStrings::OSD_AiInpaintPromptEmptyHint ? AppStrings::OSD_AiInpaintPromptEmptyHint : L"请先输入局部重绘提示词";
+            g_osd.Show(hwnd, inpaintTip, false, false, D2D1::ColorF(1.0f, 0.6f, 0.2f), OSDPosition::Bottom, 2500);
+            if (m_hwndPromptEdit) SetFocus(m_hwndPromptEdit);
+            return true;
+        }
+        StartInpaintSelection(m_currentPromptText, "");
         return true;
     }
 
-    if (m_filteredActionIndices.empty() && !m_currentPromptText.empty()) {
-        float itemH = 44.0f * m_uiScale;
-        float adhocY = m_inpaintCardRect.bottom + 10.0f * m_uiScale;
-        if (x >= m_hudRect.left && x <= m_hudRect.right && y >= adhocY && y <= adhocY + itemH) {
-            ExecuteSelectedOrPrompt();
-            return true;
-        }
+    if (!m_currentPromptText.empty() &&
+        x >= m_adhocCardRect.left && x <= m_adhocCardRect.right &&
+        y >= m_adhocCardRect.top && y <= m_adhocCardRect.bottom) {
+        m_selectedIndex = -1;
+        ExecuteSelectedOrPrompt();
+        return true;
     }
 
     if (x >= m_promptBoxRect.left && x <= m_promptBoxRect.right &&
@@ -851,11 +891,13 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
     float footerH = 28.0f * m_uiScale;
 
     int visibleCount = (std::min)(filteredCount, m_maxVisibleItems);
-    bool showAdhocHint = (filteredCount == 0 && !m_currentPromptText.empty());
-    float listH = (visibleCount > 0) ? (visibleCount * (itemH + 6.0f * m_uiScale)) : (showAdhocHint ? itemH : 0.0f);
+    bool showAdhocCard = !m_currentPromptText.empty();
+    float adhocCardH = showAdhocCard ? itemH : 0.0f;
+    float listH = (visibleCount > 0) ? (visibleCount * (itemH + 6.0f * m_uiScale)) : 0.0f;
 
     float hudH = headerH + promptBoxH + 10.0f * m_uiScale + inpaintCardH +
-        ((visibleCount > 0 || showAdhocHint) ? (10.0f * m_uiScale + listH) : 8.0f * m_uiScale) +
+        (showAdhocCard ? (10.0f * m_uiScale + adhocCardH) : 0.0f) +
+        (visibleCount > 0 ? (10.0f * m_uiScale + listH) : 8.0f * m_uiScale) +
         footerH + padding * 2.0f;
 
     float hudX = (winW - hudW) * 0.5f;
@@ -1007,6 +1049,41 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
 
     curY += inpaintCardH + 10.0f * m_uiScale;
 
+    // 5.5 Draw Ad-hoc Prompt Item if user typed something
+    if (showAdhocCard) {
+        m_adhocCardRect = D2D1::RectF(hudX + padding, curY, hudX + hudW - padding, curY + itemH);
+        D2D1_ROUNDED_RECT adhocRounded = D2D1::RoundedRect(m_adhocCardRect, 7.0f * m_uiScale, 7.0f * m_uiScale);
+
+        bool isAdhocSelected = (m_selectedIndex == -1);
+        if (isAdhocSelected) {
+            dc->FillRoundedRectangle(adhocRounded, m_brushCardSelected.Get());
+            dc->DrawRoundedRectangle(adhocRounded, m_brushAccent.Get(), 1.5f * m_uiScale);
+        } else if (m_hoverAdhocCard) {
+            dc->FillRoundedRectangle(adhocRounded, m_brushCardHover.Get());
+            dc->DrawRoundedRectangle(adhocRounded, m_brushBorder.Get(), 1.0f * m_uiScale);
+        } else {
+            m_brushCard->SetColor(isLight ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.75f) : D2D1::ColorF(0.15f, 0.16f, 0.20f, 0.75f));
+            dc->FillRoundedRectangle(adhocRounded, m_brushCard.Get());
+            dc->DrawRoundedRectangle(adhocRounded, m_brushBorder.Get(), 0.8f * m_uiScale);
+        }
+
+        D2D1_RECT_F textR = D2D1::RectF(m_adhocCardRect.left + 12.0f * m_uiScale, m_adhocCardRect.top + 4.0f * m_uiScale, m_adhocCardRect.right - 95.0f * m_uiScale, m_adhocCardRect.bottom - 4.0f * m_uiScale);
+        const wchar_t* adhocPrefix = AppStrings::AiAction_AdhocPrefix ? AppStrings::AiAction_AdhocPrefix : L"✨ 发送临时指令: \"";
+        std::wstring hintMsg = std::wstring(adhocPrefix) + m_currentPromptText + L"\"";
+        if (hintMsg.size() > 32) {
+            hintMsg = hintMsg.substr(0, 29) + L"...\"";
+        }
+        dc->DrawText(hintMsg.c_str(), static_cast<UINT32>(hintMsg.size()), m_fontItem.Get(), textR, m_brushText.Get());
+
+        D2D1_RECT_F tagR = D2D1::RectF(m_adhocCardRect.right - 90.0f * m_uiScale, m_adhocCardRect.top + (itemH - 18.0f * m_uiScale) * 0.5f, m_adhocCardRect.right - 8.0f * m_uiScale, m_adhocCardRect.bottom);
+        const wchar_t* tagEnter = AppStrings::AiAction_AdhocSend ? AppStrings::AiAction_AdhocSend : L"Enter 发送";
+        dc->DrawText(tagEnter, static_cast<UINT32>(wcslen(tagEnter)), m_fontDetail.Get(), tagR, isAdhocSelected ? m_brushAccent.Get() : m_brushTextDim.Get());
+
+        curY += itemH + 10.0f * m_uiScale;
+    } else {
+        m_adhocCardRect = {};
+    }
+
     // 6. Draw Action Items with Viewport Clipping
     m_itemRects.resize(visibleCount);
     if (visibleCount > 0) {
@@ -1074,10 +1151,8 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
             const wchar_t* tagStr = L"";
             if (act.scopeMode == AI::ScopeMode::CropAndBlend) {
                 tagStr = AppStrings::AiAction_ScopeCropAndBlend ? AppStrings::AiAction_ScopeCropAndBlend : L"选区修补";
-            } else if (act.scopeMode == AI::ScopeMode::ForceFullImage) {
-                tagStr = AppStrings::AiAction_ScopeForceFull ? AppStrings::AiAction_ScopeForceFull : L"全图";
             } else {
-                tagStr = AppStrings::AiAction_ScopeAuto ? AppStrings::AiAction_ScopeAuto : L"自动";
+                tagStr = AppStrings::AiAction_ScopeForceFull ? AppStrings::AiAction_ScopeForceFull : L"全图";
             }
 
             D2D1_RECT_F tagR = D2D1::RectF(itemR.right - 80.0f * m_uiScale, itemR.top + (itemH - 18.0f * m_uiScale) * 0.5f, itemR.right - 8.0f * m_uiScale, itemR.bottom);
@@ -1106,25 +1181,6 @@ void AiActionOverlay::Render(ID2D1DeviceContext* dc, float winW, float winH) {
             dc->FillRoundedRectangle(thumbRound, m_brushBorder.Get());
             m_brushBorder->SetOpacity(1.0f);
         }
-
-        curY += listH + 10.0f * m_uiScale;
-    } else if (showAdhocHint) {
-        D2D1_RECT_F itemR = D2D1::RectF(hudX + padding, curY, hudX + hudW - padding, curY + itemH);
-        D2D1_ROUNDED_RECT itemRounded = D2D1::RoundedRect(itemR, 7.0f * m_uiScale, 7.0f * m_uiScale);
-        dc->FillRoundedRectangle(itemRounded, m_brushCardSelected.Get());
-        dc->DrawRoundedRectangle(itemRounded, m_brushAccent.Get(), 1.5f * m_uiScale);
-
-        D2D1_RECT_F textR = D2D1::RectF(itemR.left + 12.0f * m_uiScale, itemR.top + 4.0f * m_uiScale, itemR.right - 95.0f * m_uiScale, itemR.bottom - 4.0f * m_uiScale);
-        const wchar_t* adhocPrefix = AppStrings::AiAction_AdhocPrefix ? AppStrings::AiAction_AdhocPrefix : L"✨ 发送临时指令: \"";
-        std::wstring hintMsg = std::wstring(adhocPrefix) + m_currentPromptText + L"\"";
-        if (hintMsg.size() > 32) {
-            hintMsg = hintMsg.substr(0, 29) + L"...\"";
-        }
-        dc->DrawText(hintMsg.c_str(), static_cast<UINT32>(hintMsg.size()), m_fontItem.Get(), textR, m_brushText.Get());
-
-        D2D1_RECT_F tagR = D2D1::RectF(itemR.right - 90.0f * m_uiScale, itemR.top + (itemH - 18.0f * m_uiScale) * 0.5f, itemR.right - 8.0f * m_uiScale, itemR.bottom);
-        const wchar_t* tagEnter = AppStrings::AiAction_AdhocSend ? AppStrings::AiAction_AdhocSend : L"Enter 发送";
-        dc->DrawText(tagEnter, static_cast<UINT32>(wcslen(tagEnter)), m_fontDetail.Get(), tagR, m_brushAccent.Get());
 
         curY += listH + 10.0f * m_uiScale;
     } else {

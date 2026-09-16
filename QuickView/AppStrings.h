@@ -771,7 +771,6 @@ namespace AppStrings {
     extern const wchar_t* AiAction_EscHint;
     extern const wchar_t* AiAction_ScopeCropAndBlend;
     extern const wchar_t* AiAction_ScopeForceFull;
-    extern const wchar_t* AiAction_ScopeAuto;
     extern const wchar_t* AiAction_FooterQuickKeys;
     extern const wchar_t* AiAction_Placeholder;
     extern const wchar_t* AiAction_InpaintTitle;
@@ -797,6 +796,8 @@ namespace AppStrings {
     extern const wchar_t* OSD_AiEmptyResult;
     extern const wchar_t* OSD_AiDecodeFailed;
     extern const wchar_t* OSD_AiTextureFailed;
+    extern const wchar_t* OSD_AiEmptyPromptHint;
+    extern const wchar_t* OSD_AiInpaintPromptEmptyHint;
     extern const wchar_t* Settings_Tab_Ai;
     extern const wchar_t* Settings_Header_AiProviders;
     extern const wchar_t* Settings_Desc_AiProviders;
@@ -827,7 +828,6 @@ namespace AppStrings {
     extern const wchar_t* Settings_Option_AiRes2K;
     extern const wchar_t* Settings_Option_AiRes1K;
     extern const wchar_t* Settings_Option_AiResOriginal;
-    extern const wchar_t* Settings_Option_AiScopeAuto;
     extern const wchar_t* Settings_Option_AiScopeForceFull;
     extern const wchar_t* Settings_Option_AiScopeCropBlend;
     extern const wchar_t* Settings_Option_AiCustomEndpoint;

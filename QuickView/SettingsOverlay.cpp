@@ -1168,13 +1168,11 @@ namespace {
 
             bool isZh = IsSimplifiedChinese();
             s_aiUi.scopeOptions = isZh ? std::vector<std::wstring_view>{
-                L"自适应 (选区优先)",
-                L"整图处理",
-                L"选区修补融合"
+                AppStrings::Settings_Option_AiScopeForceFull ? AppStrings::Settings_Option_AiScopeForceFull : L"全图处理",
+                AppStrings::Settings_Option_AiScopeCropBlend ? AppStrings::Settings_Option_AiScopeCropBlend : L"选区修补融合"
             } : std::vector<std::wstring_view>{
-                L"Auto (Selection First)",
-                L"Full Image",
-                L"Inpaint & Blend"
+                AppStrings::Settings_Option_AiScopeForceFull ? AppStrings::Settings_Option_AiScopeForceFull : L"Full Image",
+                AppStrings::Settings_Option_AiScopeCropBlend ? AppStrings::Settings_Option_AiScopeCropBlend : L"Inpaint & Blend"
             };
 
             s_aiUi.timeoutOptions = isZh ? std::vector<std::wstring_view>{
@@ -1846,7 +1844,7 @@ namespace {
             newAct.name = L"Action " + std::to_wstring(acts.size() + 1);
             newAct.promptTemplate = L"Describe or modify the image";
             newAct.negativePrompt = L"blurry, noise, low quality, artifacts, distorted, bad quality";
-            newAct.scopeMode = QuickView::AI::ScopeMode::Auto;
+            newAct.scopeMode = QuickView::AI::ScopeMode::FullImage;
             newAct.aspectRatio = QuickView::AI::OutputAspectRatio::Auto;
             newAct.targetResolution = QuickView::AI::TargetResolution::Res_2K;
             newAct.denoisingStrength = 0.35f;
@@ -1985,8 +1983,8 @@ namespace {
                 SettingsItem itemScope;
                 itemScope.label = AppStrings::Settings_Label_AiScopeMode ? AppStrings::Settings_Label_AiScopeMode : L"Scope Mode";
                 itemScope.tooltipText = IsSimplifiedChinese() ? 
-                    L"控制动作的作用范围。自适应在存在选区时优先处理选区，否则处理整图；修补融合会将生成内容自然羽化贴回原图。" : 
-                    L"Controls processing scope. Auto uses active selection if present, otherwise full image. Inpaint & Blend seamlessly feathers back onto base canvas.";
+                    L"控制动作的作用范围。全图处理针对整张图像运行；选区修补融合会将生成内容自然羽化贴回原图选区（若未框选则自动进入框选）。" : 
+                    L"Controls processing scope. Full Image applies globally; Inpaint & Blend feathers generation back onto base canvas (prompts for selection if none).";
                 itemScope.type = OptionType::ComboBox;
                 itemScope.pIntVal = &s_aiUi.actionScopeIndices[i];
                 itemScope.options = s_aiUi.scopeOptions;
